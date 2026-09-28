@@ -122,3 +122,4 @@ Prisma 7 runs non-interactively here (config: `prisma7.config.ts`). Migration hi
 - OTP policy (expiry, max attempts, resend cooldown, per-job/per-phone hourly caps) is enforced server-side from environment variables; challenge state is database-tracked and single-use.
 - Customer phone numbers are normalized to the 10-digit subscriber form for 2Factor; only masked numbers are ever returned to clients.
 - The 2Factor API key, session secret, and all credentials are read exclusively from environment variables and never logged.
+# Intense-Care
