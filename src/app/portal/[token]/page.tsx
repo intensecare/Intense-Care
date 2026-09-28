@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useApp } from "@/lib/app-context";
 import { BeforeAfterGallery } from "@/components/common/BeforeAfterGallery";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDateTime, formatTimeSlot } from "@/lib/utils";
 import type { PortalHandover, PortalSignResponse } from "@/lib/portal-types";
 import {
   ShieldCheck,
@@ -277,7 +277,7 @@ export default function CustomerPortalPage() {
                 {handover.job.serviceName || "Deep Cleaning"}
               </div>
               <div className="text-slate-500">
-                Scheduled: <span className="font-semibold text-slate-700">{job.scheduledDate} · {job.scheduledTimeSlot}</span>
+                Scheduled: <span className="font-semibold text-slate-700">{job.scheduledDate} · {formatTimeSlot(job.scheduledTimeSlot)}</span>
               </div>
             </div>
 

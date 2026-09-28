@@ -16,7 +16,7 @@ import { getOpsDateVisibility } from "@/lib/ops-visibility";
 import { Link2, Copy, Check, Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getAllowedTransitions, JOB_STATUS_CONFIG } from "@/lib/state-machine";
-import { formatCurrency, formatDate, formatDateTime, timeAgo } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, timeAgo, formatTimeSlot } from "@/lib/utils";
 import {
   Calendar,
   Clock,
@@ -40,6 +40,8 @@ import {
   Upload,
   History,
   KeyRound,
+  Users,
+  UserCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -76,6 +78,9 @@ export default function JobDetailPage() {
     payments,
     currentRole,
     transitionJobStatus,
+    assignStaffToJob,
+    fetchStaffDirectory,
+    refreshJobs,
     systemSettings,
     sendCompletionLink,
     updateChecklistItem,
@@ -159,6 +164,41 @@ export default function JobDetailPage() {
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // --- Staff assignment (reuses the server PATCH /api/jobs/[id] assignment
+  // path — same validation, double-booking 409 and status sync as the
+  // dispatcher tower). Backend flags are the source of truth; the store's
+  // optimistic flip is authoritative on success.
+  const canManage = currentRole === "super_admin" || currentRole === "ops_manager";
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [assignmentSaving, setAssignmentSaving] = useState(false);
+  const [selectedWorkerIds, setSelectedWorkerIds] = useState<string[]>([]);
+  const [assignmentErrorMsg, setAssignmentErrorMsg] = useState<string | null>(null);
+
+  const eligibleWorkers = users
+    .filter((u) => u.role === "staff" && u.active)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const openAssignmentModal = () => {
+    setSelectedWorkerIds(job?.assignedStaffIds || []);
+    setAssignmentErrorMsg(null);
+    setAssignmentOpen(true);
+    void fetchStaffDirectory();
+  };
+
+  const handleAssignConfirm = async () => {
+    if (!job) return;
+    setAssignmentSaving(true);
+    setAssignmentErrorMsg(null);
+    const res = await assignStaffToJob(job.id, selectedWorkerIds);
+    setAssignmentSaving(false);
+    if (!res.success) {
+      setAssignmentErrorMsg(res.message);
+      return;
+    }
+    setAssignmentOpen(false);
+    await refreshJobs();
+  };
   const [isInvoicePrintOpen, setIsInvoicePrintOpen] = useState(false);
   const [lightboxPhoto, setLightboxPhoto] = useState<{
     url: string;
@@ -269,6 +309,16 @@ export default function JobDetailPage() {
   const jobRework = reworkTasks.filter((r) => r.jobId === job.id);
   const invoice = invoices.find((i) => i.jobId === job.id);
 
+  // Workers already busy on ANOTHER active job with the same date + time window
+  // (same conflict rule as the dispatcher tower; server still re-validates).
+  const activeWorkerIds = new Set<string>();
+  jobs.forEach((j) => {
+    if (j.id === job.id) return;
+    if (j.scheduledDate !== job.scheduledDate || j.scheduledTimeSlot !== job.scheduledTimeSlot) return;
+    if (j.status === "COMPLETED" || j.status === "CANCELLED" || j.status === "CLOSED") return;
+    j.assignedStaffIds.forEach((id) => activeWorkerIds.add(id));
+  });
+
   // Allowed transitions for current user role
   const allowedTransitions = getAllowedTransitions(job).filter(
     (action) => currentRole === "super_admin" || action.allowedRoles.includes(currentRole)
@@ -278,6 +328,12 @@ export default function JobDetailPage() {
     setActionError(null);
     if (targetStatus === "CUSTOMER_VERIFIED" || (job.status === "ARRIVED" && targetStatus === "IN_PROGRESS")) {
       setIsOtpModalOpen(true);
+      return;
+    }
+    // SCHEDULED/DRAFT → ASSIGNED requires worker selection: the bare status
+    // PATCH used to flip the label while leaving the crew empty.
+    if (targetStatus === "ASSIGNED") {
+      openAssignmentModal();
       return;
     }
 
@@ -373,6 +429,18 @@ export default function JobDetailPage() {
             >
               <KeyRound className="h-4 w-4" />
               Enter Customer OTP (Verify Entry)
+            </Button>
+          )}
+
+          {/* Assign/manage field workers — mirrors the dispatcher's crew picker */}
+          {canManage && ["DRAFT", "SCHEDULED", "ASSIGNED"].includes(job.status) && (
+            <Button
+              size="sm"
+              onClick={openAssignmentModal}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium gap-1.5 h-9"
+            >
+              <Users className="h-4 w-4" />
+              {job.assignedStaffIds.length > 0 ? `Manage Workers (${job.assignedStaffIds.length})` : "Assign Staff"}
             </Button>
           )}
 
@@ -564,7 +632,7 @@ export default function JobDetailPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Time Window:</span>
-                  <span className="font-medium text-slate-900">{job.scheduledTimeSlot}</span>
+                  <span className="font-medium text-slate-900">{formatTimeSlot(job.scheduledTimeSlot)}</span>
                 </div>
                 {currentRole === "super_admin" && (
                   <>
@@ -582,11 +650,24 @@ export default function JobDetailPage() {
 
             </div>
 
-            {/* Worker Assignment & OTP Security Box */}
-            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Field Workers & Security Verification
-              </h3>
+              {/* Worker Assignment & OTP Security Box */}
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Field Workers & Security Verification
+                  </h3>
+                  {canManage && ["DRAFT", "SCHEDULED", "ASSIGNED"].includes(job.status) && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={openAssignmentModal}
+                      className="h-7 text-[11px] gap-1"
+                    >
+                      <UserCheck className="h-3.5 w-3.5" />
+                      {job.assignedStaffIds.length > 0 ? "Manage Crew" : "Assign Staff"}
+                    </Button>
+                  )}
+                </div>
 
               <div className="space-y-1">
                 {assignedWorkers.length === 0 ? (
@@ -1134,6 +1215,123 @@ export default function JobDetailPage() {
         isOpen={isOtpModalOpen}
         onClose={() => setIsOtpModalOpen(false)}
       />
+
+      {/* Staff Assignment Modal — worker picker with availability & conflicts,
+          backed by the same PATCH assignment path as the dispatcher. */}
+      <Dialog open={assignmentOpen} onOpenChange={(o) => !assignmentSaving && setAssignmentOpen(o)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-indigo-600" />
+              {job.assignedStaffIds.length > 0 ? "Manage Assigned Field Workers" : "Assign Field Workers"}
+            </DialogTitle>
+            <DialogDescription>
+              Job {job.id} • {formatDate(job.scheduledDate)} • {formatTimeSlot(job.scheduledTimeSlot)}. The first
+              selected worker becomes the lead (customer OTP holder).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-1">
+            {eligibleWorkers.length === 0 ? (
+              <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                No active field workers found. Add them under Users &amp; Roles first.
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+                {eligibleWorkers.map((w) => {
+                  const isSelected = selectedWorkerIds.includes(w.id);
+                  const isBusy = activeWorkerIds.has(w.id) && !isSelected;
+                  const isLead = isSelected && selectedWorkerIds[0] === w.id;
+                  return (
+                    <button
+                      key={w.id}
+                      type="button"
+                      disabled={assignmentSaving}
+                      onClick={() =>
+                        setSelectedWorkerIds((prev) =>
+                          prev.includes(w.id) ? prev.filter((id) => id !== w.id) : [...prev, w.id]
+                        )
+                      }
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-md border text-xs transition-all ${
+                        isSelected
+                          ? "bg-indigo-50 border-indigo-300 text-indigo-900"
+                          : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 font-semibold">
+                        <span
+                          className={`h-2 w-2 rounded-full shrink-0 ${
+                            isBusy ? "bg-amber-500" : isSelected ? "bg-indigo-500" : "bg-emerald-500"
+                          }`}
+                        />
+                        {w.name}
+                        {isLead && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-indigo-100 text-indigo-700 border border-indigo-200">
+                            Lead • OTP holder
+                          </span>
+                        )}
+                      </span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        {w.phone && <span className="text-[10px] text-slate-400 font-mono">{w.phone}</span>}
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                            isBusy
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-emerald-100 text-emerald-800"
+                          }`}
+                        >
+                          {isBusy ? "Booked this slot" : "Available"}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between text-[11px] text-slate-500">
+              <span>
+                {selectedWorkerIds.length} worker{selectedWorkerIds.length === 1 ? "" : "s"} selected
+              </span>
+              {activeWorkerIds.size > 0 && (
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  amber = already on another job in this date &amp; time window
+                </span>
+              )}
+            </div>
+
+            {assignmentErrorMsg && (
+              <div className="p-2.5 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-[11px] flex items-start gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>{assignmentErrorMsg}</span>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={assignmentSaving}
+              onClick={() => setAssignmentOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={assignmentSaving}
+              onClick={handleAssignConfirm}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white gap-1.5"
+            >
+              {assignmentSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {assignmentSaving ? "Saving…" : `Confirm ${selectedWorkerIds.length} Worker${selectedWorkerIds.length === 1 ? "" : "s"}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Photo Upload Dialog */}
       <Dialog open={photoUploadOpen} onOpenChange={setPhotoUploadOpen}>

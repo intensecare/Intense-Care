@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useApp } from "@/lib/app-context";
-import { formatDate, format24hTo12h } from "@/lib/utils";
+import { formatDate, format24hTo12h, formatTimeSlot } from "@/lib/utils";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import {
   MapPin,
@@ -41,6 +41,7 @@ export default function DispatcherPage() {
     services,
     users,
     assignStaffToJob,
+    fetchStaffDirectory,
     currentRole,
     systemSettings,
   } = useApp();
@@ -84,6 +85,14 @@ export default function DispatcherPage() {
   // Roster: prefer the assignment-scoped endpoint (ops role), fall back to the
   // full directory for super_admins already hydrated by the store.
   const staffDirectory = users.filter((u) => u.role === "staff" && u.active);
+
+  // Ops managers cannot read the full /api/users directory; hydrate the
+  // assignment-scoped roster (PUT /api/users) so worker names/phones resolve
+  // across the tower without clobbering already-hydrated users.
+  React.useEffect(() => {
+    if (staffDirectory.length === 0) void fetchStaffDirectory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [assignmentBusy, setAssignmentBusy] = useState<string | null>(null);
   const [assignmentError, setAssignmentError] = useState<Record<string, string | null>>({});
 
@@ -100,6 +109,13 @@ export default function DispatcherPage() {
     }
     return busy;
   };
+
+  /** Workers on any non-terminal job right now — drives the availability dots. */
+  const activeStaffIds = new Set<string>();
+  jobs.forEach((j) => {
+    if (j.status === "COMPLETED" || j.status === "CANCELLED" || j.status === "CLOSED") return;
+    j.assignedStaffIds.forEach((id) => activeStaffIds.add(id));
+  });
 
   const handleToggleStaff = (job: (typeof jobs)[number], staffId: string) => {
     const current = job.assignedStaffIds || [];
@@ -250,7 +266,7 @@ export default function DispatcherPage() {
                       <span className="font-mono text-sm font-bold text-slate-900">{job.id}</span>
                       <JobStatusBadge status={job.status} size="sm" />
                     </div>
-                    <span className="text-xs font-semibold text-slate-600">{formatDate(job.scheduledDate)} ({job.scheduledTimeSlot})</span>
+                    <span className="text-xs font-semibold text-slate-600">{formatDate(job.scheduledDate)} ({formatTimeSlot(job.scheduledTimeSlot)})</span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 text-xs">
@@ -397,7 +413,7 @@ export default function DispatcherPage() {
                       </div>
 
                       <div className="text-xs text-slate-400 font-medium">
-                        {formatDate(job.scheduledDate)} • Slot: {job.scheduledTimeSlot}
+                        {formatDate(job.scheduledDate)} • Slot: {formatTimeSlot(job.scheduledTimeSlot)}
                       </div>
                     </div>
 
@@ -492,14 +508,9 @@ export default function DispatcherPage() {
                       j.status !== "CANCELLED" &&
                       j.status !== "CLOSED"
                   ).length;
-                  const todaySlotBusy = jobs.some(
-                    (j) =>
-                      j.id &&
-                      j.scheduledDate === todayStr &&
-                      (j.assignedStaffIds || []).includes(staff.id) &&
-                      j.status !== "COMPLETED" &&
-                      j.status !== "CANCELLED"
-                  );
+                  // "Booked" = currently on any non-terminal job (date-agnostic
+                  // view); per-slot conflicts are shown in each job's crew picker.
+                  const todaySlotBusy = activeStaffIds.has(staff.id);
 
                   return (
                     <div
@@ -526,7 +537,7 @@ export default function DispatcherPage() {
                           <strong className="text-slate-800 font-mono">{staff.phone}</strong>
                         </div>
                         <div className="flex justify-between">
-                          <span>Today:</span>
+                          <span>Now:</span>
                           <span className={todaySlotBusy ? "text-amber-700 font-medium" : "text-emerald-700 font-medium"}>
                             {todaySlotBusy ? "Booked" : "Free"}
                           </span>

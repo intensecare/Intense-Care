@@ -5,7 +5,7 @@ import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
-import { formatCurrency, formatDate, toLocalDateString, toLocalDateOffset, format24hTo12h } from "@/lib/utils";
+import { formatCurrency, formatDate, toLocalDateString, toLocalDateOffset, format24hTo12h, formatTimeSlot } from "@/lib/utils";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import {
   Calendar as CalendarIcon,
@@ -141,7 +141,7 @@ export default function CalendarPage() {
                     <JobStatusBadge status={job.status} size="sm" />
                     <span className="text-xs text-slate-400 flex items-center gap-1">
                       <Clock className="h-3 w-3" />
-                      {job.scheduledTimeSlot}
+                      {formatTimeSlot(job.scheduledTimeSlot)}
                     </span>
                   </div>
 

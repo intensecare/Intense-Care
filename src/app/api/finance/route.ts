@@ -184,7 +184,7 @@ export async function POST(request: Request) {
             propertyId: quote.propertyId,
             serviceId: quote.serviceId,
             scheduledDate,
-            scheduledTimeSlot: "09:00 AM - 01:30 PM",
+            scheduledTimeSlot: "09:00 - 13:30",
             amount: quote.total,
             status: "SCHEDULED",
             notes: `Converted from quotation ${quote.quoteNumber}`,

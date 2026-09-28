@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { StatCard } from "@/components/common/StatCard";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
-import { formatCurrency, formatDate, timeAgo, toLocalDateString } from "@/lib/utils";
+import { formatCurrency, formatDate, timeAgo, toLocalDateString, formatTimeSlot } from "@/lib/utils";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import {
   Briefcase,
@@ -271,7 +271,7 @@ export default function DashboardPage() {
                           <span>•</span>
                           <span className="flex items-center gap-1">
                             <Calendar className="h-3 w-3" />
-                            {formatDate(job.scheduledDate)} • {job.scheduledTimeSlot}
+                            {formatDate(job.scheduledDate)} • {formatTimeSlot(job.scheduledTimeSlot)}
                           </span>
                           {assignedWorkers.length > 0 && (
                             <>

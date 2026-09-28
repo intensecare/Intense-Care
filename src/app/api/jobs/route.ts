@@ -93,7 +93,16 @@ const CreateJobSchema = z.object({
   propertyAddress: z.string().max(500).optional(),
   serviceId: z.string().min(1).max(64),
   scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  scheduledTimeSlot: z.string().min(1).max(80),
+  scheduledTimeSlot: z
+    .string()
+    .min(1)
+    .max(80)
+    // Free from/to window ("HH:MM - HH:MM", 24h) — any times the ops desk sets.
+    // Legacy "09:00 AM - 01:30 PM" style strings remain valid for compatibility.
+    .regex(
+      /^\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}$|^\d{1,2}:\d{2}\s*[AP]M\s*[-–]\s*\d{1,2}:\d{2}\s*[AP]M$/i,
+      "Time window must be a from → to range, e.g. 09:00 - 13:30"
+    ),
   assignedStaffIds: z.array(z.string().max(64)).default([]),
   notes: z.string().max(2000).optional(),
   referralPartnerId: z.string().max(64).optional(),

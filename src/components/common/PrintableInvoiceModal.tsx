@@ -157,7 +157,7 @@ export function PrintableInvoiceModal({
               <thead>
                 <tr className="border-b-2 border-slate-900 text-slate-500 font-semibold uppercase text-[10px]">
                   <th className="py-2.5">Service Item Description</th>
-                  <th className="py-2.5 text-center">Package Tier</th>
+                  <th className="py-2.5 text-center">Qty</th>
                   <th className="py-2.5 text-right">Amount</th>
                 </tr>
               </thead>

@@ -200,6 +200,26 @@ async function main() {
   r = await req(ops, "PATCH", `/api/jobs/${jobClash.id}`, { assignedStaffIds: ["usr-nonexistent"] });
   ok("phantom worker id rejected 400", r.status === 400, `got ${r.status}`);
 
+  // Free from/to time window — canonical "HH:MM - HH:MM" (24h)
+  section("5b. Free from/to time window");
+  r = await req(admin, "POST", "/api/jobs", { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: fmt(today), scheduledTimeSlot: "10:30 - 15:00" });
+  ok("booking accepts manually-set from/to window", r.status === 201 && r.json?.data?.job?.scheduledTimeSlot === "10:30 - 15:00", JSON.stringify(r.json).slice(0, 150));
+  r = await req(admin, "POST", "/api/jobs", { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: fmt(today), scheduledTimeSlot: "whenever" });
+  ok("invalid time window rejected 400", r.status === 400, `got ${r.status}`);
+
+  // Reassignment & persistence (same PATCH path the job-console modal uses)
+  r = await req(ops, "PATCH", `/api/jobs/${jobToday.id}`, { assignedStaffIds: [staffAccs[0].id, staffAccs[1].id] });
+  ok("ops reassigns multiple workers", r.status === 200 && r.json?.data?.assignedStaffIds?.length === 2, JSON.stringify(r.json?.data?.assignedStaffIds));
+  r = await req(ops, "PATCH", `/api/jobs/${jobToday.id}`, { assignedStaffIds: [staffAccs[1].id] });
+  ok("reassignment can drop a worker", r.status === 200 && r.json?.data?.assignedStaffIds?.length === 1);
+  ok("status stays ASSIGNED after partial reassignment", r.json?.data?.status === "ASSIGNED");
+  r = await req(ops, "GET", "/api/jobs");
+  const persistedCrew = (r.json?.data || []).find((j) => j.id === jobToday.id);
+  ok("assignment persisted in DB (list shows new crew)", persistedCrew?.assignedStaffIds?.[0] === staffAccs[1].id, JSON.stringify(persistedCrew?.assignedStaffIds));
+  // Restore the original lead for the OTP section below (it expects worker A)
+  r = await req(ops, "PATCH", `/api/jobs/${jobToday.id}`, { assignedStaffIds: [staffAccs[0].id] });
+  ok("restore original lead assignment", r.status === 200, `got ${r.status}`);
+
   // ============ 6. OTP lifecycle (policy only — no real SMS fired) ============
   section("6. OTP policy gates (no SMS fired)");
   // Rita (staff jar) IS the assigned lead on jobToday (status ASSIGNED):
@@ -283,7 +303,7 @@ async function main() {
   const pubJson = await pub.json().catch(() => null);
   ok("public partner portal works", pubJson?.success && pubJson?.data?.partner?.code === partner.code);
   // referred booking on a fresh future job (admin scope) → complete → settle
-  r = await req(admin, "POST", "/api/jobs", { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: fmt(today), scheduledTimeSlot: "08:00 AM - 04:00 PM", referralPartnerId: partner.id });
+  r = await req(admin, "POST", "/api/jobs", { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: fmt(today), scheduledTimeSlot: "08:00 - 16:00", referralPartnerId: partner.id });
   const jobRef = r.json?.data?.job;
   ok("referred booking created", r.status === 201);
   r = await req(admin, "GET", "/api/referrals");

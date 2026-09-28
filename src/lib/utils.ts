@@ -102,3 +102,21 @@ export function format24hTo12h(time24?: string | null): string {
   const hour12 = hour % 12 === 0 ? 12 : hour % 12;
   return `${String(hour12).padStart(2, "0")}:${minuteStr || "00"} ${suffix}`;
 }
+
+/**
+ * Renders a job's scheduled time slot in 12h form: "09:00 - 13:30" →
+ * "09:00 AM - 01:30 PM". Free windows are stored as "HH:MM - HH:MM" (24h);
+ * legacy strings ("09:00 AM - 01:30 PM" etc.) pass through unchanged.
+ */
+export function formatTimeSlot(slot?: string | null): string {
+  if (!slot) return "-";
+  const m = slot.match(/^(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})$/);
+  if (!m) return slot;
+  const to12 = (h: string, min: string) => {
+    const hour = Number(h);
+    const suffix = hour >= 12 ? "PM" : "AM";
+    const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+    return `${String(hour12).padStart(2, "0")}:${min} ${suffix}`;
+  };
+  return `${to12(m[1], m[2])} - ${to12(m[3], m[4])}`;
+}

@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { JobStatusBadge, PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
-import { formatCurrency, formatDate, toLocalDateOffset } from "@/lib/utils";
+import { formatCurrency, formatDate, toLocalDateOffset, formatTimeSlot } from "@/lib/utils";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import { JobStatus } from "@/lib/types";
 import {
@@ -90,7 +90,12 @@ function JobsPageInner() {
   const [selectedPropertyId, setSelectedPropertyId] = useState(properties[0]?.id || "");
   const [selectedServiceId, setSelectedServiceId] = useState(services[0]?.id || "");
   const [scheduledDate, setScheduledDate] = useState(toLocalDateOffset(1)); // default: tomorrow
-  const [scheduledTimeSlot, setScheduledTimeSlot] = useState("09:00 AM - 01:30 PM");
+  // Free time window: the ops desk sets any start/end times (manual, not a
+  // fixed preset). Both compose into the canonical scheduledTimeSlot string
+  // ("HH:MM - HH:MM", 24h) stored on the job and shown everywhere.
+  const [timeFrom, setTimeFrom] = useState("09:00");
+  const [timeTo, setTimeTo] = useState("13:30");
+  const composedTimeSlot = `${timeFrom} - ${timeTo}`;
   const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
   const [referralPartnerId, setReferralPartnerId] = useState("");
   const [jobNotes, setJobNotes] = useState("");
@@ -177,12 +182,21 @@ function JobsPageInner() {
         return;
       }
 
+      if (!timeFrom || !timeTo) {
+        setFormError("Please set both the start and end time of the service window.");
+        return;
+      }
+      if (timeFrom >= timeTo) {
+        setFormError("The end time must be after the start time.");
+        return;
+      }
+
       const result = await createJob({
         customerId: targetCustId,
         propertyId: targetPropId,
         serviceId: targetService,
         scheduledDate,
-        scheduledTimeSlot,
+        scheduledTimeSlot: composedTimeSlot,
         assignedStaffIds,
         notes: jobNotes,
         referralPartnerId: referralPartnerId || undefined,
@@ -422,7 +436,7 @@ function JobsPageInner() {
                           {formatDate(job.scheduledDate)}
                         </div>
                         <div className="text-[11px] text-slate-500">
-                          {job.scheduledTimeSlot}
+                          {formatTimeSlot(job.scheduledTimeSlot)}
                         </div>
                       </td>
 
@@ -624,20 +638,31 @@ function JobsPageInner() {
                 />
               </div>
 
-              {/* Time Slot */}
+              {/* Time Window — freely settable from/to (manual, no fixed presets) */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700">
-                  Time Window *
+                  Time Window * (from → to, set any times)
                 </label>
-                <select
-                  value={scheduledTimeSlot}
-                  onChange={(e) => setScheduledTimeSlot(e.target.value)}
-                  className="w-full h-9 rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                >
-                  <option value="09:00 AM - 01:30 PM">Morning (09:00 AM - 01:30 PM)</option>
-                  <option value="02:00 PM - 06:30 PM">Afternoon (02:00 PM - 06:30 PM)</option>
-                  <option value="08:00 AM - 04:00 PM">Full Day Turnaround (08:00 AM - 04:00 PM)</option>
-                </select>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="time"
+                    value={timeFrom}
+                    onChange={(e) => setTimeFrom(e.target.value)}
+                    className="text-xs flex-1"
+                    required
+                  />
+                  <span className="text-xs text-slate-400 font-semibold shrink-0">→</span>
+                  <Input
+                    type="time"
+                    value={timeTo}
+                    onChange={(e) => setTimeTo(e.target.value)}
+                    className="text-xs flex-1"
+                    required
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Service window: <strong className="text-slate-600">{composedTimeSlot}</strong>
+                </p>
               </div>
 
               {/* Direct Field-Worker Assignment (multi-select) */}

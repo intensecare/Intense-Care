@@ -208,6 +208,10 @@ interface AppContextType {
   convertQuoteToInvoice: (quoteId: string) => Promise<{ success: boolean; message: string }>;
   convertQuoteToJob: (quoteId: string) => Promise<{ success: boolean; message: string }>;
   assignStaffToJob: (jobId: string, staffIds: string[]) => Promise<{ success: boolean; message: string }>;
+  /** Assignment-scoped roster of active field workers (PUT /api/users), visible
+   *  to both super_admin and ops_manager — backs the dispatcher tower and the
+   *  job-console staff-assignment modal. */
+  fetchStaffDirectory: () => Promise<void>;
 
   // Service Package Management (DB-backed; companies author everything)
   createService: (serviceData: Omit<Service, "id">) => Promise<{ success: boolean; message: string; service?: Service }>;
@@ -895,6 +899,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Assignment saved." };
   };
 
+  /**
+   * Hydrates the assignment-scoped field-worker roster (PUT /api/users —
+   * semantic GET, allowed for super_admin AND ops_manager). Ops managers cannot
+   * read the full /api/users directory, so the dispatcher tower and the
+   * job-console assignment modal call this to resolve worker names/phones.
+   * Merges into the users store without clobbering existing hydrated users.
+   */
+  const fetchStaffDirectory = useCallback(async () => {
+    const r = await api<Array<Pick<User, "id" | "name" | "phone" | "active">>>("/api/users", {
+      method: "PUT",
+    });
+    if (!r.ok || !r.data) return;
+    const staff = r.data;
+    setUsers((prev) => {
+      const known = new Set(prev.map((u) => u.id));
+      const additions = staff.filter((s) => !known.has(s.id));
+      if (additions.length === 0) return prev;
+      return [
+        ...prev,
+        ...additions.map((s) => ({
+          id: s.id,
+          name: s.name,
+          email: "",
+          phone: s.phone || "",
+          role: "staff" as const,
+          active: s.active !== false,
+          createdAt: "",
+        })),
+      ];
+    });
+  }, []);
+
   // --- Customers & properties -----------------------------------------------------
   const createCustomer = async (customerData: Partial<Customer>) => {
     const r = await api<Customer>("/api/customers", {
@@ -1287,6 +1323,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         convertQuoteToInvoice,
         convertQuoteToJob,
         assignStaffToJob,
+        fetchStaffDirectory,
         createService,
         updateService,
         deleteService,
