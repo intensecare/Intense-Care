@@ -1,0 +1,551 @@
+"use client";
+
+import React, { useState } from "react";
+import { AdminLayout } from "@/components/common/AdminLayout";
+import { PageHeader } from "@/components/common/PageHeader";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PaymentStatusBadge } from "@/components/common/JobStatusBadge";
+import { useApp } from "@/lib/app-context";
+import { Expense } from "@/lib/types";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
+import { DollarSign, FileText, CheckCircle2, TrendingUp, AlertTriangle, Plus, CreditCard } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+
+export default function FinancePage() {
+  const { invoices, payments, quotes, customers, jobs, expenses, recordPayment, createExpense, convertQuoteToInvoice } = useApp();
+
+  const [activeTab, setActiveTab] = useState("invoices");
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [payAmount, setPayAmount] = useState<number>(0);
+  const [payMethod, setPayMethod] = useState<any>("upi");
+  const [payRef, setPayRef] = useState("");
+
+  // New Expense Modal State
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [expCategory, setExpCategory] = useState<Expense["category"]>("chemicals");
+  const [expAmount, setExpAmount] = useState<number>(0);
+  const [expDesc, setExpDesc] = useState("");
+  const [expMethod, setExpMethod] = useState<Expense["paymentMethod"]>("card");
+  const [expRef, setExpRef] = useState("");
+
+  const totalInvoiced = invoices.reduce((acc, i) => acc + i.total, 0);
+  const totalCollected = invoices.reduce((acc, i) => acc + i.amountPaid, 0);
+  const totalReceivables = invoices.reduce((acc, i) => acc + i.balanceDue, 0);
+  const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+  const netOperatingIncome = totalCollected - totalExpenses;
+
+  const handleOpenPaymentModal = (inv: any) => {
+    setSelectedInvoiceId(inv.id);
+    setPayAmount(inv.balanceDue);
+    setPayRef(`TXN-${Date.now().toString().slice(-6)}`);
+  };
+
+  const handleSubmitPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInvoiceId || payAmount <= 0) return;
+
+    await recordPayment(selectedInvoiceId, payAmount, payMethod, payRef);
+    setSelectedInvoiceId(null);
+  };
+
+  const handleAddExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (expAmount <= 0 || !expDesc.trim()) return;
+
+    await createExpense({
+      date: new Date().toISOString().split("T")[0],
+      category: expCategory,
+      amount: expAmount,
+      description: expDesc,
+      paymentMethod: expMethod,
+      reference: expRef || undefined,
+    });
+
+    setShowExpenseModal(false);
+    setExpAmount(0);
+    setExpDesc("");
+    setExpRef("");
+  };
+
+  return (
+    <AdminLayout>
+      <PageHeader
+        title="Super Admin Financial Governance"
+        description="Quotations, tax invoices, actual payment collections, operational business expenses, and net profit ledger."
+        breadcrumbs={[
+          { label: "Operations", href: "/" },
+          { label: "Finance & Invoices" },
+        ]}
+      />
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
+          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Total Invoiced
+          </div>
+          <div className="text-2xl font-bold text-slate-900 mt-2">
+            {formatCurrency(totalInvoiced)}
+          </div>
+          <div className="text-xs text-slate-400 mt-1">{invoices.length} Invoices Issued</div>
+        </div>
+
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 shadow-xs">
+          <div className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
+            Actual Revenue Collected
+          </div>
+          <div className="text-2xl font-bold text-emerald-700 mt-2">
+            {formatCurrency(totalCollected)}
+          </div>
+          <div className="text-xs text-emerald-600 mt-1">Verified cash/bank receipts</div>
+        </div>
+
+        <div className="rounded-lg border border-rose-200 bg-rose-50/40 p-4 shadow-xs">
+          <div className="text-xs font-semibold uppercase tracking-wider text-rose-800">
+            Total Expenses
+          </div>
+          <div className="text-2xl font-bold text-rose-700 mt-2">
+            {formatCurrency(totalExpenses)}
+          </div>
+          <div className="text-xs text-rose-600 mt-1">{expenses.length} Recorded expenses</div>
+        </div>
+
+        <div className="rounded-lg border border-slate-900 bg-slate-900 text-white p-4 shadow-xs">
+          <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+            Net Operating Result
+          </div>
+          <div className="text-2xl font-bold mt-2">
+            {formatCurrency(netOperatingIncome)}
+          </div>
+          <div className="text-xs text-slate-400 mt-1">Collected revenue − Expenses</div>
+        </div>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <div className="flex items-center justify-between">
+          <TabsList className="bg-slate-200/70 p-1">
+            <TabsTrigger value="invoices">Invoices ({invoices.length})</TabsTrigger>
+            <TabsTrigger value="payments">Payments ({payments.length})</TabsTrigger>
+            <TabsTrigger value="quotes">Quotations ({quotes.length})</TabsTrigger>
+            <TabsTrigger value="expenses">Business Expenses ({expenses.length})</TabsTrigger>
+          </TabsList>
+
+          {activeTab === "expenses" && (
+            <Button
+              size="sm"
+              onClick={() => setShowExpenseModal(true)}
+              className="bg-slate-900 text-white text-xs h-8"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Record Business Expense
+            </Button>
+          )}
+        </div>
+
+        {/* 1. INVOICES TAB */}
+        <TabsContent value="invoices" className="space-y-4">
+          {invoices.length === 0 ? (
+            <EmptyState
+              icon={FileText}
+              title="No tax invoices generated yet"
+              description="Tax invoices are created upon booking scheduling with itemized GST breakdown."
+            />
+          ) : (
+            <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px]">
+                    <tr>
+                      <th className="py-3 px-4">Invoice #</th>
+                      <th className="py-3 px-4">Job ID</th>
+                      <th className="py-3 px-4">Customer</th>
+                      <th className="py-3 px-4">Subtotal + GST</th>
+                      <th className="py-3 px-4">Total Amount</th>
+                      <th className="py-3 px-4">Paid / Balance Due</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {invoices.map((inv) => {
+                      const cust = customers.find((c) => c.id === inv.customerId);
+
+                      return (
+                        <tr key={inv.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                            {inv.invoiceNumber}
+                          </td>
+                          <td className="py-3 px-4 font-mono">
+                            <Link href={`/jobs/${inv.jobId}`} className="text-blue-600 hover:underline">
+                              {inv.jobId}
+                            </Link>
+                          </td>
+                          <td className="py-3 px-4 font-medium text-slate-900">
+                            {cust?.name}
+                          </td>
+                          <td className="py-3 px-4 text-slate-500">
+                            {formatCurrency(inv.subtotal)} + {formatCurrency(inv.tax)}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-900">
+                            {formatCurrency(inv.total)}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-emerald-700 font-semibold">{formatCurrency(inv.amountPaid)}</span> /{" "}
+                            <span className={inv.balanceDue > 0 ? "text-rose-600 font-bold" : "text-slate-400"}>
+                              {formatCurrency(inv.balanceDue)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <PaymentStatusBadge status={inv.status} />
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            {inv.balanceDue > 0 && (
+                              <Button
+                                size="sm"
+                                onClick={() => handleOpenPaymentModal(inv)}
+                                className="h-7 text-xs bg-slate-900 text-white font-medium"
+                              >
+                                Collect Payment
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* 2. PAYMENTS TAB */}
+        <TabsContent value="payments" className="space-y-4">
+          {payments.length === 0 ? (
+            <EmptyState
+              icon={CreditCard}
+              title="No payments recorded yet"
+              description="Record bank transfers, UPI transactions, or card receipts against outstanding invoices."
+            />
+          ) : (
+            <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px]">
+                    <tr>
+                      <th className="py-3 px-4">Payment ID</th>
+                      <th className="py-3 px-4">Job ID</th>
+                      <th className="py-3 px-4">Amount</th>
+                      <th className="py-3 px-4">Method</th>
+                      <th className="py-3 px-4">Transaction Reference</th>
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {payments.map((p) => (
+                      <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                          {p.id}
+                        </td>
+                        <td className="py-3 px-4 font-mono">
+                          <Link href={`/jobs/${p.jobId}`} className="text-blue-600 hover:underline">
+                            {p.jobId}
+                          </Link>
+                        </td>
+                        <td className="py-3 px-4 font-bold text-emerald-700">
+                          {formatCurrency(p.amount)}
+                        </td>
+                        <td className="py-3 px-4 uppercase font-semibold text-[11px] text-slate-700">
+                          {p.paymentMethod}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-600 text-[11px]">
+                          {p.transactionReference}
+                        </td>
+                        <td className="py-3 px-4 text-slate-500">
+                          {formatDateTime(p.paidAt)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800">
+                            {p.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* 3. QUOTES TAB */}
+        <TabsContent value="quotes" className="space-y-4">
+          <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
+            <div className="divide-y divide-slate-100">
+              {quotes.map((q) => {
+                const cust = customers.find((c) => c.id === q.customerId);
+
+                return (
+                  <div key={q.id} className="p-4 flex items-center justify-between text-xs hover:bg-slate-50/60">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-slate-900">{q.quoteNumber}</span>
+                        <span className="px-2 py-0.2 rounded text-[10px] font-bold uppercase bg-blue-50 text-blue-800">
+                          {q.status}
+                        </span>
+                      </div>
+                      <div className="font-semibold text-slate-800">{cust?.name}</div>
+                      <div className="text-[11px] text-slate-500">
+                        Valid until: {formatDate(q.validUntil)}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <div className="text-base font-bold text-slate-900">{formatCurrency(q.total)}</div>
+                        <div className="text-[11px] text-slate-400">Subtotal + Tax</div>
+                      </div>
+
+                      {q.status !== "converted_to_job" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => convertQuoteToInvoice(q.id)}
+                          className="text-xs h-8 border-slate-300"
+                        >
+                          Convert to Invoice
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* 4. EXPENSES TAB */}
+        <TabsContent value="expenses" className="space-y-4">
+          {expenses.length === 0 ? (
+            <EmptyState
+              icon={DollarSign}
+              title="No expenses recorded"
+              description="Record operational costs such as chemicals, equipment maintenance, fuel, and salaries."
+            />
+          ) : (
+            <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px]">
+                    <tr>
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Category</th>
+                      <th className="py-3 px-4">Description</th>
+                      <th className="py-3 px-4">Payment Method</th>
+                      <th className="py-3 px-4">Reference</th>
+                      <th className="py-3 px-4 font-bold text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {expenses.map((exp) => (
+                      <tr key={exp.id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-4 text-slate-500 font-mono">
+                          {formatDate(exp.date)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-700">
+                            {exp.category}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-medium text-slate-900">
+                          {exp.description}
+                        </td>
+                        <td className="py-3 px-4 uppercase font-semibold text-[11px] text-slate-600">
+                          {exp.paymentMethod.replace("_", " ")}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-500 text-[11px]">
+                          {exp.reference || "—"}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-rose-700 text-right">
+                          {formatCurrency(exp.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Collect Payment Dialog */}
+      <Dialog open={!!selectedInvoiceId} onOpenChange={(open) => !open && setSelectedInvoiceId(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record Payment Settlement</DialogTitle>
+            <DialogDescription>
+              Record customer payment for outstanding tax invoice.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSubmitPayment} className="space-y-4 py-2 text-xs">
+            <div className="space-y-1">
+              <label className="font-semibold text-slate-700">Settlement Amount (₹) *</label>
+              <Input
+                type="number"
+                value={payAmount}
+                onFocus={(e) => e.target.select()}
+                onChange={(e) => setPayAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                required
+                className="text-xs font-bold"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-semibold text-slate-700">Payment Instrument</label>
+              <select
+                value={payMethod}
+                onChange={(e) => setPayMethod(e.target.value)}
+                className="w-full h-9 rounded-md border border-slate-200 px-3 bg-white"
+              >
+                <option value="upi">UPI (GPay / PhonePe / Paytm)</option>
+                <option value="card">Credit / Debit Card</option>
+                <option value="bank_transfer">Direct Bank Transfer</option>
+                <option value="cash">Cash on Handover</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-semibold text-slate-700">Transaction Reference ID *</label>
+              <Input
+                value={payRef}
+                onChange={(e) => setPayRef(e.target.value)}
+                required
+                className="text-xs font-mono"
+              />
+            </div>
+
+            <DialogFooter className="pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedInvoiceId(null)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" className="bg-slate-900 text-white">
+                Record Payment
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Record Business Expense Dialog */}
+      <Dialog open={showExpenseModal} onOpenChange={setShowExpenseModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record Operational Business Expense</DialogTitle>
+            <DialogDescription>
+              Log company expenditure for accurate net profit accounting.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleAddExpense} className="space-y-4 py-2 text-xs">
+            <div className="space-y-1">
+              <label className="font-semibold text-slate-700">Expense Category *</label>
+              <select
+                value={expCategory}
+                onChange={(e) => setExpCategory(e.target.value as any)}
+                className="w-full h-9 rounded-md border border-slate-200 px-3 bg-white"
+              >
+                <option value="chemicals">Chemicals & Cleaning Supplies</option>
+                <option value="equipment">Equipment & Machinery</option>
+                <option value="fuel">Fuel & Logistics</option>
+                <option value="salaries">Staff Wages / Bonuses</option>
+                <option value="marketing">Marketing & Ads</option>
+                <option value="utilities">Utilities & Office</option>
+                <option value="other">Other Operational Expense</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-semibold text-slate-700">Amount (₹) *</label>
+              <Input
+                type="number"
+                value={expAmount}
+                onFocus={(e) => e.target.select()}
+                onChange={(e) => setExpAmount(e.target.value === "" ? 0 : Number(e.target.value))}
+                required
+                className="text-xs font-bold"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-semibold text-slate-700">Description *</label>
+              <Input
+                value={expDesc}
+                onChange={(e) => setExpDesc(e.target.value)}
+                placeholder="e.g. 20L Industrial Floor Degreaser purchase"
+                required
+                className="text-xs"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-semibold text-slate-700">Payment Instrument</label>
+              <select
+                value={expMethod}
+                onChange={(e) => setExpMethod(e.target.value as any)}
+                className="w-full h-9 rounded-md border border-slate-200 px-3 bg-white"
+              >
+                <option value="card">Company Card</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="upi">UPI Transfer</option>
+                <option value="cash">Petty Cash</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-semibold text-slate-700">Invoice / Bill Reference (Optional)</label>
+              <Input
+                value={expRef}
+                onChange={(e) => setExpRef(e.target.value)}
+                placeholder="e.g. INV-CHEM-9921"
+                className="text-xs font-mono"
+              />
+            </div>
+
+            <DialogFooter className="pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowExpenseModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" className="bg-slate-900 text-white">
+                Save Expense
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </AdminLayout>
+  );
+}

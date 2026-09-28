@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 4.8% 95.9%;
+    --foreground: 240 5.9% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 5.9% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 5.9% 10%;
+
+    --primary: 343.4 79.7% 54.7%; /* Rose Pink Logo Color #e11d48 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 343.4 80% 97%;
+    --secondary-foreground: 343.4 79.7% 40%;
+
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+
+    --accent: 343.4 80% 96%;
+    --accent-foreground: 343.4 79.7% 45%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 343.4 79.7% 54.7%;
+
+    --radius: 0.375rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-zinc-50/50 text-zinc-900 antialiased selection:bg-zinc-900 selection:text-white font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Accessibility Font Size Scaler (Govt website style: -A, A, +A, ++A) */
+html {
+  font-size: 16px;
+  transition: font-size 0.15s ease-in-out;
+}
+html.font-scale-sm {
+  font-size: 14px;
+}
+html.font-scale-md {
+  font-size: 16px;
+}
+html.font-scale-lg {
+  font-size: 18px;
+}
+html.font-scale-xl {
+  font-size: 20px;
+}
+
+/* Crisp, clean custom scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+}
+
+

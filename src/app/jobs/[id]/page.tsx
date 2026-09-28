@@ -1,0 +1,1341 @@
+"use client";
+
+import React, { useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { AdminLayout } from "@/components/common/AdminLayout";
+import { PageHeader } from "@/components/common/PageHeader";
+import { JobStatusBadge, PaymentStatusBadge } from "@/components/common/JobStatusBadge";
+import { JobTimeline } from "@/components/common/JobTimeline";
+import { BeforeAfterGallery } from "@/components/common/BeforeAfterGallery";
+import { OTPModal } from "@/components/common/OTPModal";
+import { PrintableInvoiceModal } from "@/components/common/PrintableInvoiceModal";
+import { ImageLightboxModal } from "@/components/common/ImageLightboxModal";
+import { PromptModal } from "@/components/common/PromptModal";
+import { useApp } from "@/lib/app-context";
+import { getOpsDateVisibility } from "@/lib/ops-visibility";
+import { Link2, Copy, Check, Loader2 } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
+import { getAllowedTransitions, JOB_STATUS_CONFIG } from "@/lib/state-machine";
+import { formatCurrency, formatDate, formatDateTime, timeAgo } from "@/lib/utils";
+import {
+  Calendar,
+  Clock,
+  MapPin,
+  Phone,
+  Mail,
+  ShieldCheck,
+  AlertTriangle,
+  CheckCircle2,
+  Share2,
+  DollarSign,
+  FileText,
+  Smartphone,
+  ExternalLink,
+  ChevronRight,
+  Plus,
+  ArrowRight,
+  Sparkles,
+  Layers,
+  Camera,
+  Upload,
+  History,
+  KeyRound,
+} from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+
+export default function JobDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const { currentUser } = useAuth();
+  const jobId = (params?.id as string) || "";
+
+  const {
+    jobs,
+    customers,
+    properties,
+    services,
+    users,
+    checklistItems,
+    photos,
+    qualityChecks,
+    qualityIssues,
+    reworkTasks,
+    complaints,
+    invoices,
+    payments,
+    currentRole,
+    transitionJobStatus,
+    systemSettings,
+    sendCompletionLink,
+    updateChecklistItem,
+    addJobPhoto,
+    completeReworkTask,
+    reinspectAndPassQC,
+    recordPayment,
+  } = useApp();
+
+  // Sign-off & feedback live server-side on the completion invite.
+  const [signOff, setSignOff] = useState<{
+    signStatus: string;
+    signedAt: string | null;
+    signatoryName: string | null;
+    feedbackRating: number | null;
+    feedbackTags: string[];
+    feedbackComment: string | null;
+    googleReviewClicked: boolean;
+  } | null>(null);
+
+  const [activeTab, setActiveTab] = useState("overview");
+
+  // Secure customer handover link (generated server-side after QC pass; the
+  // ops desk copies and shares it over any channel — no messaging dependency).
+  const [handoverLink, setHandoverLink] = useState<string | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  // Fetch the server-side sign-off/feedback state for this job (completion
+  // invite) whenever the job exists.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/feedback?jobId=${encodeURIComponent(jobId)}`);
+        const json = await res.json().catch(() => null);
+        if (!cancelled && res.ok && json?.success) {
+          setSignOff(json.data);
+        }
+      } catch (e) {
+        // Non-fatal: the tab simply shows empty state.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  const handleGenerateHandoverLink = async () => {
+    if (!job) return;
+    setLinkBusy(true);
+    setLinkError(null);
+    const res = await sendCompletionLink(job.id);
+    setLinkBusy(false);
+    if (res.success && res.linkPath) {
+      setHandoverLink(`${window.location.origin}${res.linkPath}`);
+      setLinkCopied(false);
+    } else {
+      setLinkError(res.message);
+    }
+  };
+
+  const handleCopyHandoverLink = async () => {
+    if (!handoverLink) return;
+    try {
+      await navigator.clipboard.writeText(handoverLink);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+    } catch {
+      // Clipboard unavailable (e.g. insecure context) — the link stays visible
+      // so the ops desk can select and copy it manually.
+    }
+  };
+  const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
+  const [photoUploadOpen, setPhotoUploadOpen] = useState(false);
+  const [photoArea, setPhotoArea] = useState("Kitchen");
+  const [photoType, setPhotoType] = useState<"before" | "after">("before");
+  const [photoDataUrl, setPhotoDataUrl] = useState("");
+  const [photoCaption, setPhotoCaption] = useState("");
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [isInvoicePrintOpen, setIsInvoicePrintOpen] = useState(false);
+  const [lightboxPhoto, setLightboxPhoto] = useState<{
+    url: string;
+    title?: string;
+    category?: string;
+    uploadedBy?: string;
+    uploadedAt?: string;
+    notes?: string;
+  } | null>(null);
+
+  const [promptConfig, setPromptConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    description?: string;
+    placeholder?: string;
+    defaultValue?: string;
+    confirmText?: string;
+    onSubmit: (val: string) => void;
+  }>({
+    isOpen: false,
+    title: "",
+    onSubmit: () => {},
+  });
+
+  const cameraInputRef = React.useRef<HTMLInputElement>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setPhotoDataUrl(event.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Find job
+  const job = jobs.find((j) => j.id === jobId);
+
+  // Ops Managers cannot open jobs outside their dispatch visibility window
+  // (past + today + tomorrow after the cutoff). Direct URL access to a future
+  // job renders as not-found, mirroring the API's 403.
+  const opsWindowBlocked =
+    currentRole === "ops_manager" &&
+    !!job &&
+    !getOpsDateVisibility(new Date(), {
+      nextDayDispatchTime: systemSettings?.nextDayDispatchTime || "20:00",
+    }).isDateVisible(job.scheduledDate);
+
+  if (!job) {
+    return (
+      <AdminLayout>
+        <div className="p-12 text-center bg-white rounded-lg border border-slate-200">
+          <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-slate-900">Job Not Found</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            The requested job {jobId} does not exist or has been archived.
+          </p>
+          <Link href="/jobs">
+            <Button size="sm" className="mt-4">
+              Return to Jobs
+            </Button>
+          </Link>
+        </div>
+      </AdminLayout>
+    );
+  }
+
+  if (opsWindowBlocked) {
+    return (
+      <AdminLayout>
+        <div className="p-12 text-center bg-white rounded-lg border border-slate-200">
+          <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-slate-900">Outside Your Dispatch Window</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Job {jobId} is scheduled for <strong>{job.scheduledDate}</strong>, which is beyond your
+            permitted dispatch window. It will become visible at the dispatch cutoff.
+          </p>
+          <Link href="/dispatcher">
+            <Button size="sm" className="mt-4">
+              Return to Dispatch Queue
+            </Button>
+          </Link>
+        </div>
+      </AdminLayout>
+    );
+  }
+
+  const customer = customers.find((c) => c.id === job.customerId);
+  const property = properties.find((p) => p.id === job.propertyId);
+  const service = services.find((s) => s.id === job.serviceId);
+  const assignedWorkers = (job.assignedStaffIds || [])
+    .map((id) => users.find((u) => u.id === id))
+    .filter(Boolean) as { id: string; name: string }[];
+  const leadWorker = assignedWorkers[0];
+  const isLeadViewer =
+    currentUser?.role === "super_admin" ||
+    currentUser?.role === "ops_manager" ||
+    leadWorker?.id === currentUser?.id;
+  const jobChecklist = checklistItems.filter((item) => item.jobId === job.id);
+  const jobPhotos = photos.filter((p) => p.jobId === job.id);
+  const qc = qualityChecks.find((q) => q.jobId === job.id);
+  const jobIssues = qualityIssues.filter((i) => i.jobId === job.id);
+  const jobRework = reworkTasks.filter((r) => r.jobId === job.id);
+  const invoice = invoices.find((i) => i.jobId === job.id);
+
+  // Allowed transitions for current user role
+  const allowedTransitions = getAllowedTransitions(job).filter(
+    (action) => currentRole === "super_admin" || action.allowedRoles.includes(currentRole)
+  );
+
+  const handleExecuteTransition = (targetStatus: any) => {
+    setActionError(null);
+    if (targetStatus === "CUSTOMER_VERIFIED" || (job.status === "ARRIVED" && targetStatus === "IN_PROGRESS")) {
+      setIsOtpModalOpen(true);
+      return;
+    }
+
+    const res = transitionJobStatus(job.id, targetStatus);
+    if (!res.success) {
+      setActionError(res.message);
+    }
+  };
+
+  const handlePhotoUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!photoDataUrl) return;
+
+    setPhotoUploading(true);
+    setPhotoError(null);
+    const res = await addJobPhoto({
+      jobId: job.id,
+      area: photoArea,
+      photoType,
+      imageDataUrl: photoDataUrl,
+      caption: photoCaption || undefined,
+    });
+    setPhotoUploading(false);
+
+    if (res.success) {
+      setPhotoUploadOpen(false);
+      setPhotoDataUrl("");
+      setPhotoCaption("");
+    } else {
+      setPhotoError(res.message);
+    }
+  };
+
+  return (
+    <AdminLayout>
+      <PageHeader
+        title={`Job Record: ${job.id}`}
+        description={`Comprehensive digital file for ${customer?.name || "Customer"} at ${property?.title || "Property"}`}
+        breadcrumbs={[
+          { label: "Operations", href: "/" },
+          { label: "Jobs", href: "/jobs" },
+          { label: job.id },
+        ]}
+        badge={<JobStatusBadge status={job.status} size="md" />}
+        actions={
+          <div className="flex items-center gap-2">
+            {handoverLink && (
+              <Link
+                href={handoverLink}
+                target="_blank"
+                className="hidden sm:inline-flex"
+              >
+                <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5">
+                  <ExternalLink className="h-3.5 w-3.5 text-teal-600" />
+                  Customer Portal Link
+                </Button>
+              </Link>
+            )}
+
+            <Link href="/field">
+              <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5">
+                <Smartphone className="h-3.5 w-3.5 text-blue-600" />
+                Open in Field App
+              </Button>
+            </Link>
+          </div>
+        }
+      />
+
+      {/* State Machine Transition Action Bar */}
+      <div className="bg-slate-900 text-white rounded-lg p-4 mb-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+            Current Lifecycle State
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-lg font-bold text-white">
+              {JOB_STATUS_CONFIG[job.status]?.label || job.status}
+            </span>
+            <span className="text-xs text-slate-300">
+              — {JOB_STATUS_CONFIG[job.status]?.shortDescription}
+            </span>
+          </div>
+        </div>
+
+        {/* Dynamic Allowed Actions for Current State */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {job.status === "ARRIVED" && job.otpVerification.status !== "verified" && (
+            <Button
+              size="sm"
+              onClick={() => setIsOtpModalOpen(true)}
+              className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold gap-1.5 h-9"
+            >
+              <KeyRound className="h-4 w-4" />
+              Enter Customer OTP (Verify Entry)
+            </Button>
+          )}
+
+          {allowedTransitions.map((action) => (
+            <Button
+              key={action.status}
+              size="sm"
+              variant={
+                action.buttonVariant === "destructive"
+                  ? "destructive"
+                  : action.buttonVariant === "outline"
+                  ? "outline"
+                  : "default"
+              }
+              onClick={() => handleExecuteTransition(action.status)}
+              className={
+                action.buttonVariant === "destructive"
+                  ? ""
+                  : action.buttonVariant === "outline"
+                  ? "bg-slate-800 text-white border-slate-700 hover:bg-slate-700"
+                  : "bg-blue-600 hover:bg-blue-500 text-white font-medium"
+              }
+            >
+              {action.label}
+              <ArrowRight className="h-3.5 w-3.5 ml-1" />
+            </Button>
+          ))}
+
+          {allowedTransitions.length === 0 && (
+            <span className="text-xs text-slate-400 italic">
+              Terminal state reached (No further transitions required)
+            </span>
+          )}
+        </div>
+      </div>
+
+      {actionError && (
+        <div className="mb-4 p-3 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>{actionError}</span>
+        </div>
+      )}
+
+      {/* Secure Customer Handover Link (after QC pass) */}
+      {(currentRole === "super_admin" || currentRole === "ops_manager") &&
+        (job.status === "CUSTOMER_APPROVAL" || job.status === "COMPLETED" || job.status === "FEEDBACK_REQUESTED") && (
+          <div className="mb-6 p-4 rounded-lg border border-teal-200 bg-teal-50/60 space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <h3 className="text-sm font-bold text-teal-950 flex items-center gap-1.5">
+                  <Link2 className="h-4 w-4 text-teal-600" />
+                  Secure Customer Handover Link
+                </h3>
+                <p className="text-[11px] text-teal-800 mt-0.5">
+                  Share this link with the customer (WhatsApp/SMS/call). It opens their handover page — before/after photos, digital sign-off, and the Google review prompt.
+                </p>
+              </div>
+
+              <Button
+                size="sm"
+                onClick={handleGenerateHandoverLink}
+                disabled={linkBusy}
+                className="h-9 text-xs bg-teal-700 hover:bg-teal-800 text-white gap-1.5"
+              >
+                {linkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+                {handoverLink ? "Generate New Link" : "Generate Secure Link"}
+              </Button>
+            </div>
+
+            {linkError && (
+              <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">{linkError}</p>
+            )}
+
+            {handoverLink && (
+              <div className="flex items-center gap-2 bg-white border border-teal-200 rounded-md p-2">
+                <input
+                  readOnly
+                  value={handoverLink}
+                  onFocus={(e) => e.target.select()}
+                  className="flex-1 text-[11px] font-mono text-slate-700 bg-transparent outline-none"
+                />
+                <Button size="sm" variant="outline" onClick={handleCopyHandoverLink} className="h-7 text-[11px] gap-1">
+                  {linkCopied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                  {linkCopied ? "Copied" : "Copy"}
+                </Button>
+                <Link href={handoverLink.replace(window.location.origin, "")} target="_blank">
+                  <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1">
+                    <ExternalLink className="h-3 w-3" />
+                    Open
+                  </Button>
+                </Link>
+              </div>
+            )}
+
+            {handoverLink && (
+              <p className="text-[10px] text-teal-700">
+                Each new link invalidates sharing of the previous one. The link expires automatically.
+              </p>
+            )}
+          </div>
+        )}
+
+      {/* Visual State Progression Stepper */}
+      <div className="mb-6">
+        <JobTimeline job={job} />
+      </div>
+
+      {/* Tabbed Job Detail Content */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList className="bg-slate-200/70 p-1">
+          <TabsTrigger value="overview">Overview & Details</TabsTrigger>
+          <TabsTrigger value="checklist">
+            Checklist ({jobChecklist.filter((c) => c.status === "completed").length}/{jobChecklist.length})
+          </TabsTrigger>
+          <TabsTrigger value="photos">
+            Evidence Photos ({jobPhotos.length})
+          </TabsTrigger>
+          <TabsTrigger value="qc">
+            Quality & Rework {jobIssues.length > 0 && `(${jobIssues.length} issues)`}
+          </TabsTrigger>
+          <TabsTrigger value="approval">Sign-off & Feedback</TabsTrigger>
+          {currentRole === "super_admin" && (
+            <TabsTrigger value="financials">Finance & Invoices</TabsTrigger>
+          )}
+          <TabsTrigger value="audit">Audit Log</TabsTrigger>
+        </TabsList>
+
+        {/* 1. OVERVIEW TAB */}
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Customer & Property Card */}
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Customer & Property
+              </h3>
+
+              <div className="space-y-1">
+                <div className="text-sm font-bold text-slate-900">
+                  {customer?.name}
+                </div>
+                <div className="text-xs text-slate-500 flex items-center gap-1.5 font-mono">
+                  <Phone className="h-3 w-3 text-slate-400" />
+                  {customer?.phone}
+                </div>
+                <div className="text-xs text-slate-500 flex items-center gap-1.5">
+                  <Mail className="h-3 w-3 text-slate-400" />
+                  {customer?.email}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 space-y-1 text-xs">
+                <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 text-blue-600" />
+                  {property?.title}
+                </div>
+                <p className="text-slate-500 text-[11px] leading-relaxed">
+                  {property?.address}
+                </p>
+                <div className="text-[11px] text-slate-400 pt-1">
+                  Type: <span className="capitalize text-slate-700">{property?.propertyType}</span> • {property?.bedrooms || 3} BHK • {property?.carpetAreaSqFt || 2000} sq ft
+                </div>
+                {property?.accessNotes && (
+                  <div className="mt-2 p-2 rounded bg-slate-50 border border-slate-200 text-[11px] text-slate-600">
+                    <strong>Access:</strong> {property.accessNotes}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Service & Booking Details */}
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Service Package
+              </h3>
+
+              <div className="space-y-1">
+                <div className="text-sm font-bold text-slate-900">
+                  {service?.name}
+                </div>
+                <div className="text-xs text-slate-400">
+                  Estimated duration: ~{service?.estimatedDurationHours || 4} hours
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Scheduled Date:</span>
+                  <span className="font-semibold text-slate-900">{formatDate(job.scheduledDate)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Time Window:</span>
+                  <span className="font-medium text-slate-900">{job.scheduledTimeSlot}</span>
+                </div>
+                {currentRole === "super_admin" && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Service Fee:</span>
+                      <span className="font-bold text-slate-900">{formatCurrency(job.amount ?? 0)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Payment Status:</span>
+                      <PaymentStatusBadge status={job.paymentStatus ?? "UNPAID"} />
+                    </div>
+                  </>
+                )}
+              </div>
+
+            </div>
+
+            {/* Worker Assignment & OTP Security Box */}
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Field Workers & Security Verification
+              </h3>
+
+              <div className="space-y-1">
+                {assignedWorkers.length === 0 ? (
+                  <div className="text-sm font-bold text-slate-900">No field workers assigned yet</div>
+                ) : (
+                  <div className="space-y-1">
+                    {assignedWorkers.map((w, idx) => (
+                      <div key={w.id} className="text-sm text-slate-900 font-medium">
+                        {w.name}
+                        {idx === 0 && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            Lead • OTP holder
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* OTP Box */}
+              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-2 text-xs">
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="flex items-center gap-1.5 text-slate-700">
+                    <KeyRound className="h-3.5 w-3.5 text-slate-500" />
+                    Customer Arrival OTP
+                  </span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-bold ${
+                      job.otpVerification.status === "verified"
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {job.otpVerification.status}
+                  </span>
+                </div>
+
+                <div className="text-[11px] text-slate-500">
+                  {job.otpVerification.status === "verified" ? (
+                    <span className="text-emerald-700">
+                      ✓ Verified at {formatDateTime(job.otpVerification.verifiedAt)}
+                    </span>
+                  ) : (
+                    <span>
+                      OTP sent by SMS to the registered customer number upon arrival. Verification is performed server-side.
+                    </span>
+                  )}
+                </div>
+
+                {job.otpVerification.status !== "verified" &&
+                  (isLeadViewer ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsOtpModalOpen(true)}
+                      className="w-full text-xs h-7 mt-1 bg-white"
+                    >
+                      Enter / Verify Customer OTP
+                    </Button>
+                  ) : (
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      Only the lead worker ({leadWorker?.name || "first-assigned"}) can verify the customer OTP.
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* 2. CHECKLIST TAB */}
+        <TabsContent value="checklist" className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Service Execution Checklist
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Auto-generated from template '{service?.name}'.
+                </p>
+              </div>
+              <span className="text-xs font-semibold px-2.5 py-1 rounded bg-slate-100 text-slate-800">
+                {jobChecklist.filter((c) => c.status === "completed").length} of {jobChecklist.length} Tasks Done
+              </span>
+            </div>
+
+            <div className="divide-y divide-slate-100 mt-2">
+              {jobChecklist.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-400">
+                  No checklist items generated for this service.
+                </div>
+              ) : (
+                jobChecklist.map((item) => (
+                  <div
+                    key={item.id}
+                    className="py-3 flex items-start justify-between gap-4 text-xs"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-slate-700 px-2 py-0.5 rounded bg-slate-100 text-[10px]">
+                          {item.area}
+                        </span>
+                        {item.critical && (
+                          <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">
+                            Mandatory / Critical
+                          </span>
+                        )}
+                        <span
+                          className={`px-1.5 py-0.2 rounded text-[10px] font-semibold uppercase ${
+                            item.status === "completed"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : item.status === "issue"
+                              ? "bg-rose-100 text-rose-800"
+                              : item.status === "skipped"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {item.status}
+                        </span>
+                      </div>
+                      <p className="text-slate-800 font-medium">{item.task}</p>
+                      {item.completedBy && (
+                        <p className="text-[10px] text-slate-400">
+                          Completed by {item.completedBy} at {formatDateTime(item.completedAt)}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {item.status !== "completed" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => updateChecklistItem(item.id, "completed")}
+                          className="h-7 text-[11px] px-2 text-emerald-700 hover:bg-emerald-50"
+                        >
+                          Mark Done
+                        </Button>
+                      )}
+                      {item.status !== "skipped" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setPromptConfig({
+                              isOpen: true,
+                              title: "Skip Checklist Item",
+                              description: `Specify reason for skipping "${item.task}":`,
+                              placeholder: "Client requested to skip",
+                              defaultValue: "Client requested to skip",
+                              onSubmit: (reason) => {
+                                updateChecklistItem(item.id, "skipped", reason || "Client requested to skip");
+                              },
+                            });
+                          }}
+                          className="h-7 text-[11px] px-2 text-slate-500"
+                        >
+                          Skip
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* 3. PHOTOS TAB */}
+        <TabsContent value="photos" className="space-y-4">
+          <BeforeAfterGallery
+            photos={jobPhotos}
+            allowUpload={true}
+            onUploadClick={() => setPhotoUploadOpen(true)}
+          />
+        </TabsContent>
+
+        {/* 4. QUALITY CHECK TAB */}
+        <TabsContent value="qc" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* QC Score Card */}
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Quality Audit Result
+              </h3>
+
+              {qc ? (
+                <div className="space-y-3">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-extrabold text-slate-900">
+                      {qc.score}%
+                    </span>
+                    <span
+                      className={`text-xs font-bold uppercase px-2 py-0.5 rounded ${
+                        qc.status === "PASS"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-rose-100 text-rose-800"
+                      }`}
+                    >
+                      {qc.status}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-600">
+                    Audited by: <strong className="text-slate-800">{qc.inspectorName}</strong>
+                  </p>
+                  <p className="text-xs text-slate-500 italic">
+                    "{qc.notes || "Standard audit conducted"}"
+                  </p>
+                  <div className="text-[11px] text-slate-400">
+                    Inspected: {formatDateTime(qc.inspectedAt)}
+                  </div>
+                </div>
+              ) : (
+                <div className="py-6 text-center text-xs text-slate-400">
+                  <ShieldCheck className="h-8 w-8 mx-auto text-slate-300 mb-2" />
+                  <p>Quality check not yet conducted.</p>
+                  <p className="text-[11px] mt-1">
+                    Occurs after work is marked completed.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Rework & Issues List */}
+            <div className="md:col-span-2 rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Defects & Corrective Rework Tasks
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Linked defect history and corrective action tracking.
+                  </p>
+                </div>
+                {((job.status === "REWORK_REQUIRED" || job.status === "REWORK_COMPLETED" || job.status === "REINSPECTION") && (currentRole === "super_admin" || currentRole === "ops_manager")) && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setPromptConfig({
+                        isOpen: true,
+                        title: "Reinspect & Pass Quality Audit",
+                        description: "Enter QC reinspection verification notes for customer sign-off:",
+                        placeholder: "All defects verified resolved.",
+                        defaultValue: "All defects verified resolved to 100% standard.",
+                        onSubmit: (notes) => {
+                          reinspectAndPassQC(job.id, notes || "All defects verified resolved.");
+                        },
+                      });
+                    }}
+                    className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+                    Reinspect & Pass QC
+                  </Button>
+                )}
+              </div>
+
+              {jobIssues.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-400">
+                  Zero defects recorded. Quality standard satisfied.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {jobIssues.map((issue) => {
+                    const task = jobRework.find((r) => r.qualityIssueId === issue.id);
+
+                    return (
+                      <div
+                        key={issue.id}
+                        className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 space-y-2 text-xs"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-900">
+                              {issue.area}
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                issue.severity === "critical"
+                                  ? "bg-rose-600 text-white"
+                                  : issue.severity === "major"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-slate-200 text-slate-700"
+                              }`}
+                            >
+                              {issue.severity}
+                            </span>
+                          </div>
+
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                              issue.status === "resolved" || issue.status === "reinspected_pass"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-rose-100 text-rose-800"
+                            }`}
+                          >
+                            {issue.status.replace("_", " ")}
+                          </span>
+                        </div>
+
+                        <p className="text-slate-800 font-medium">
+                          {issue.itemDescription}
+                        </p>
+                        <p className="text-slate-600 text-[11px]">
+                          <strong>Instructions:</strong> {issue.reworkInstructions || issue.notes}
+                        </p>
+
+                        {task && task.status !== "completed" && (currentRole === "super_admin" || currentRole === "ops_manager" || currentRole === "staff") && (
+                          <div className="pt-2 flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setPromptConfig({
+                                  isOpen: true,
+                                  title: "Mark Rework Task Completed",
+                                  description: "Enter completion & correction notes for this rework item:",
+                                  placeholder: "Rework completed to satisfaction",
+                                  defaultValue: "Rework completed to satisfaction",
+                                  onSubmit: (note) => {
+                                    completeReworkTask(task.id, note || "Rework completed to satisfaction");
+                                  },
+                                });
+                              }}
+                              className="h-7 text-xs bg-white text-emerald-700 hover:bg-emerald-50"
+                            >
+                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                              Mark Rework Task Done
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* 5. APPROVAL & FEEDBACK TAB */}
+        <TabsContent value="approval" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Customer Sign-off Card */}
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Digital Handover Sign-Off
+              </h3>
+
+              {signOff ? (
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Sign-off Status:</span>
+                    <span
+                      className={`font-semibold px-2 py-0.5 rounded ${
+                        signOff.signStatus === "APPROVED"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : signOff.signStatus === "ATTENTION_REQUESTED"
+                          ? "bg-rose-100 text-rose-800"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {signOff.signStatus}
+                    </span>
+                  </div>
+
+                  {signOff.signedAt && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Signed At:</span>
+                      <span className="font-mono text-slate-800">{formatDateTime(signOff.signedAt)}</span>
+                    </div>
+                  )}
+
+                  {signOff.signatoryName && (
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-200 text-slate-700">
+                      <strong>Signed By:</strong> {signOff.signatoryName}
+                    </div>
+                  )}
+
+                  <div className="pt-3 border-t border-slate-100 text-[11px] text-slate-500">
+                    The secure customer sign-off link is generated after QC pass and displayed in the Secure Customer Handover Link panel above. Tokens are never stored in plaintext.
+                  </div>
+                </div>
+              ) : (
+                <div className="py-6 text-center text-xs text-slate-400">
+                  Customer approval link generated after QC pass.
+                </div>
+              )}
+            </div>
+
+            {/* Customer Feedback & Google Review */}
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Customer Rating & Sentiment
+              </h3>
+
+              {signOff?.feedbackRating ? (
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="flex text-amber-400">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <span key={i} className={i < (signOff.feedbackRating ?? 0) ? "text-amber-400" : "text-slate-200"}>
+                          ★
+                        </span>
+                      ))}
+                    </div>
+                    <span className="font-bold text-slate-900">{signOff.feedbackRating}/5.0</span>
+                    <span className="capitalize font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[11px]">
+                      {(signOff.feedbackRating ?? 0) >= 4 ? "positive" : (signOff.feedbackRating ?? 0) === 3 ? "neutral" : "negative"}
+                    </span>
+                  </div>
+
+                  {signOff.feedbackComment && (
+                    <p className="text-slate-700 italic bg-slate-50 p-3 rounded border border-slate-200">
+                      "{signOff.feedbackComment}"
+                    </p>
+                  )}
+
+                  {signOff.feedbackTags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {signOff.feedbackTags.map((tag) => (
+                        <span key={tag} className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-medium">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100">
+                    <span>Google Review Triggered:</span>
+                    <span className={signOff.googleReviewClicked ? "text-emerald-600 font-bold" : "text-slate-400"}>
+                      {signOff.googleReviewClicked ? "Yes (Customer Clicked Link)" : "Not Clicked"}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-6 text-center text-xs text-slate-400">
+                  No post-service feedback submitted yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* 6. FINANCIALS TAB */}
+        <TabsContent value="financials" className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Billing & Invoicing File
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Official tax invoice and settlement status
+                </p>
+              </div>
+              <PaymentStatusBadge status={job.paymentStatus ?? "UNPAID"} />
+            </div>
+
+            {invoice ? (
+              <div className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-3 rounded-md bg-slate-50 border border-slate-200">
+                  <div>
+                    <span className="text-slate-400 text-[11px]">Invoice #</span>
+                    <div className="font-mono font-bold text-slate-800">{invoice.invoiceNumber}</div>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[11px]">Total Billed</span>
+                    <div className="font-bold text-slate-900">{formatCurrency(invoice.total)}</div>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[11px]">Amount Settled</span>
+                    <div className="font-bold text-emerald-700">{formatCurrency(invoice.amountPaid)}</div>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[11px]">Outstanding Balance</span>
+                    <div className="font-bold text-rose-700">{formatCurrency(invoice.balanceDue)}</div>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsInvoicePrintOpen(true)}
+                    className="text-xs h-8 gap-1.5 border-slate-300"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-blue-600" />
+                    View / Print Tax Invoice
+                  </Button>
+
+                  {invoice.balanceDue > 0 && (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setPromptConfig({
+                          isOpen: true,
+                          title: "Record Invoice Payment Settlement",
+                          description: `Enter payment transaction reference (UPI ID, Card Transaction #, or Bank Transfer Ref) to settle ${formatCurrency(invoice.balanceDue)}:`,
+                          placeholder: "e.g. UPI/6692810029",
+                          defaultValue: "UPI/SETTLE-" + Date.now().toString().slice(-6),
+                          confirmText: "Record Settlement",
+                          onSubmit: (ref) => {
+                            recordPayment(invoice.id, invoice.balanceDue, "upi", ref || "MANUAL_SETTLE");
+                          },
+                        });
+                      }}
+                      className="bg-slate-900 text-white text-xs h-8"
+                    >
+                      Record Full Settlement ({formatCurrency(invoice.balanceDue)})
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="py-6 text-center text-xs text-slate-400">
+                Invoice generation pending.
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* 7. AUDIT LOG TAB */}
+        <TabsContent value="audit" className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+              Immutable Action Log for {job.id}
+            </h3>
+
+            <div className="py-6 text-center text-xs text-slate-400">
+              Session-scoped audit entries are recorded in real time; the
+              authoritative, tamper-evident server audit trail is available in
+              Settings → Operations Audit Log.
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* OTP Verification Modal */}
+      <OTPModal
+        job={job}
+        isOpen={isOtpModalOpen}
+        onClose={() => setIsOtpModalOpen(false)}
+      />
+
+      {/* Photo Upload Dialog */}
+      <Dialog open={photoUploadOpen} onOpenChange={setPhotoUploadOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Upload Service Evidence Photo</DialogTitle>
+            <DialogDescription>
+              Record before or after condition with area tag and caption for customer audit.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handlePhotoUploadSubmit} className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700">Area / Room</label>
+              <select
+                value={photoArea}
+                onChange={(e) => setPhotoArea(e.target.value)}
+                className="w-full h-9 rounded-md border border-slate-200 text-xs px-3 bg-white"
+              >
+                <option value="Kitchen Chimney & Baffle">Kitchen Chimney & Baffle</option>
+                <option value="Master Bathroom Shower Glass">Master Bathroom Shower Glass</option>
+                <option value="Kitchen Gas Hob & Granite">Kitchen Gas Hob & Granite</option>
+                <option value="Living Room French Windows">Living Room French Windows</option>
+                <option value="Balcony Floor Buffing">Balcony Floor Buffing</option>
+                <option value="Wardrobe Interior Tracks">Wardrobe Interior Tracks</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700">Photo Type</label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                  <input
+                    type="radio"
+                    checked={photoType === "before"}
+                    onChange={() => setPhotoType("before")}
+                  />
+                  Before (Initial State)
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-slate-700">
+                  <input
+                    type="radio"
+                    checked={photoType === "after"}
+                    onChange={() => setPhotoType("after")}
+                  />
+                  After (Delivered Result)
+                </label>
+              </div>
+            </div>
+
+            {/* Camera Capture / File Upload UI */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-700 block">Capture or Select Evidence Photo</label>
+
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                ref={cameraInputRef}
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <input
+                type="file"
+                accept="image/*"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+
+              {photoDataUrl ? (
+                <div className="relative rounded-lg overflow-hidden border border-slate-200 bg-slate-900 group">
+                  <img src={photoDataUrl} alt="Evidence Preview" className="w-full h-36 object-cover" />
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="h-7 text-xs bg-white text-slate-900 font-semibold"
+                      onClick={() => cameraInputRef.current?.click()}
+                    >
+                      <Camera className="h-3.5 w-3.5 mr-1 text-slate-700" />
+                      Retake
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 text-xs bg-rose-600 text-white font-semibold"
+                      onClick={() => setPhotoDataUrl("")}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="p-3 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100/70 transition-all flex flex-col items-center justify-center text-center group"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center mb-1 shadow-xs group-hover:scale-105 transition-transform">
+                      <Camera className="h-4 w-4" />
+                    </div>
+                    <span className="text-xs font-bold text-blue-950">Camera</span>
+                    <span className="text-[10px] text-blue-600">Snap photo</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 transition-all flex flex-col items-center justify-center text-center group"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-slate-800 text-white flex items-center justify-center mb-1 shadow-xs group-hover:scale-105 transition-transform">
+                      <Upload className="h-4 w-4" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-900">Gallery / Files</span>
+                    <span className="text-[10px] text-slate-500">Pick image file</span>
+                  </button>
+                </div>
+              )}
+
+              {photoError && (
+                <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">{photoError}</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700">Caption / Notes</label>
+              <Input
+                value={photoCaption}
+                onChange={(e) => setPhotoCaption(e.target.value)}
+                placeholder="E.g., Heavy carbon descaled with eco degreaser"
+                className="text-xs"
+              />
+            </div>
+
+            <DialogFooter className="pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPhotoUploadOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={photoUploading} className="bg-slate-900 text-white">
+                {photoUploading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    Uploading…
+                  </>
+                ) : (
+                  "Upload & Record"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reusable Prompt Modal */}
+      <PromptModal
+        isOpen={promptConfig.isOpen}
+        onClose={() => setPromptConfig((prev) => ({ ...prev, isOpen: false }))}
+        title={promptConfig.title}
+        description={promptConfig.description}
+        placeholder={promptConfig.placeholder}
+        defaultValue={promptConfig.defaultValue}
+        confirmText={promptConfig.confirmText}
+        onSubmit={promptConfig.onSubmit}
+      />
+
+      {/* Printable Tax Invoice Modal */}
+      {invoice && (
+        <PrintableInvoiceModal
+          isOpen={isInvoicePrintOpen}
+          onClose={() => setIsInvoicePrintOpen(false)}
+          invoice={invoice}
+          job={job}
+          customer={customer}
+          property={property}
+          service={service}
+          payments={payments.filter((p) => p.invoiceId === invoice.id)}
+          systemSettings={systemSettings}
+        />
+      )}
+
+      {/* Lightbox Image Preview Modal */}
+      {lightboxPhoto && (
+        <ImageLightboxModal
+          isOpen={!!lightboxPhoto}
+          onClose={() => setLightboxPhoto(null)}
+          imageUrl={lightboxPhoto.url}
+          title={lightboxPhoto.title}
+          category={lightboxPhoto.category}
+          uploadedBy={lightboxPhoto.uploadedBy}
+          uploadedAt={lightboxPhoto.uploadedAt}
+          notes={lightboxPhoto.notes}
+        />
+      )}
+    </AdminLayout>
+  );
+}

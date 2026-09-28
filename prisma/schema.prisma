@@ -1,0 +1,511 @@
+// Prisma schema — the database is the SINGLE SOURCE OF TRUTH for the entire
+// ERP. Every operational record (users, customers, properties, services,
+// jobs, checklists, QC, referrals, finance) lives here; the client UI is a
+// hydrated view with write-through actions. Nothing is hardcoded in the UI:
+// service packages, rubrics, commission rules, and settings are all
+// company-managed data created through the app itself.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String
+  role         String   // "super_admin" | "ops_manager" | "staff"
+  avatar       String?
+  passwordHash String? // bcrypt hash; null = password login disabled until set
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+}
+
+model Customer {
+  id                String   @id @default(cuid())
+  name              String
+  phone             String
+  email             String   @default("")
+  type              String   @default("individual") // "individual" | "commercial"
+  address           String   @default("")
+  notes             String?
+  source            String   @default("direct") // direct | referral | google | repeat
+  referralPartnerId String?
+  referralCode      String?
+  lifetimeRevenue   Float    @default(0)
+  totalBookings     Int      @default(0)
+  status            String   @default("active") // active | inactive
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  properties Property[]
+  jobs       Job[]
+
+  @@index([phone])
+}
+
+model Property {
+  id                  String   @id @default(cuid())
+  customerId          String
+  title               String
+  address             String
+  propertyType        String   @default("apartment") // apartment | villa | office | penthouse | commercial | duplex
+  city                String   @default("")
+  postalCode          String?
+  bedrooms            Int      @default(1)
+  bathrooms           Int      @default(1)
+  areaSqFt            Int      @default(1000)
+  accessCode          String?
+  accessNotes         String?
+  parkingInstructions String?
+  preferredTime       String?
+  recurringService    Boolean  @default(false)
+  recurringFrequency  String?
+  createdAt           DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  jobs     Job[]
+
+  @@index([customerId])
+}
+
+model Service {
+  id                     String   @id @default(cuid())
+  name                   String
+  slug                   String   @unique
+  category               String   @default("residential")
+  description            String
+  basePrice              Float
+  estimatedDurationHours Float
+  active                 Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  checklistTemplate ServiceChecklistItem[]
+  jobs              Job[]
+
+  @@index([active])
+}
+
+/// A company-authored quality rubric step that belongs to a service package.
+/// Jobs instantiate copies of these as JobChecklistItem records at booking.
+model ServiceChecklistItem {
+  id         String  @id @default(cuid())
+  serviceId  String
+  area       String
+  task       String
+  critical   Boolean @default(false)
+  position   Int     @default(0)
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+}
+
+model Job {
+  id                String   @id @default(cuid())
+  customerId        String
+  propertyId        String
+  serviceId         String
+  scheduledDate     String
+  scheduledTimeSlot String
+  assignedManagerId String?
+  assignedStaffIds  String[] @default([]) // directly-assigned field worker ids (first entry = lead worker)
+  amount            Float
+  paymentStatus     String   @default("UNPAID")
+  status            String   @default("SCHEDULED")
+  notes             String?
+  qualityCheckId    String?
+  referralPartnerId String?
+  arrivedAt         DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  customer          Customer           @relation(fields: [customerId], references: [id])
+  property          Property           @relation(fields: [propertyId], references: [id])
+  service           Service            @relation(fields: [serviceId], references: [id])
+  referralPartner   ReferralPartner?   @relation("JobAttribution", fields: [referralPartnerId], references: [id])
+  checklistItems    JobChecklistItem[]
+  invoices          Invoice[]
+  otpChallenges     OtpChallenge[]
+  completionInvites CompletionInvite[]
+  photos            JobPhoto[]
+  qualityChecks     QualityCheck[]
+  reworkTasks       ReworkTask[]
+  complaints        Complaint[]
+  commissionEntries CommissionEntry[]
+
+  @@index([scheduledDate])
+  @@index([status])
+}
+
+/// Per-job working checklist, instantiated from the service's rubric at
+/// booking time. Each item is completed/skipped/flagged by field workers.
+model JobChecklistItem {
+  id             String   @id @default(cuid())
+  jobId          String
+  area           String
+  task           String
+  critical       Boolean  @default(false)
+  status         String   @default("pending") // pending | completed | skipped | issue
+  skippedReason  String?
+  issueNotes     String?
+  photoEvidence  String?
+  completedBy    String?
+  completedAt    DateTime?
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
+
+model Invoice {
+  id            String   @id @default(cuid())
+  invoiceNumber String   @unique
+  jobId         String
+  customerId    String
+  subtotal      Float
+  tax           Float
+  discount      Float    @default(0)
+  total         Float
+  amountPaid    Float    @default(0)
+  balanceDue    Float
+  dueDate       String
+  status        String   @default("UNPAID") // UNPAID | PARTIAL | PAID | REFUNDED | CANCELLED
+  issuedAt      DateTime @default(now())
+
+  job      Job       @relation(fields: [jobId], references: [id])
+  payments Payment[]
+
+  @@index([jobId])
+  @@index([customerId])
+}
+
+model Payment {
+  id                   String   @id @default(cuid())
+  invoiceId            String
+  jobId                String
+  customerId           String
+  amount               Float
+  paymentMethod        String // card | bank_transfer | cash | upi | online_link
+  transactionReference String
+  status               String   @default("completed")
+  paidAt               DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@index([jobId])
+}
+
+model QualityCheck {
+  id          String   @id @default(cuid())
+  jobId       String
+  inspectorId String
+  score       Int
+  decision    String   // "PASS" | "REWORK_REQUIRED"
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  job        Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  issues     QualityIssue[]
+
+  @@index([jobId])
+}
+
+model QualityIssue {
+  id                 String    @id @default(cuid())
+  qualityCheckId     String
+  jobId              String
+  area               String
+  itemDescription    String
+  severity           String    @default("minor") // minor | major | critical
+  notes              String?
+  status             String    @default("rework_in_progress") // rework_in_progress | resolved | reinspected_pass
+  reworkTaskId       String?
+  assignedStaffId    String?
+  reworkInstructions String?
+  createdAt          DateTime  @default(now())
+  resolvedAt         DateTime?
+
+  qualityCheck QualityCheck @relation(fields: [qualityCheckId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([qualityCheckId])
+}
+
+model ReworkTask {
+  id              String    @id @default(cuid())
+  qualityIssueId  String
+  jobId           String
+  assignedStaffId String?
+  instructions    String
+  status          String    @default("pending") // pending | in_progress | completed
+  completedNotes  String?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([assignedStaffId])
+}
+
+model Complaint {
+  id                String    @id @default(cuid())
+  jobId             String
+  customerId        String
+  category          String // quality | punctuality | staff_behavior | damage | missed_area | billing
+  severity          String    @default("high")
+  description       String
+  assignedOwnerId   String?
+  assignedOwnerName String?
+  status            String    @default("open")
+  resolutionNotes   String?
+  resolvedAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([status])
+}
+
+/// Evidence photo for a job (before/after), stored in Cloudinary. The database
+/// keeps only the Cloudinary identifiers/URLs and metadata — never image bytes.
+model JobPhoto {
+  id                 String   @id @default(cuid())
+  jobId              String
+  area               String // "Kitchen", "Master Bathroom", ...
+  photoType          String // "before" | "after"
+  cloudinaryPublicId String
+  photoUrl           String // Cloudinary secure delivery URL
+  thumbnailUrl       String?
+  bytes              Int?
+  width              Int?
+  height             Int?
+  format             String?
+  caption            String?
+  uploadedByUserId   String
+  uploadedByName     String
+  uploadedAt         DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
+
+model Quote {
+  id          String   @id @default(cuid())
+  quoteNumber String   @unique
+  customerId  String
+  propertyId  String
+  serviceId   String
+  subtotal    Float
+  tax         Float
+  discount    Float    @default(0)
+  total       Float
+  validUntil  String
+  status      String   @default("sent")
+  createdAt   DateTime @default(now())
+}
+
+model ReferralPartner {
+  id                     String   @id @default(cuid())
+  name                   String
+  code                   String   @unique
+  partnerType            String   @default("interior_designer")
+  email                  String   @default("")
+  phone                  String   @default("")
+  commissionRuleId       String?
+  status                 String   @default("active")
+  totalReferrals         Int      @default(0)
+  totalConversions       Int      @default(0)
+  totalRevenueGenerated  Float    @default(0)
+  totalCommissionEarned  Float    @default(0)
+  totalCommissionPaid    Float    @default(0)
+  totalCommissionPending Float    @default(0)
+  bankAccountName        String?
+  bankAccountNumber      String?
+  bankIfscOrRouting      String?
+  bankUpiId              String?
+  createdAt              DateTime @default(now())
+
+  commissionRule    CommissionRule?  @relation(fields: [commissionRuleId], references: [id])
+  commissionEntries CommissionEntry[]
+  payouts           Payout[]
+  attributedJobs    Job[]            @relation("JobAttribution")
+
+  @@index([status])
+}
+
+model CommissionRule {
+  id              String   @id @default(cuid())
+  name            String
+  partnerType     String   @default("interior_designer")
+  calculationType String   @default("percentage") // percentage | fixed | tiered | service_specific
+  value           Float    @default(10)
+  tierRules       Json?
+  serviceOverrides Json?
+  isDefault       Boolean  @default(false)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  partners ReferralPartner[]
+}
+
+model CommissionEntry {
+  id               String   @id @default(cuid())
+  partnerId        String
+  referralId       String?
+  jobId            String
+  bookingAmount    Float
+  commissionAmount Float
+  ruleApplied      String
+  status           String   @default("COMMISSION_PENDING")
+  approvedAt       DateTime?
+  payoutId         String?
+  reversedReason   String?
+  createdAt        DateTime @default(now())
+
+  partner ReferralPartner @relation(fields: [partnerId], references: [id])
+  job     Job             @relation(fields: [jobId], references: [id])
+
+  @@index([partnerId])
+  @@index([jobId])
+  @@index([status])
+}
+
+model Payout {
+  id              String   @id @default(cuid())
+  partnerId       String
+  partnerName     String
+  amount          Float
+  payoutMethod    String // bank_transfer | upi | cheque | wallet
+  referenceNumber String
+  status          String   @default("paid")
+  paidAt          DateTime @default(now())
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  partner ReferralPartner @relation(fields: [partnerId], references: [id])
+
+  @@index([partnerId])
+}
+
+model Expense {
+  id            String   @id @default(cuid())
+  date          String
+  category      String
+  amount        Float
+  description   String
+  paymentMethod String
+  reference     String?
+  createdBy     String
+  createdAt     DateTime @default(now())
+}
+
+model SystemSettings {
+  id          String   @id @default("singleton")
+  data        Json // full SystemSettings blob (tax, OTP policy, review URL, dispatch cutoff...)
+  updatedAt   DateTime @updatedAt
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  action      String
+  performedBy String
+  oldState    String?
+  newState    String?
+  details     String?
+  timestamp   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([timestamp])
+}
+
+/// One arrival-verification OTP challenge for a job. The plaintext code is
+/// NEVER persisted — only a SHA-256 hash. 2Factor handles SMS delivery with
+/// our generated code; we verify the submitted code against the stored hash
+/// with constant-time comparison. Expired/consumed challenges are retained
+/// for audit.
+model OtpChallenge {
+  id                String    @id @default(cuid())
+  jobId             String
+  codeHash          String? // SHA-256 hex of the code (null when provider-managed AUTOGEN)
+  providerManaged   Boolean   @default(false) // true: OTP generated + verified by 2Factor session
+  phone             String // last-4 only is exposed via API; full number is for audit
+  phoneLast4        String
+  status            String    @default("PENDING") // PENDING | VERIFIED | EXPIRED | LOCKED | CANCELLED
+  attempts          Int       @default(0)
+  maxAttempts       Int
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  provider          String    @default("2factor")
+  providerSessionId String? // 2Factor "Details" session id (AUTOGEN / custom-OTP sessions)
+  createdByUserId   String // staff user who triggered arrival
+  createdByRole     String
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, status])
+  @@index([expiresAt])
+}
+
+/// Audit trail of every outbound SMS dispatch (OTP + completion links).
+/// Sensitive payloads (OTP codes, portal tokens) are masked before logging.
+model SmsLog {
+  id           String   @id @default(cuid())
+  jobId        String?
+  phone        String // destination (full number retained for delivery audit)
+  phoneLast4   String
+  purpose      String // OTP_VERIFICATION only now (handover moved to email)
+  provider     String // "2factor" | "none" (provider not configured)
+  status       String   @default("QUEUED") // QUEUED | SENT | FAILED
+  providerRef  String? // 2Factor session id / request reference
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  @@index([jobId])
+  @@index([purpose, createdAt])
+}
+
+/// Tokenized customer handover. Created when a job passes QC; the token is a
+/// 256-bit random URL-safe value handed to the customer (ops desk shares the
+/// link). The handover snapshot is resolved from live job state at request
+/// time; the invite records issuance and the customer's sign-off.
+model CompletionInvite {
+  id                  String    @id @default(cuid())
+  tokenHash           String    @unique // SHA-256 hex of the portal token
+  tokenLast4          String // masked display only
+  jobId               String
+  customerId          String
+  signStatus          String    @default("PENDING") // PENDING | APPROVED | ATTENTION_REQUESTED
+  signedAt            DateTime?
+  signatoryName       String?
+  signUserAgent       String?
+  signIpHash          String?
+  attentionNotes      String? // customer-reported issues when signStatus = ATTENTION_REQUESTED
+  feedbackRating      Int? // 1-5 post-service rating
+  feedbackComment     String?
+  feedbackTags        String[]
+  googleReviewClicked Boolean   @default(false)
+  feedbackAt          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([customerId])
+}

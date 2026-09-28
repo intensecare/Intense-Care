@@ -1,0 +1,54 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+/dist
+
+# environment & secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# logs & debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+/logs
+
+# typescript
+*.tsbuildinfo
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# misc artifacts
+*.swp
+*.bak
+/tmp
+
+# agent/tooling local files
+.agents/
+.freebuff/
+skills-lock.json

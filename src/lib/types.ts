@@ -1,0 +1,520 @@
+export type UserRole = "super_admin" | "ops_manager" | "staff";
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: UserRole;
+  avatar?: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export type JobStatus =
+  | "DRAFT"
+  | "SCHEDULED"
+  | "ASSIGNED"
+  | "ARRIVED"
+  | "CUSTOMER_VERIFIED"
+  | "IN_PROGRESS"
+  | "WORK_COMPLETED"
+  | "QUALITY_CHECK"
+  | "PASS"
+  | "REWORK_REQUIRED"
+  | "REWORK_COMPLETED"
+  | "REINSPECTION"
+  | "CUSTOMER_APPROVAL"
+  | "COMPLETED"
+  | "FEEDBACK_REQUESTED"
+  | "CLOSED"
+  | "CANCELLED";
+
+export type PaymentStatus =
+  | "UNPAID"
+  | "PARTIAL"
+  | "PAID"
+  | "REFUNDED"
+  | "CANCELLED";
+
+export interface SystemSettings {
+  nextDayDispatchTime: string; // e.g., "20:00" for 8:00 PM
+  googleBusinessReviewUrl: string;
+  currency: string;
+  /** Tax rate as a percentage of the taxable value (e.g. 18 for GST 18%). 0 disables tax. */
+  taxRatePercent: number;
+  /** Tax name shown on invoices, e.g. "GST". */
+  taxLabel: string;
+  /** Business GSTIN printed on statutory invoice documents. */
+  gstin: string;
+  /** SAC/service accounting code printed on statutory invoice documents. */
+  sacCode: string;
+  otpExpiryMinutes: number;
+  otpMaxRetries: number;
+  resendCooldownSeconds: number;
+}
+
+export interface Expense {
+  id: string;
+  date: string;
+  category: "equipment" | "chemicals" | "fuel" | "salaries" | "marketing" | "utilities" | "other";
+  amount: number;
+  description: string;
+  paymentMethod: "cash" | "card" | "bank_transfer" | "upi";
+  reference?: string;
+  attachmentUrl?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  whatsapp: string;
+  address: string;
+  notes?: string;
+  source: string; // 'referral' | 'google' | 'direct' | 'repeat'
+  referralPartnerId?: string;
+  referralCode?: string;
+  lifetimeRevenue: number;
+  totalBookings: number;
+  status: "active" | "inactive";
+  createdAt: string;
+}
+
+export type PropertyType =
+  | "apartment"
+  | "villa"
+  | "office"
+  | "penthouse"
+  | "commercial"
+  | "duplex";
+
+export interface Property {
+  id: string;
+  customerId: string;
+  propertyType: PropertyType;
+  title: string; // e.g. "Prestige Lakeside 3BHK"
+  address: string;
+  city: string;
+  postalCode: string;
+  carpetAreaSqFt?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  gpsCoordinates: {
+    lat: number;
+    lng: number;
+  };
+  accessNotes?: string;
+  parkingInstructions?: string;
+  preferredTime?: string;
+  recurringService: boolean;
+  recurringFrequency?: "weekly" | "biweekly" | "monthly" | "quarterly";
+  createdAt: string;
+}
+
+export interface ServiceChecklistTemplateItem {
+  id: string;
+  area: string; // e.g. "Kitchen", "Bathrooms", "Living Room"
+  task: string; // e.g. "Degrease chimney & exhaust fan"
+  critical: boolean; // if critical, cannot be skipped without admin override
+}
+
+export interface Service {
+  id: string;
+  name: string;
+  slug: string;
+  category: "residential" | "commercial" | "specialized";
+  description: string;
+  basePrice: number;
+  estimatedDurationHours: number;
+  checklistTemplate: ServiceChecklistTemplateItem[];
+  active: boolean;
+}
+
+export interface JobChecklistItem {
+  id: string;
+  jobId: string;
+  area: string;
+  task: string;
+  critical: boolean;
+  status: "pending" | "completed" | "skipped" | "issue";
+  skippedReason?: string;
+  issueNotes?: string;
+  photoEvidence?: string;
+  completedBy?: string;
+  completedAt?: string;
+}
+
+export interface JobPhoto {
+  id: string;
+  jobId: string;
+  area: string; // "Kitchen", "Master Bedroom", "Balcony", "Bathroom 1"
+  photoType: "before" | "after";
+  photoUrl: string;
+  thumbnailUrl?: string;
+  caption?: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
+export interface QualityIssue {
+  id: string;
+  qualityCheckId: string;
+  jobId: string;
+  area: string;
+  itemDescription: string;
+  severity: "minor" | "major" | "critical";
+  notes: string;
+  photoEvidence?: string;
+  status: "open" | "rework_in_progress" | "resolved" | "reinspected_pass";
+  reworkTaskId?: string;
+  assignedStaffId?: string;
+  reworkInstructions?: string;
+  createdAt: string;
+  resolvedAt?: string;
+}
+
+export interface ReworkTask {
+  id: string;
+  qualityIssueId: string;
+  jobId: string;
+  assignedStaffId: string;
+  instructions: string;
+  status: "pending" | "in_progress" | "completed" | "reinspected";
+  completedAt?: string;
+  completedNotes?: string;
+  createdAt: string;
+}
+
+export interface QualityCheck {
+  id: string;
+  jobId: string;
+  inspectorId: string;
+  inspectorName: string;
+  score: number; // 0 - 100
+  status: "PENDING" | "ASSIGNED" | "IN_PROGRESS" | "PASS" | "REWORK_REQUIRED";
+  itemsChecked: number;
+  itemsPassed: number;
+  issuesCount: number;
+  notes?: string;
+  evidencePhotos: string[];
+  inspectedAt?: string;
+  completedAt?: string;
+}
+
+export interface CustomerApproval {
+  id: string;
+  jobId: string;
+  customerId: string;
+  approvalToken: string;
+  status: "PENDING" | "APPROVED" | "ATTENTION_REQUESTED";
+  approvedAt?: string;
+  signatureOrConfirmation?: string;
+  attentionNotes?: string;
+  attentionCategory?: string;
+  userAgent?: string;
+  ipAddress?: string;
+}
+
+export interface CustomerFeedback {
+  id: string;
+  jobId: string;
+  customerId: string;
+  rating: number; // 1 to 5
+  sentiment: "positive" | "neutral" | "negative";
+  tags: string[];
+  comment?: string;
+  googleReviewPromptShown: boolean;
+  googleReviewClicked: boolean;
+  createdAt: string;
+}
+
+export interface Complaint {
+  id: string;
+  jobId: string;
+  customerId: string;
+  category:
+    | "quality"
+    | "punctuality"
+    | "staff_behavior"
+    | "damage"
+    | "missed_area"
+    | "billing";
+  severity: "low" | "medium" | "high" | "critical";
+  description: string;
+  assignedOwnerId: string;
+  assignedOwnerName?: string;
+  status: "open" | "investigating" | "resolution_proposed" | "resolved" | "closed";
+  resolutionNotes?: string;
+  resolvedAt?: string;
+  createdAt: string;
+}
+
+export type CommissionRuleType =
+  | "percentage"
+  | "fixed"
+  | "tiered"
+  | "service_specific";
+
+export interface CommissionTier {
+  minAmount: number;
+  maxAmount: number;
+  rate: number; // percentage or fixed
+}
+
+export interface CommissionRule {
+  id: string;
+  name: string;
+  partnerType:
+    | "customer"
+    | "employee"
+    | "real_estate_agent"
+    | "interior_designer"
+    | "corporate_partner"
+    | "influencer";
+  calculationType: CommissionRuleType;
+  value: number; // percentage (e.g. 10 for 10%) or fixed amount
+  tierRules?: CommissionTier[];
+  serviceOverrides?: Record<string, number>; // serviceId -> percentage or fixed
+  isDefault: boolean;
+  active: boolean;
+}
+
+export type CommissionStatus =
+  | "REFERRAL"
+  | "BOOKED"
+  | "JOB_COMPLETED"
+  | "COMMISSION_PENDING"
+  | "APPROVED"
+  | "PAYMENT_PROCESSING"
+  | "PAID"
+  | "REVERSED";
+
+export interface CommissionEntry {
+  id: string;
+  partnerId: string;
+  referralId: string;
+  jobId: string;
+  bookingAmount: number;
+  commissionAmount: number;
+  ruleApplied: string;
+  status: CommissionStatus;
+  approvedAt?: string;
+  payoutId?: string;
+  reversedReason?: string;
+  createdAt: string;
+}
+
+export interface ReferralPartner {
+  id: string;
+  name: string;
+  code: string; // e.g. "INTERIOR-LUXE"
+  partnerType:
+    | "customer"
+    | "employee"
+    | "real_estate_agent"
+    | "interior_designer"
+    | "corporate_partner"
+    | "influencer";
+  email: string;
+  phone: string;
+  commissionRuleId: string;
+  status: "active" | "inactive";
+  totalReferrals: number;
+  totalConversions: number;
+  totalRevenueGenerated: number;
+  totalCommissionEarned: number;
+  totalCommissionPaid: number;
+  totalCommissionPending: number;
+  bankDetails?: {
+    accountName: string;
+    accountNumber: string;
+    ifscOrRouting: string;
+    upiId?: string;
+  };
+  createdAt: string;
+}
+
+export interface Referral {
+  id: string;
+  partnerId: string;
+  customerId: string;
+  jobId?: string;
+  referralCode: string;
+  attributionDate: string;
+  attributionExpiresAt: string;
+  status: "lead" | "booked" | "completed" | "expired" | "disqualified";
+}
+
+export interface Payout {
+  id: string;
+  partnerId: string;
+  partnerName: string;
+  amount: number;
+  payoutMethod: "bank_transfer" | "upi" | "cheque" | "wallet";
+  referenceNumber: string;
+  status: "draft" | "processing" | "paid" | "failed";
+  paidAt?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+/**
+ * Client-side mirror of the server-authoritative OTP state.
+ *
+ * The plaintext OTP never exists on the client: codes are generated on the
+ * server, delivered by 2Factor SMS, and verified server-side. The UI reads
+ * only masked/derived status from /api/jobs/[id] and the OTP endpoints.
+ */
+export interface JobOTP {
+  phone: string; // registered customer phone (masked display only)
+  sentToLast4?: string;
+  expiresAt?: string;
+  attempts: number;
+  maxAttempts: number;
+  resendCooldownSeconds?: number;
+  lastSentAt?: string;
+  verifiedAt?: string;
+  verifiedBy?: string;
+  status: "none" | "pending" | "verified" | "expired" | "locked" | "cancelled";
+}
+
+export interface Job {
+  id: string; // e.g. "JOB-2026-0841"
+  customerId: string;
+  propertyId: string;
+  serviceId: string;
+  scheduledDate: string; // YYYY-MM-DD
+  scheduledTimeSlot: string; // "09:00 AM - 01:00 PM"
+  assignedManagerId?: string;
+  /** Directly-assigned field workers. The FIRST entry is the lead worker:
+   *  only they receive/verify the customer arrival OTP and gate the start-work
+   *  flow; other assigned workers execute the job without OTP control. */
+  assignedStaffIds: string[];
+  /** Job value — super_admin only. The server redacts this field (and
+   *  paymentStatus) for ops_manager and staff; treat as optional at runtime. */
+  amount?: number;
+  paymentStatus?: PaymentStatus;
+  status: JobStatus;
+  notes?: string;
+  accessCode?: string;
+  otpVerification: JobOTP;
+  qualityCheckId?: string;
+  customerApprovalId?: string;
+  feedbackId?: string;
+  referralAttribution?: {
+    partnerId: string;
+    referralCode: string;
+    commissionEntryId?: string;
+  };
+  arrivedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Quote {
+  id: string;
+  quoteNumber: string;
+  customerId: string;
+  propertyId: string;
+  serviceId: string;
+  items: {
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    amount: number;
+  }[];
+  subtotal: number;
+  tax: number;
+  discount: number;
+  total: number;
+  validUntil: string;
+  status: "draft" | "sent" | "accepted" | "declined" | "converted_to_job";
+  createdAt: string;
+}
+
+export interface Invoice {
+  id: string;
+  invoiceNumber: string;
+  jobId: string;
+  customerId: string;
+  subtotal: number;
+  tax: number;
+  discount: number;
+  total: number;
+  amountPaid: number;
+  balanceDue: number;
+  dueDate: string;
+  status: PaymentStatus;
+  issuedAt: string;
+}
+
+export interface Payment {
+  id: string;
+  invoiceId: string;
+  jobId: string;
+  customerId: string;
+  amount: number;
+  paymentMethod: "card" | "bank_transfer" | "cash" | "upi" | "online_link";
+  transactionReference: string;
+  status: "completed" | "pending" | "refunded" | "failed";
+  paidAt: string;
+}
+
+export interface NotificationRecord {
+  id: string;
+  channel: "whatsapp" | "sms" | "email";
+  recipient: string;
+  templateType:
+    | "booking_confirmation"
+    | "otp_verification"
+    | "work_started"
+    | "work_completed"
+    | "qc_pass"
+    | "approval_request"
+    | "feedback_request"
+    | "commission_credited";
+  title: string;
+  body: string;
+  status: "sent" | "delivered" | "failed" | "queued";
+  sentAt: string;
+}
+
+/**
+ * Server SMS gateway dispatch record (from /api/notifications/sms).
+ * Recipients are masked server-side; no message bodies are exposed.
+ */
+export interface SmsGatewayLog {
+  id: string;
+  jobId: string | null;
+  purpose: "OTP_VERIFICATION";
+  provider: string;
+  status: "QUEUED" | "SENT" | "FAILED";
+  error?: string | null;
+  recipientMasked: string;
+  createdAt: string;
+}
+
+export interface AuditLog {
+  id: string;
+  entityType: "job" | "otp" | "qc" | "commission" | "payment" | "rework" | "customer";
+  entityId: string;
+  action: string;
+  performedBy: {
+    id: string;
+    name: string;
+    role: string;
+  };
+  oldState?: string;
+  newState?: string;
+  details?: string;
+  timestamp: string;
+}
+
+
+
