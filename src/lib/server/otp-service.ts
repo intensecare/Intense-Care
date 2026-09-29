@@ -4,10 +4,13 @@ import { logger, maskPhone } from "./logger";
 import { otpPolicy } from "./policy";
 import {
   isTwoFactorConfigured,
+  otpSendMode,
   sendOtpAutogen,
+  sendOtpTemplate,
   verifyOtpSession,
   toSubscriberNumber,
 } from "./twofactor";
+import { generateRandomOTP } from "../utils";
 
 /**
  * Server-authoritative OTP lifecycle for job arrival verification.
@@ -54,6 +57,37 @@ function constantTimeEquals(a: string, b: string): boolean {
   const bBuf = Buffer.from(b);
   if (aBuf.length !== bBuf.length) return false;
   return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+function sha256Hex(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+/**
+ * Burns one attempt after a wrong code (local or provider-verified) and
+ * returns the caller's failure envelope; locks the challenge at the cap.
+ */
+async function burnAttemptAndFail(
+  challenge: { id: string; attempts: number; maxAttempts: number },
+  jobId: string,
+  source: "local" | "provider"
+): Promise<{ success: false; failure: VerifyFailure }> {
+  const attempts = challenge.attempts + 1;
+  const locked = attempts >= challenge.maxAttempts;
+  await prisma.otpChallenge.update({
+    where: { id: challenge.id },
+    data: { status: locked ? "LOCKED" : "PENDING", attempts, updatedAt: new Date() },
+  });
+  logger.warn("otp.verify.failed", { jobId, challengeId: challenge.id, attempts, locked, source });
+  return {
+    success: false,
+    failure: {
+      kind: "invalid_code",
+      message: locked
+        ? "Incorrect code — all attempts used. This OTP is locked; request a new one."
+        : `Incorrect code. ${challenge.maxAttempts - attempts} attempt(s) remaining.`,
+    },
+  };
 }
 
 async function loadJobWithCustomer(jobId: string) {
@@ -174,11 +208,18 @@ async function dispatchArrivalOtp(
   await cancelPreviousChallenges(jobId);
 
   const expiryMinutes = otpPolicy.expiryMinutes();
+  // AUTOGEN (default): the provider owns the code and verification happens via
+  // its session. Template mode (TWOFACTOR_OTP_TEMPLATE set): a 6-digit code is
+  // generated HERE and hashed immediately — the plaintext lives only in the
+  // outbound SMS body, never in the database or logs.
+  const mode = otpSendMode();
+  const localCode = mode === "template" ? generateRandomOTP(6) : null;
+
   const challenge = await prisma.otpChallenge.create({
     data: {
       jobId,
-      codeHash: null, // provider-managed (AUTOGEN) — no local hash
-      providerManaged: true,
+      codeHash: localCode ? sha256Hex(localCode) : null,
+      providerManaged: mode !== "template",
       phone: customer.phone,
       phoneLast4: customer.phone.replace(/[^0-9]/g, "").slice(-4),
       status: "PENDING",
@@ -222,8 +263,11 @@ async function dispatchArrivalOtp(
     };
   }
 
-  const result = await sendOtpAutogen(customer.phone);
-  if (!result.ok || !result.sessionId) {
+  const result =
+    mode === "template"
+      ? await sendOtpTemplate(customer.phone, localCode as string)
+      : await sendOtpAutogen(customer.phone);
+  if (!result.ok || (mode === "autogen" && !result.sessionId)) {
     await prisma.smsLog.update({
       where: { id: smsLog.id },
       data: { status: "FAILED", errorMessage: result.error ?? "provider_error" },
@@ -248,11 +292,14 @@ async function dispatchArrivalOtp(
 
   await prisma.smsLog.update({
     where: { id: smsLog.id },
-    data: { status: "SENT", providerRef: result.sessionId },
+    data: { status: "SENT", providerRef: result.sessionId ?? null },
   });
   await prisma.otpChallenge.update({
     where: { id: challenge.id },
-    data: { providerSessionId: result.sessionId, updatedAt: new Date() },
+    data:
+      mode === "autogen"
+        ? { providerSessionId: result.sessionId, updatedAt: new Date() }
+        : { updatedAt: new Date() },
   });
 
   logger.info("otp.send.dispatched", {
@@ -260,6 +307,7 @@ async function dispatchArrivalOtp(
     phone: maskPhone(customer.phone),
     expiryMinutes,
     challengeId: challenge.id,
+    mode,
   });
 
   return {
@@ -368,7 +416,36 @@ export async function verifyArrivalOtp(
     };
   }
 
-  if (!challenge.providerManaged || !challenge.providerSessionId) {
+  // Template-mode challenge: the code was generated locally at send time and
+  // is verified against the stored SHA-256 hash — no provider session involved.
+  if (!challenge.providerManaged) {
+    if (!challenge.codeHash) {
+      return {
+        success: false,
+        failure: { kind: "wrong_status", message: "This OTP has no verification material. Request a new one." },
+      };
+    }
+    if (constantTimeEquals(challenge.codeHash, sha256Hex(code))) {
+      const consumed = await prisma.otpChallenge.updateMany({
+        where: { id: challenge.id, status: "PENDING" },
+        data: { status: "VERIFIED", consumedAt: new Date(), updatedAt: new Date() },
+      });
+      if (consumed.count === 0) {
+        return {
+          success: false,
+          failure: { kind: "wrong_status", message: "This OTP was just used or invalidated. Request a new one." },
+        };
+      }
+      logger.info("otp.verify.success", { jobId, challengeId: challenge.id, mode: "template" });
+      return {
+        success: true,
+        data: { verifiedAt: new Date().toISOString(), challengeId: challenge.id },
+      };
+    }
+    return await burnAttemptAndFail(challenge, jobId, "local");
+  }
+
+  if (!challenge.providerSessionId) {
     return {
       success: false,
       failure: {

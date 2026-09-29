@@ -350,6 +350,16 @@ async function main() {
   r = await req(admin, "PATCH", "/api/settings", { taxLabel: before.taxLabel });
   ok("admin settings PATCH ok", r.status === 200);
 
+  // SMS provider credit probe (read-only — sends no SMS)
+  r = await req(ops, "GET", "/api/sms/balance");
+  ok("ops CANNOT read provider balance", r.status === 403, `got ${r.status}`);
+  r = await req(admin, "GET", "/api/sms/balance");
+  ok(
+    "admin provider balance 200 (credits visible)",
+    r.status === 200 && r.json?.success === true && "configured" in (r.json?.data || {}),
+    JSON.stringify(r.json?.data)
+  );
+
   // ============ 11. Persistence (data survives) ============
   section("11. DB persistence sanity");
   r = await req(admin, "GET", "/api/jobs");

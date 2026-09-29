@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Database,
   ShieldCheck,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,31 @@ export default function SettingsPage() {
   );
   const [taxLabel, setTaxLabel] = useState(systemSettings.taxLabel || "GST");
   const [gstin, setGstin] = useState(systemSettings.gstin || "");
+
+  // Live 2Factor credit check (super_admin) — a delivery failure where the
+  // provider accepts sends but messages never arrive (zero route credits,
+  // template issues) is invisible in the dispatch logs; this surfaces it.
+  const [balance, setBalance] = useState<{
+    configured: boolean;
+    otpSmsCredits?: string | null;
+    transactionalSmsCredits?: string | null;
+    error?: string;
+  } | null>(null);
+  const [balanceBusy, setBalanceBusy] = useState(false);
+
+  const checkBalance = async () => {
+    setBalanceBusy(true);
+    try {
+      const res = await fetch("/api/sms/balance");
+      const json = await res.json().catch(() => null);
+      if (json?.success) setBalance(json.data);
+      else setBalance({ configured: true, error: "balance_check_failed" });
+    } catch {
+      setBalance({ configured: true, error: "network_error" });
+    } finally {
+      setBalanceBusy(false);
+    }
+  };
   const [sacCode, setSacCode] = useState(systemSettings.sacCode || "");
   const [googleReviewUrl, setGoogleReviewUrl] = useState(systemSettings.googleBusinessReviewUrl || "");
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -114,6 +140,40 @@ export default function SettingsPage() {
                 {smsGatewayLogs.length} dispatches
               </span>
             </div>
+
+            {currentUser?.role === "super_admin" && (
+              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-700">2Factor Account Credits</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px] gap-1"
+                    disabled={balanceBusy}
+                    onClick={() => void checkBalance()}
+                  >
+                    <RefreshCw className={`h-3 w-3 ${balanceBusy ? "animate-spin" : ""}`} />
+                    {balanceBusy ? "Checking…" : "Check Live"}
+                  </Button>
+                </div>
+                {balance && (
+                  <div className="text-[11px] space-y-1">
+                    {balance.error ? (
+                      <span className="text-rose-700 font-medium">Provider error: {balance.error}</span>
+                    ) : (
+                      <div className="flex gap-4">
+                        <span className={Number(balance.otpSmsCredits ?? 0) > 0 ? "text-emerald-700" : "text-rose-700 font-bold"}>
+                          OTP/SMS credits: <strong>{balance.otpSmsCredits ?? "—"}</strong>
+                        </span>
+                        <span className={Number(balance.transactionalSmsCredits ?? 0) > 0 ? "text-emerald-700" : "text-rose-700 font-bold"}>
+                          Transactional: <strong>{balance.transactionalSmsCredits ?? "—"}</strong>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80 text-[11px] space-y-1 max-h-40 overflow-y-auto">
               {smsGatewayLogs.length === 0 ? (
                 <span className="text-slate-400">No dispatches recorded yet.</span>
