@@ -18,15 +18,21 @@
  * When TWOFACTOR_API_KEY is absent the client reports `configured: false` so
  * callers fail safe — no virtual "sent" states.
  *
- * Modes (set TWOFACTOR_OTP_TEMPLATE to switch):
- *  - "autogen" (default): code generated + verified by 2Factor sessions.
- *  - "template": 6-digit code generated LOCALLY, delivered through YOUR
- *    DLT-registered template (POST /ADDON_SERVICES/SEND/TSMS with
- *    TemplateName + VAR1) and verified locally against a SHA-256 hash. This
- *    is the fallback when 2Factor's shared AUTOGEN template route silently
- *    swallows sends (provider returns Success + session id, handset never
- *    receives the SMS — observed live on this account with credits intact).
- *    Verification is done in our database; no provider session is involved.
+ * Modes (set TWOFACTOR_OTP_TEMPLATE to switch off the shared route):
+ *  - "autogen" (default): code generated + verified by 2Factor sessions,
+ *    delivered through 2Factor's SHARED pre-approved DLT template. Observed
+ *    live on this account: the provider accepts the send and returns a live
+ *    session, but the handset never receives the SMS (shared-template route
+ *    silently swallowing delivery) — hence the two escape hatches below.
+ *  - "autogen_template" (TWOFACTOR_OTP_TEMPLATE set): provider still generates
+ *    and verifies the code, but delivery goes through YOUR DLT-registered
+ *    template + sender id via the official variant
+ *    /SMS/{phone}/AUTOGEN/{template_name} (2Factor KB "Creating Custom OTP
+ *    Templates"). Session VERIFY flow is unchanged.
+ *  - "template" (TWOFACTOR_OTP_TEMPLATE set AND TWOFACTOR_OTP_LOCAL_CODE=1):
+ *    6-digit code generated LOCALLY, delivered through YOUR DLT-registered
+ *    template (POST /ADDON_SERVICES/SEND/TSMS with TemplateName + VAR1) and
+ *    verified locally against a SHA-256 hash. No provider session involved.
  */
 
 const BASE = "https://2factor.in/API/V1";
@@ -51,11 +57,19 @@ export function isTwoFactorConfigured(): boolean {
 
 // --- Delivery mode (AUTOGEN vs own DLT template) ---------------------------
 
-export type OtpSendMode = "autogen" | "template";
+export type OtpSendMode = "autogen" | "autogen_template" | "template";
 
-/** Template mode engages as soon as TWOFACTOR_OTP_TEMPLATE is set. */
+/**
+ * THREEFACTOR_OTP_TEMPLATE switches off the broken shared route:
+ *  - unset                      -> "autogen" (shared DLT template)
+ *  - set                        -> "autogen_template" (own DLT template,
+ *                                  provider still generates + verifies)
+ *  - set + TWOFACTOR_OTP_LOCAL_CODE=1 -> "template" (fully local code path)
+ */
 export function otpSendMode(): OtpSendMode {
-  return process.env.TWOFACTOR_OTP_TEMPLATE?.trim() ? "template" : "autogen";
+  const tpl = process.env.TWOFACTOR_OTP_TEMPLATE?.trim();
+ if (!tpl) return "autogen";
+  return process.env.TWOFACTOR_OTP_LOCAL_CODE?.trim() === "1" ? "template" : "autogen_template";
 }
 
 export function otpTemplateName(): string | null {
@@ -112,11 +126,13 @@ export interface TwoFactorBalance {
   otpSmsCredits?: string | null;
   transactionalSmsCredits?: string | null;
   error?: string;
+  /** Active OTP delivery mode — surfaced in the Settings health card. */
+  mode: OtpSendMode;
 }
 
 export async function getTwoFactorBalance(): Promise<TwoFactorBalance> {
   const key = apiKey();
-  if (!key) return { configured: false };
+  if (!key) return { configured: false, mode: otpSendMode() };
 
   const [otp, tsms] = await Promise.all([
     callJson(`${BASE}/${key}/BAL/SMS`),
@@ -129,11 +145,17 @@ export async function getTwoFactorBalance(): Promise<TwoFactorBalance> {
   };
 
   if (!otp.ok && !tsms.ok) {
-    return { configured: true, ok: false, error: otp.error || tsms.error || "balance_probe_failed" };
+    return {
+      configured: true,
+      ok: false,
+      mode: otpSendMode(),
+      error: otp.error || tsms.error || "balance_probe_failed",
+    };
   }
   return {
     configured: true,
     ok: true,
+    mode: otpSendMode(),
     otpSmsCredits: readDetail(otp),
     transactionalSmsCredits: readDetail(tsms),
   };
@@ -187,17 +209,25 @@ export async function sendOtpTemplate(phone: string, code: string): Promise<TwoF
 }
 
 /**
- * Triggers a provider-generated OTP to the phone via the pre-approved DLT
- * template (AUTOGEN). Returns the session id used for verification.
+ * Triggers a provider-generated OTP to the phone. Default route is AUTOGEN
+ * (2Factor's shared pre-approved DLT template); pass a DLT template name to
+ * use the official AUTOGEN/{template} variant, which delivers the SAME
+ * provider-generated code through YOUR registered template + sender while
+ * keeping the session VERIFY flow unchanged.
  */
-export async function sendOtpAutogen(phone: string): Promise<TwoFactorResult> {
+export async function sendOtpAutogen(
+  phone: string,
+  templateName?: string | null
+): Promise<TwoFactorResult> {
   const key = apiKey();
   const subscriber = toSubscriberNumber(phone);
   if (!key || !subscriber) {
     return { ok: false, error: !key ? "provider_not_configured" : "invalid_phone" };
   }
 
-  const url = `${BASE}/${key}/SMS/${subscriber}/AUTOGEN`;
+  const url = templateName
+    ? `${BASE}/${key}/SMS/${subscriber}/AUTOGEN/${encodeURIComponent(templateName)}`
+    : `${BASE}/${key}/SMS/${subscriber}/AUTOGEN`;
   const result = await callJson(url);
 
   if (result.ok) {

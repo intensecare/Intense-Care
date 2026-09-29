@@ -5,6 +5,7 @@ import { otpPolicy } from "./policy";
 import {
   isTwoFactorConfigured,
   otpSendMode,
+  otpTemplateName,
   sendOtpAutogen,
   sendOtpTemplate,
   verifyOtpSession,
@@ -208,10 +209,17 @@ async function dispatchArrivalOtp(
   await cancelPreviousChallenges(jobId);
 
   const expiryMinutes = otpPolicy.expiryMinutes();
-  // AUTOGEN (default): the provider owns the code and verification happens via
-  // its session. Template mode (TWOFACTOR_OTP_TEMPLATE set): a 6-digit code is
-  // generated HERE and hashed immediately — the plaintext lives only in the
-  // outbound SMS body, never in the database or logs.
+  // Three delivery modes (otpSendMode()):
+  //  - "autogen" (default): provider generates the code through its SHARED DLT
+  //    template and owns verification via its session. Known-bad on this
+  //    account: provider accepts the send, the handset never gets the SMS.
+  //  - "autogen_template" (TWOFACTOR_OTP_TEMPLATE set): provider still
+  //    generates + verifies, but delivery uses YOUR DLT template + sender via
+  //    /SMS/{phone}/AUTOGEN/{template}. Verification code path unchanged.
+  //  - "template" (TWOFACTOR_OTP_TEMPLATE set + TWOFACTOR_OTP_LOCAL_CODE=1):
+  //    a 6-digit code is generated HERE and hashed immediately — the
+  //    plaintext lives only in the outbound SMS body, never in DB or logs —
+  //    and verification happens against the local SHA-256 hash.
   const mode = otpSendMode();
   const localCode = mode === "template" ? generateRandomOTP(6) : null;
 
@@ -219,7 +227,7 @@ async function dispatchArrivalOtp(
     data: {
       jobId,
       codeHash: localCode ? sha256Hex(localCode) : null,
-      providerManaged: mode !== "template",
+      providerManaged: mode === "autogen",
       phone: customer.phone,
       phoneLast4: customer.phone.replace(/[^0-9]/g, "").slice(-4),
       status: "PENDING",
@@ -266,7 +274,9 @@ async function dispatchArrivalOtp(
   const result =
     mode === "template"
       ? await sendOtpTemplate(customer.phone, localCode as string)
-      : await sendOtpAutogen(customer.phone);
+      : mode === "autogen_template"
+        ? await sendOtpAutogen(customer.phone, otpTemplateName())
+        : await sendOtpAutogen(customer.phone);
   if (!result.ok || (mode === "autogen" && !result.sessionId)) {
     await prisma.smsLog.update({
       where: { id: smsLog.id },

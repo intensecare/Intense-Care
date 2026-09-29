@@ -19,11 +19,11 @@ export async function GET() {
 
     const balance = await getTwoFactorBalance();
     if (!balance.configured) {
-      return NextResponse.json({ success: true, data: { configured: false } });
+      return NextResponse.json({ success: true, data: { configured: false, mode: balance.mode } });
     }
     if (!balance.ok) {
       return NextResponse.json(
-        { success: true, data: { configured: true, error: balance.error } },
+        { success: true, data: { configured: true, mode: balance.mode, error: balance.error } },
         { status: 200 }
       );
     }
@@ -32,6 +32,7 @@ export async function GET() {
       success: true,
       data: {
         configured: true,
+        mode: balance.mode,
         otpSmsCredits: balance.otpSmsCredits ?? null,
         transactionalSmsCredits: balance.transactionalSmsCredits ?? null,
       },

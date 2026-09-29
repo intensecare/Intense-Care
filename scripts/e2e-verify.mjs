@@ -355,8 +355,11 @@ async function main() {
   ok("ops CANNOT read provider balance", r.status === 403, `got ${r.status}`);
   r = await req(admin, "GET", "/api/sms/balance");
   ok(
-    "admin provider balance 200 (credits visible)",
-    r.status === 200 && r.json?.success === true && "configured" in (r.json?.data || {}),
+    "admin provider balance 200 (credits + mode visible)",
+    r.status === 200 &&
+      r.json?.success === true &&
+      "configured" in (r.json?.data || {}) &&
+      typeof r.json?.data?.mode === "string",
     JSON.stringify(r.json?.data)
   );
 

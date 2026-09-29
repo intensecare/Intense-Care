@@ -45,6 +45,7 @@ export default function SettingsPage() {
   // template issues) is invisible in the dispatch logs; this surfaces it.
   const [balance, setBalance] = useState<{
     configured: boolean;
+    mode?: string;
     otpSmsCredits?: string | null;
     transactionalSmsCredits?: string | null;
     error?: string;
@@ -158,6 +159,14 @@ export default function SettingsPage() {
                 </div>
                 {balance && (
                   <div className="text-[11px] space-y-1">
+                    <div className="text-slate-600">
+                      Delivery mode: <strong className="font-mono">{balance.mode}</strong>
+                      {balance.mode === "autogen" && (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                          shared template route
+                        </span>
+                      )}
+                    </div>
                     {balance.error ? (
                       <span className="text-rose-700 font-medium">Provider error: {balance.error}</span>
                     ) : (
