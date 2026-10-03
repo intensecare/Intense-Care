@@ -48,6 +48,7 @@ export function OTPModal({ job, isOpen, onClose, onSuccess }: OTPModalProps) {
   const [sentToLast4, setSentToLast4] = useState<string | null>(job.otpVerification.sentToLast4 ?? null);
   const [attemptsUsed, setAttemptsUsed] = useState(0);
   const [maxAttempts, setMaxAttempts] = useState(job.otpVerification.maxAttempts || 5);
+  const [devCode, setDevCode] = useState<string | null>(null);
 
   // Resend cooldown countdown
   useEffect(() => {
@@ -84,6 +85,7 @@ export function OTPModal({ job, isOpen, onClose, onSuccess }: OTPModalProps) {
     setIsSending(true);
     setError(null);
     setInfo(null);
+    setDevCode(null);
     (async () => {
       const res = await sendJobArrivalOTP(job.id);
       if (cancelled) return;
@@ -92,6 +94,7 @@ export function OTPModal({ job, isOpen, onClose, onSuccess }: OTPModalProps) {
         setInfo(res.message);
         setCooldown(res.cooldownSeconds ?? 60);
         if (res.maskedPhone) setSentToLast4(res.maskedPhone.replace(/\D/g, "").slice(-4));
+        if (res.devCode) setDevCode(res.devCode);
       } else if (res.message.includes("already verified")) {
         setInfo(res.message);
       } else {
@@ -152,6 +155,7 @@ export function OTPModal({ job, isOpen, onClose, onSuccess }: OTPModalProps) {
       setCooldown(res.cooldownSeconds ?? 60);
       setCode("");
       if (res.maskedPhone) setSentToLast4(res.maskedPhone.replace(/\D/g, "").slice(-4));
+      if (res.devCode) setDevCode(res.devCode);
     } else {
       setError(res.message);
     }
@@ -174,6 +178,12 @@ export function OTPModal({ job, isOpen, onClose, onSuccess }: OTPModalProps) {
         </DialogHeader>
 
         <form onSubmit={handleVerify} className="space-y-4 py-2">
+          {devCode && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900">
+              <span className="font-semibold">DEV MODE —</span> no SMS sent. OTP:{" "}
+              <span className="font-mono text-base font-bold tracking-widest">{devCode}</span>
+            </div>
+          )}
           <div className="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs space-y-1">
             <div className="flex items-center justify-between font-medium text-slate-700">
               <span className="flex items-center gap-1.5">

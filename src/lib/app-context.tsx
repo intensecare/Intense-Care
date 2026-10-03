@@ -88,7 +88,7 @@ interface AppContextType {
 
   sendJobArrivalOTP: (
     jobId: string
-  ) => Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number }>;
+  ) => Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number; devCode?: string }>;
 
   verifyJobOTP: (
     jobId: string,
@@ -97,7 +97,7 @@ interface AppContextType {
 
   resendJobOTP: (
     jobId: string
-  ) => Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number }>;
+  ) => Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number; devCode?: string }>;
 
   fetchSmsGatewayLog: () => Promise<SmsGatewayLog[]>;
 
@@ -524,12 +524,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // --- Server-authoritative OTP flows (2Factor SMS) --------------------------
   const sendJobArrivalOTP = async (
     jobId: string
-  ): Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number }> => {
-    const r = await api<{ maskedPhone: string; cooldownSeconds?: number }>("/api/otp/send", {
+  ): Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number; devCode?: string }> => {
+    const r = await api<{
+      maskedPhone: string;
+      cooldownSeconds?: number;
+      sentVia?: string;
+      devCode?: string;
+    }>("/api/otp/send", {
       method: "POST",
       body: JSON.stringify({ jobId }),
     });
     if (!r.ok) return { success: false, message: r.error || "OTP dispatch failed. Please retry." };
+    if (r.data?.devCode) {
+      // Dev mode (OTP_DEV_MODE=1): no SMS was sent; the code comes back inline.
+      return {
+        success: true,
+        message: `DEV MODE: OTP is ${r.data.devCode} — no SMS was sent.`,
+        maskedPhone: r.data?.maskedPhone,
+        cooldownSeconds: r.data?.cooldownSeconds,
+        devCode: r.data.devCode,
+      };
+    }
     await logAudit("otp", jobId, "OTP_SENT", `Arrival OTP dispatched via 2Factor SMS to ${r.data?.maskedPhone}`);
     return {
       success: true,
@@ -577,12 +592,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const resendJobOTP = async (
     jobId: string
-  ): Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number }> => {
-    const r = await api<{ maskedPhone: string; cooldownSeconds?: number }>("/api/otp/resend", {
+  ): Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number; devCode?: string }> => {
+    const r = await api<{
+      maskedPhone: string;
+      cooldownSeconds?: number;
+      sentVia?: string;
+      devCode?: string;
+    }>("/api/otp/resend", {
       method: "POST",
       body: JSON.stringify({ jobId }),
     });
     if (!r.ok) return { success: false, message: r.error || "OTP resend failed. Please retry." };
+    if (r.data?.devCode) {
+      return {
+        success: true,
+        message: `DEV MODE: new OTP is ${r.data.devCode} — no SMS was sent.`,
+        maskedPhone: r.data?.maskedPhone,
+        cooldownSeconds: r.data?.cooldownSeconds,
+        devCode: r.data.devCode,
+      };
+    }
     await logAudit("otp", jobId, "OTP_RESENT", `Fresh OTP dispatched via 2Factor SMS to ${r.data?.maskedPhone}`);
     return {
       success: true,

@@ -55,6 +55,17 @@ export function isTwoFactorConfigured(): boolean {
   return apiKey() !== null;
 }
 
+/**
+ * Dev/test escape hatch: with OTP_DEV_MODE=1 the code is generated locally and
+ * returned in the API response — no SMS is sent, no provider is contacted.
+ * Intended for local development and staging ONLY. NEVER set this in
+ * production: any signed-in lead worker could read the customer OTP from the
+ * network tab and verify jobs without the customer's phone.
+ */
+export function isOtpDevMode(): boolean {
+  return process.env.OTP_DEV_MODE?.trim() === "1";
+}
+
 // --- Delivery mode (AUTOGEN vs own DLT template) ---------------------------
 
 export type OtpSendMode = "autogen" | "autogen_template" | "template";

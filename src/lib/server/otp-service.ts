@@ -4,7 +4,9 @@ import { logger, maskPhone } from "./logger";
 import { otpPolicy } from "./policy";
 import {
   isTwoFactorConfigured,
+  isOtpDevMode,
   otpSendMode,
+  OtpSendMode,
   otpTemplateName,
   sendOtpAutogen,
   sendOtpTemplate,
@@ -45,7 +47,9 @@ export interface SendOtpSuccess {
   expiresAt: string;
   cooldownSeconds: number;
   maskedPhone: string;
-  sentVia: "2factor";
+  sentVia: "2factor" | "dev";
+  /** Only in dev mode (OTP_DEV_MODE=1): the code itself, for testing without SMS. */
+  devCode?: string;
 }
 
 export interface VerifyOtpSuccess {
@@ -209,10 +213,11 @@ async function dispatchArrivalOtp(
   await cancelPreviousChallenges(jobId);
 
   const expiryMinutes = otpPolicy.expiryMinutes();
-  // Three delivery modes (otpSendMode()):
+  // Delivery modes:
+  //  - dev (OTP_DEV_MODE=1): code generated HERE and returned in the API
+  //    response — no SMS, no provider. Testing only; never in production.
   //  - "autogen" (default): provider generates the code through its SHARED DLT
-  //    template and owns verification via its session. Known-bad on this
-  //    account: provider accepts the send, the handset never gets the SMS.
+  //    template and owns verification via its session.
   //  - "autogen_template" (TWOFACTOR_OTP_TEMPLATE set): provider still
   //    generates + verifies, but delivery uses YOUR DLT template + sender via
   //    /SMS/{phone}/AUTOGEN/{template}. Verification code path unchanged.
@@ -220,14 +225,20 @@ async function dispatchArrivalOtp(
   //    a 6-digit code is generated HERE and hashed immediately — the
   //    plaintext lives only in the outbound SMS body, never in DB or logs —
   //    and verification happens against the local SHA-256 hash.
-  const mode = otpSendMode();
+  const devMode = isOtpDevMode();
+  const mode: OtpSendMode = devMode ? "template" : otpSendMode();
   const localCode = mode === "template" ? generateRandomOTP(6) : null;
 
   const challenge = await prisma.otpChallenge.create({
     data: {
       jobId,
       codeHash: localCode ? sha256Hex(localCode) : null,
-      providerManaged: mode === "autogen",
+      // Both autogen modes verify through the provider session; only
+      // "template"/dev generate and verify locally against codeHash.
+      // (Previously only "autogen" was marked provider-managed, which left
+      // autogen_template challenges with neither a hash nor a session —
+      // impossible to verify.)
+      providerManaged: mode !== "template",
       phone: customer.phone,
       phoneLast4: customer.phone.replace(/[^0-9]/g, "").slice(-4),
       status: "PENDING",
@@ -239,17 +250,42 @@ async function dispatchArrivalOtp(
     },
   });
 
-  const configured = isTwoFactorConfigured();
+  const configured = devMode || isTwoFactorConfigured();
   const smsLog = await prisma.smsLog.create({
     data: {
       jobId,
       phone: customer.phone,
       phoneLast4: customer.phone.replace(/[^0-9]/g, "").slice(-4),
       purpose: "OTP_VERIFICATION",
-      provider: configured ? "2factor" : "none",
+      provider: devMode ? "dev" : configured ? "2factor" : "none",
       status: "QUEUED",
     },
   });
+
+  // Dev mode short-circuit: no provider involved — surface the code in the
+  // response so the flow can be tested end-to-end without SMS delivery.
+  if (devMode) {
+    await prisma.smsLog.update({
+      where: { id: smsLog.id },
+      data: { status: "SENT", providerRef: "dev-mode" },
+    });
+    logger.warn("otp.send.dev_mode_active", {
+      jobId,
+      phone: maskPhone(customer.phone),
+      challengeId: challenge.id,
+    });
+    return {
+      success: true,
+      data: {
+        challengeId: challenge.id,
+        expiresAt: challenge.expiresAt.toISOString(),
+        cooldownSeconds: otpPolicy.resendCooldownSeconds(),
+        maskedPhone: maskPhone(customer.phone),
+        sentVia: "dev",
+        devCode: localCode as string,
+      },
+    };
+  }
 
   if (!configured) {
     await prisma.smsLog.update({
@@ -307,7 +343,7 @@ async function dispatchArrivalOtp(
   await prisma.otpChallenge.update({
     where: { id: challenge.id },
     data:
-      mode === "autogen"
+      mode !== "template" && result.sessionId
         ? { providerSessionId: result.sessionId, updatedAt: new Date() }
         : { updatedAt: new Date() },
   });
