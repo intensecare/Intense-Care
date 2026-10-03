@@ -223,7 +223,10 @@ interface AppContextType {
     items: { description: string; quantity: number; unitPrice: number }[];
     validUntil: string;
   }) => Promise<{ success: boolean; message: string }>;
-  convertQuoteToInvoice: (quoteId: string) => Promise<{ success: boolean; message: string }>;
+  convertQuoteToInvoice: (
+    quoteId: string,
+    schedule?: { scheduledDate: string; scheduledTimeSlot: string }
+  ) => Promise<{ success: boolean; message: string; jobId?: string }>;
   convertQuoteToJob: (quoteId: string) => Promise<{ success: boolean; message: string }>;
   deleteQuote: (id: string) => Promise<{ success: boolean; message: string }>;
   assignStaffToJob: (jobId: string, staffIds: string[]) => Promise<{ success: boolean; message: string }>;
@@ -1326,10 +1329,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Quotation created." };
   };
 
-  const convertQuoteToInvoice = async (quoteId: string) => {
+  const convertQuoteToInvoice = async (
+    quoteId: string,
+    schedule?: { scheduledDate: string; scheduledTimeSlot: string }
+  ) => {
     const r = await api<{ invoice: Invoice; jobId: string }>("/api/finance", {
       method: "POST",
-      body: JSON.stringify({ action: "convert-quote", quoteId }),
+      body: JSON.stringify({ action: "convert-quote", quoteId, ...schedule }),
     });
     if (!r.ok) return { success: false, message: r.error || "Conversion failed." };
     // The server created a booking + tax invoice and closed the quotation.
@@ -1354,7 +1360,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refreshCustomers(),
     ]);
     await logAudit("payment", quoteId, "QUOTE_CONVERTED", "Quotation converted to job + invoice");
-    return { success: true, message: "Quotation converted to job + invoice." };
+    return { success: true, message: "Quotation converted to job + invoice.", jobId: r.data?.jobId };
   };
 
   const convertQuoteToJob = async (quoteId: string) => {

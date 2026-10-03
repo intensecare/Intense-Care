@@ -6,10 +6,13 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
-import { Expense } from "@/lib/types";
+import { Expense, Quote } from "@/lib/types";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
-import { DollarSign, FileText, CheckCircle2, TrendingUp, AlertTriangle, Plus, CreditCard, Loader2, Trash2 } from "lucide-react";
+import { DollarSign, FileText, CheckCircle2, TrendingUp, AlertTriangle, Plus, CreditCard, Loader2, Trash2, Printer } from "lucide-react";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
+import { QuoteFormDialog } from "@/components/common/QuoteFormDialog";
+import { QuotePreviewModal } from "@/components/common/QuotePreviewModal";
+import { ConvertQuoteDialog } from "@/components/common/ConvertQuoteDialog";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -24,7 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 export default function FinancePage() {
-  const { invoices, payments, quotes, customers, jobs, expenses, payouts, partners, properties, services, recordPayment, createExpense, convertQuoteToInvoice, deleteExpense, deleteQuote } = useApp();
+  const { invoices, payments, quotes, customers, jobs, expenses, payouts, partners, properties, services, systemSettings, recordPayment, createExpense, createQuote, convertQuoteToInvoice, deleteExpense, deleteQuote } = useApp();
 
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "expense" | "quote"; id: string; label: string } | null>(null);
   const [actionError, setActionError] = useState("");
@@ -33,6 +36,11 @@ export default function FinancePage() {
   const [detailInvoiceId, setDetailInvoiceId] = useState<string | null>(null);
   const [detailQuoteId, setDetailQuoteId] = useState<string | null>(null);
   const [detailExpenseId, setDetailExpenseId] = useState<string | null>(null);
+
+  // Quotation workflow: raise (form), preview (print/share), convert (schedule).
+  const [quoteFormOpen, setQuoteFormOpen] = useState(false);
+  const [previewQuote, setPreviewQuote] = useState<Quote | null>(null);
+  const [convertTarget, setConvertTarget] = useState<Quote | null>(null);
   const [payAmount, setPayAmount] = useState<number>(0);
   const [payMethod, setPayMethod] = useState<any>("upi");
   const [payRef, setPayRef] = useState("");
@@ -181,6 +189,16 @@ export default function FinancePage() {
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
               Record Business Expense
+            </Button>
+          )}
+          {activeTab === "quotes" && (
+            <Button
+              size="sm"
+              onClick={() => setQuoteFormOpen(true)}
+              className="bg-slate-900 text-white text-xs h-8"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Raise Quotation
             </Button>
           )}
         </div>
@@ -362,17 +380,31 @@ export default function FinancePage() {
                         <div className="text-[11px] text-slate-400">Subtotal + Tax</div>
                       </div>
 
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewQuote(q);
+                        }}
+                        className="text-xs h-8 gap-1"
+                        title="Print / share the quotation with the client"
+                      >
+                        <Printer className="h-3 w-3" />
+                        View / Print
+                      </Button>
+
                       {q.status !== "converted_to_job" && (
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={(e) => {
                             e.stopPropagation();
-                            convertQuoteToInvoice(q.id);
+                            setConvertTarget(q);
                           }}
                           className="text-xs h-8 border-slate-300"
                         >
-                          Convert to Invoice
+                          Convert to Booking
                         </Button>
                       )}
 
@@ -669,9 +701,34 @@ export default function FinancePage() {
                       <span className="font-bold text-slate-900">{formatCurrency(detailQuote.total)}</span>
                     </div>
                   </div>
+
+                  {detailQuote.items.length > 0 && (
+                    <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
+                      {detailQuote.items.map((it, i) => (
+                        <div key={i} className="p-2.5 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-800 truncate">{it.description}</div>
+                            <div className="text-[10px] text-slate-400">Qty {it.quantity}</div>
+                          </div>
+                          <span className="font-mono text-slate-700 shrink-0">{formatCurrency(it.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <DialogFooter className="pt-3 border-t border-slate-100">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs gap-1"
+                    onClick={() => {
+                      setPreviewQuote(detailQuote);
+                    }}
+                  >
+                    <Printer className="h-3.5 w-3.5 mr-0.5" />
+                    Print / Share
+                  </Button>
                   {detailQuote.status === "sent" && (
                     <>
                       <Button
@@ -679,12 +736,10 @@ export default function FinancePage() {
                         variant="outline"
                         className="text-xs border-slate-300"
                         onClick={() => {
-                          const id = detailQuote.id;
-                          setDetailQuoteId(null);
-                          void convertQuoteToInvoice(id);
+                          setConvertTarget(detailQuote);
                         }}
                       >
-                        Convert to Invoice
+                        Convert to Booking
                       </Button>
                       <Button
                         size="sm"
@@ -802,6 +857,39 @@ export default function FinancePage() {
         }
         confirmText="Delete"
       />
+
+      {/* Raise Quotation Dialog */}
+      <QuoteFormDialog
+        open={quoteFormOpen}
+        onOpenChange={setQuoteFormOpen}
+        customers={customers}
+        properties={properties}
+        services={services}
+        systemSettings={systemSettings}
+        onSubmit={async (payload) => createQuote(payload)}
+      />
+
+      {/* Convert Quotation Dialog (pick service schedule) */}
+      <ConvertQuoteDialog
+        isOpen={convertTarget !== null}
+        onClose={() => setConvertTarget(null)}
+        quote={convertTarget}
+        property={properties.find((p) => p.id === convertTarget?.propertyId)}
+        onConfirm={async (q, schedule) => convertQuoteToInvoice(q.id, schedule)}
+      />
+
+      {/* Quotation Document (print / share) */}
+      {previewQuote && (
+        <QuotePreviewModal
+          isOpen={previewQuote !== null}
+          onClose={() => setPreviewQuote(null)}
+          quote={previewQuote}
+          customer={customers.find((c) => c.id === previewQuote.customerId)}
+          property={properties.find((p) => p.id === previewQuote.propertyId)}
+          service={services.find((s) => s.id === previewQuote.serviceId)}
+          systemSettings={systemSettings}
+        />
+      )}
 
       {/* Collect Payment Dialog */}
       <Dialog open={!!selectedInvoiceId} onOpenChange={(open) => !open && setSelectedInvoiceId(null)}>

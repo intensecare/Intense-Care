@@ -11,6 +11,9 @@ import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { CustomerFormDialog } from "@/components/common/CustomerFormDialog";
 import { PropertyFormDialog } from "@/components/common/PropertyFormDialog";
 import { CustomerStatementModal } from "@/components/common/CustomerStatementModal";
+import { QuoteFormDialog } from "@/components/common/QuoteFormDialog";
+import { QuotePreviewModal } from "@/components/common/QuotePreviewModal";
+import { ConvertQuoteDialog } from "@/components/common/ConvertQuoteDialog";
 import { useApp } from "@/lib/app-context";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import type { CustomerDetailSnapshot, Invoice, Property, Quote } from "@/lib/types";
@@ -35,6 +38,7 @@ import {
   Car,
   Clock,
   FileSpreadsheet,
+  Printer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,7 +68,9 @@ export default function CustomerDetailPage() {
     recordPayment,
     convertQuoteToInvoice,
     deleteQuote,
+    createQuote,
     systemSettings,
+    services,
   } = useApp();
 
   const canEdit = currentRole === "super_admin" || currentRole === "ops_manager";
@@ -90,6 +96,11 @@ export default function CustomerDetailPage() {
 
   // Printable statement of account (super_admin — contains financials)
   const [isStatementOpen, setIsStatementOpen] = useState(false);
+
+  // Quotation workflow (super_admin): raise / preview / convert with schedule.
+  const [quoteFormOpen, setQuoteFormOpen] = useState(false);
+  const [previewQuote, setPreviewQuote] = useState<Quote | null>(null);
+  const [convertTarget, setConvertTarget] = useState<Quote | null>(null);
 
   // Payment collection
   const [payInvoice, setPayInvoice] = useState<Invoice | null>(null);
@@ -229,14 +240,16 @@ export default function CustomerDetailPage() {
     await load();
   };
 
-  const handleConvertQuote = async (q: Quote) => {
+  const handleConvertQuote = async (q: Quote, schedule: { scheduledDate: string; scheduledTimeSlot: string }) => {
     setActionError("");
-    const result = await convertQuoteToInvoice(q.id);
+    const result = await convertQuoteToInvoice(q.id, schedule);
     if (!result.success) {
       setActionError(result.message);
-      return;
+      return false;
     }
+    setConvertTarget(null);
     await load();
+    return true;
   };
 
   const handleDeleteQuote = async (q: Quote) => {
@@ -828,6 +841,16 @@ export default function CustomerDetailPage() {
         {/* 5. QUOTATIONS (super_admin) */}
         {isSuper && (
           <TabsContent value="quotations" className="space-y-4">
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => setQuoteFormOpen(true)}
+                className="bg-slate-900 text-white text-xs h-8"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Raise Quotation
+              </Button>
+            </div>
             {quotes.length === 0 ? (
               <EmptyState
                 icon={Receipt}
@@ -860,14 +883,24 @@ export default function CustomerDetailPage() {
                           </div>
                           <div className="text-[11px] text-slate-400">Subtotal + Tax</div>
                         </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setPreviewQuote(q)}
+                          className="text-xs h-8 gap-1"
+                          title="Print / share the quotation with the client"
+                        >
+                          <Printer className="h-3 w-3" />
+                          View / Print
+                        </Button>
                         {q.status === "sent" && (
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleConvertQuote(q)}
+                            onClick={() => setConvertTarget(q)}
                             className="text-xs h-8 border-slate-300"
                           >
-                            Convert to Invoice
+                            Convert to Booking
                           </Button>
                         )}
                         {q.status === "sent" && (
@@ -941,6 +974,48 @@ export default function CustomerDetailPage() {
           jobs={jobs}
           systemSettings={systemSettings}
         />
+      )}
+
+      {/* Quotation workflow (super_admin): raise / convert / print */}
+      {isSuper && (
+        <>
+          <QuoteFormDialog
+            open={quoteFormOpen}
+            onOpenChange={setQuoteFormOpen}
+            customers={[customer]}
+            properties={properties}
+            services={services}
+            systemSettings={systemSettings}
+            lockedCustomerId={customerId}
+            defaultPropertyId={properties[0]?.id}
+            onSubmit={async (payload) => {
+              const result = await createQuote(payload);
+              if (result.success) await load();
+              return result;
+            }}
+          />
+          <ConvertQuoteDialog
+            isOpen={convertTarget !== null}
+            onClose={() => setConvertTarget(null)}
+            quote={convertTarget}
+            property={properties.find((p) => p.id === convertTarget?.propertyId)}
+            onConfirm={async (q, schedule) => {
+              const okDone = await handleConvertQuote(q, schedule);
+              return { success: okDone, message: okDone ? "Quotation converted to job + invoice." : "Conversion failed." };
+            }}
+          />
+          {previewQuote && (
+            <QuotePreviewModal
+              isOpen={previewQuote !== null}
+              onClose={() => setPreviewQuote(null)}
+              quote={previewQuote}
+              customer={customer}
+              property={properties.find((p) => p.id === previewQuote.propertyId)}
+              service={services.find((s) => s.id === previewQuote.serviceId)}
+              systemSettings={systemSettings}
+            />
+          )}
+        </>
       )}
 
       {/* Collect Payment Dialog */}

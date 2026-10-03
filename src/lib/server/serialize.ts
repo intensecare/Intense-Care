@@ -356,13 +356,24 @@ export function serializePayout(p: Prisma.PayoutGetPayload<object>): Payout {
 }
 
 export function serializeQuote(q: Prisma.QuoteGetPayload<object>): Quote {
+  // Line items persisted with the quotation (legacy rows have none).
+  const rawItems: unknown[] = Array.isArray(q.items) ? (q.items as unknown[]) : [];
+  const items = rawItems
+    .filter((it): it is Record<string, unknown> => typeof it === "object" && it !== null && !Array.isArray(it))
+    .map((it) => ({
+      description: String(it.description ?? ""),
+      quantity: Number(it.quantity ?? 1),
+      unitPrice: Number(it.unitPrice ?? 0),
+      amount: Number(it.quantity ?? 1) * Number(it.unitPrice ?? 0),
+    }));
+
   return {
     id: q.id,
     quoteNumber: q.quoteNumber,
     customerId: q.customerId,
     propertyId: q.propertyId,
     serviceId: q.serviceId,
-    items: [],
+    items,
     subtotal: q.subtotal,
     tax: q.tax,
     discount: q.discount,

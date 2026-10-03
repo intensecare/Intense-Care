@@ -308,6 +308,7 @@ model Quote {
   customerId  String
   propertyId  String
   serviceId   String
+  items       Json?
   subtotal    Float
   tax         Float
   discount    Float    @default(0)

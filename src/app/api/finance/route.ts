@@ -81,6 +81,14 @@ const QuoteSchema = z.object({
 const ConvertSchema = z.object({
   action: z.literal("convert-quote"),
   quoteId: z.string().min(1).max(64),
+  // Optional service schedule for the converted booking; falls back to
+  // tomorrow's date with a morning window when omitted.
+  scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  scheduledTimeSlot: z
+    .string()
+    .regex(/^\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}$|^\d{1,2}:\d{2}\s*[AP]M\s*[-–]\s*\d{1,2}:\d{2}\s*[AP]M$/i)
+    .max(80)
+    .optional(),
 });
 
 /** POST /api/finance — record payments, log expenses, create/convert quotes (admins). */
@@ -175,6 +183,13 @@ export async function POST(request: Request) {
           customerId: d.customerId,
           propertyId: d.propertyId,
           serviceId: d.serviceId,
+          // Line items are stored verbatim so the quoted document can show
+          // exactly what was priced (legacy quotations have none).
+          items: d.items.map((it) => ({
+            description: it.description,
+            quantity: it.quantity,
+            unitPrice: it.unitPrice,
+          })),
           subtotal,
           tax,
           total: subtotal + tax,
@@ -194,9 +209,12 @@ export async function POST(request: Request) {
 
       // Accepted quotations become a scheduled job with its tax invoice,
       // created atomically so the invoice always has a real job behind it.
+      // The desk picks the service date/window at conversion; defaults keep
+      // the previous behavior for API callers that omit them.
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
-      const scheduledDate = tomorrow.toISOString().slice(0, 10);
+      const scheduledDate = parsed.data.scheduledDate ?? tomorrow.toISOString().slice(0, 10);
+      const scheduledTimeSlot = parsed.data.scheduledTimeSlot ?? "09:00 - 13:30";
 
       const { job, invoice } = await prisma.$transaction(async (tx) => {
         const createdJob = await tx.job.create({
@@ -205,7 +223,7 @@ export async function POST(request: Request) {
             propertyId: quote.propertyId,
             serviceId: quote.serviceId,
             scheduledDate,
-            scheduledTimeSlot: "09:00 - 13:30",
+            scheduledTimeSlot,
             amount: quote.total,
             status: "SCHEDULED",
             notes: `Converted from quotation ${quote.quoteNumber}`,
@@ -229,7 +247,9 @@ export async function POST(request: Request) {
           where: { id: quote.customerId },
           data: { totalBookings: { increment: 1 } },
         });
-        await tx.quote.update({ where: { id: quote.id }, data: { status: "converted" } });
+        // Status string matches the client contract (Quote["status"]) so the
+        // UI hides convert/delete actions on converted quotations.
+        await tx.quote.update({ where: { id: quote.id }, data: { status: "converted_to_job" } });
         return { job: createdJob, invoice: createdInvoice };
       });
 
