@@ -178,7 +178,7 @@ export default function DashboardPage() {
           <SuperAdminRevenueTrend />
         </>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
           <StatCard
             title="Assigned & Ready"
             value={visibleJobs.filter((j) => j.status === "ASSIGNED" || j.status === "SCHEDULED").length}
@@ -194,14 +194,6 @@ export default function DashboardPage() {
             icon={AlertTriangle}
             change={complaints.some((c) => c.status !== "closed" && c.status !== "resolved") ? "In review" : "All clear"}
             changeType={complaints.some((c) => c.status !== "closed" && c.status !== "resolved") ? "negative" : "positive"}
-          />
-          <StatCard
-            title="Window Cutoff"
-            value={visibility.cutoffTime}
-            subtitle={`Tomorrow visible after ${visibility.cutoffTime}`}
-            icon={Clock}
-            change={visibility.isAfterCutoff ? "Queue unlocked" : "Cutoff lock active"}
-            changeType={visibility.isAfterCutoff ? "positive" : "neutral"}
           />
           <StatCard
             title="Field Workers"
@@ -243,8 +235,7 @@ export default function DashboardPage() {
                 </div>
                 <h4 className="text-xs font-semibold text-slate-800">Operational Queue Clear</h4>
                 <p className="text-[11px] text-slate-500 max-w-sm mx-auto mt-1 mb-3">
-                  No cleaning jobs are inside your dispatch window
-                  {isOps ? ` (past through ${visibility.maxVisibleDate})` : ""}. New bookings appear here once they enter the window.
+                  No cleaning jobs to show right now. Jobs appear here as soon as they are scheduled and assigned.
                 </p>
               </div>
             ) : (

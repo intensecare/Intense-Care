@@ -68,7 +68,7 @@ export async function GET(
       if (!visibility.isDateVisible(job.scheduledDate)) {
         logger.warn("jobs.get_one.ops_window_denied", { jobId: id, by: user.id });
         return NextResponse.json(
-          { success: false, error: "This job is outside your dispatch visibility window." },
+          { success: false, error: "This job is not yet open for dispatch." },
           { status: 403 }
         );
       }

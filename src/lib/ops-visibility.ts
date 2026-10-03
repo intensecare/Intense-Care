@@ -12,10 +12,25 @@ import { Job, SystemSettings } from "./types";
  *                           (default 20:00 = 8:00 PM) on today's clock
  *   - beyond tomorrow     → never visible
  *
- * All date math is local-calendar based (YYYY-MM-DD strings via
- * toLocalDateString), matching the rest of the ERP. The cutoff hour/minute
- * comes from SystemSettings.nextDayDispatchTime ("20:00").
+ * All date math runs on the BUSINESS wall clock (IST, UTC+5:30 — no DST),
+ * NOT the host clock: the API and this UI must agree even though the deployed
+ * server runs in UTC and the browser runs in the user's local timezone.
+ * Previously `now.getHours()` was used directly, so a 9:00 PM IST user saw an
+ * "unlocked" banner while the UTC server still filtered tomorrow's jobs out.
+ * The cutoff hour/minute comes from SystemSettings.nextDayDispatchTime ("20:00").
  */
+
+/** Business timezone offset from UTC in minutes (IST = +5:30 = 330). */
+const BUSINESS_TZ_OFFSET_MINUTES = 330;
+
+/**
+ * Shifts an instant so plain local getters (getHours/getDate/…) read the
+ * BUSINESS wall clock regardless of the machine's own timezone.
+ * Exported for deterministic testing of the host-independence invariant.
+ */
+export function toBusinessWallClock(now: Date): Date {
+  return new Date(now.getTime() + (BUSINESS_TZ_OFFSET_MINUTES + now.getTimezoneOffset()) * 60_000);
+}
 
 export interface OpsDateVisibility {
   today: string; // YYYY-MM-DD local
@@ -56,10 +71,14 @@ export function getOpsDateVisibility(
   const cutoffTime = settings?.nextDayDispatchTime || "20:00";
   const { hour, minute } = parseCutoff(cutoffTime);
 
-  const today = localDateOffset(0, now);
-  const tomorrow = localDateOffset(1, now);
+  // Evaluate everything on the business wall clock (see doc comment above):
+  // identical result in the IST browser and on a UTC server.
+  const wall = toBusinessWallClock(now);
 
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const today = localDateOffset(0, wall);
+  const tomorrow = localDateOffset(1, wall);
+
+  const currentMinutes = wall.getHours() * 60 + wall.getMinutes();
   const cutoffMinutes = hour * 60 + minute;
   const isAfterCutoff = currentMinutes >= cutoffMinutes;
 

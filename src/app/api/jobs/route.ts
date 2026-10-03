@@ -214,7 +214,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             success: false,
-            error: `Scheduled date ${d.scheduledDate} is outside your dispatch window (up to ${visibility.maxVisibleDate}).`,
+            error: `Scheduled date ${d.scheduledDate} is not yet open for dispatch.`,
           },
           { status: 409 }
         );

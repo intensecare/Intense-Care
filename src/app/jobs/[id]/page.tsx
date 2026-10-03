@@ -408,10 +408,10 @@ export default function JobDetailPage() {
       <AdminLayout>
         <div className="p-12 text-center bg-white rounded-lg border border-slate-200">
           <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-slate-900">Outside Your Dispatch Window</h2>
+          <h2 className="text-lg font-bold text-slate-900">Not Open for Dispatch Yet</h2>
           <p className="text-xs text-slate-500 mt-1">
-            Job {jobId} is scheduled for <strong>{job.scheduledDate}</strong>, which is beyond your
-            permitted dispatch window. It will become visible at the dispatch cutoff.
+            Job {jobId} is scheduled for <strong>{job.scheduledDate}</strong>. It will appear here as
+            soon as it is assigned to you.
           </p>
           <Link href="/dispatcher">
             <Button size="sm" className="mt-4">
