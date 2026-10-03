@@ -234,7 +234,7 @@ export function serializeQualityCheck(q: Prisma.QualityCheckGetPayload<object>):
 export function serializeQualityIssue(i: Prisma.QualityIssueGetPayload<object>): QualityIssue {
   return {
     id: i.id,
-    qualityCheckId: i.qualityCheckId,
+    qualityCheckId: i.qualityCheckId ?? undefined,
     jobId: i.jobId,
     area: i.area,
     itemDescription: i.itemDescription,

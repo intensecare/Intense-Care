@@ -143,6 +143,7 @@ model Job {
 
   @@index([scheduledDate])
   @@index([status])
+  @@index([scheduledDate, status])
 }
 
 /// Per-job working checklist, instantiated from the service's rubric at
@@ -221,7 +222,7 @@ model QualityCheck {
 
 model QualityIssue {
   id                 String    @id @default(cuid())
-  qualityCheckId     String
+  qualityCheckId     String?
   jobId              String
   area               String
   itemDescription    String
@@ -234,7 +235,7 @@ model QualityIssue {
   createdAt          DateTime  @default(now())
   resolvedAt         DateTime?
 
-  qualityCheck QualityCheck @relation(fields: [qualityCheckId], references: [id], onDelete: Cascade)
+  qualityCheck QualityCheck? @relation(fields: [qualityCheckId], references: [id], onDelete: Cascade)
 
   @@index([jobId])
   @@index([qualityCheckId])
@@ -380,6 +381,7 @@ model CommissionEntry {
   @@index([partnerId])
   @@index([jobId])
   @@index([status])
+  @@index([partnerId, status])
 }
 
 model Payout {

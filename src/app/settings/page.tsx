@@ -10,6 +10,7 @@ import {
   Database,
   ShieldCheck,
   RefreshCw,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,10 +69,12 @@ export default function SettingsPage() {
   const [sacCode, setSacCode] = useState(systemSettings.sacCode || "");
   const [googleReviewUrl, setGoogleReviewUrl] = useState(systemSettings.googleBusinessReviewUrl || "");
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSystemSettings({
+    setIsSaving(true);
+    await updateSystemSettings({
       otpExpiryMinutes,
       otpMaxRetries,
       resendCooldownSeconds,
@@ -84,6 +87,7 @@ export default function SettingsPage() {
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
+    setIsSaving(false);
   };
 
   return (
@@ -411,9 +415,18 @@ export default function SettingsPage() {
               </div>
 
               <div className="pt-2">
-                <Button type="submit" size="sm" className="w-full bg-slate-900 text-white">
-                  <Save className="h-3.5 w-3.5 mr-1.5" />
-                  Save Settings
+                <Button type="submit" size="sm" className="w-full bg-slate-900 text-white" disabled={isSaving}>
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-3.5 w-3.5 mr-1.5" />
+                      Save Settings
+                    </>
+                  )}
                 </Button>
                 {savedSuccess && (
                   <p className="text-[11px] text-emerald-700 font-semibold text-center mt-2 flex items-center justify-center gap-1">

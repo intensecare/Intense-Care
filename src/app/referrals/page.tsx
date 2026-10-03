@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -20,6 +20,7 @@ import {
   Sparkles,
   Users,
   Settings,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 export default function ReferralsAndCommissionsPage() {
   const {
@@ -73,6 +75,17 @@ export default function ReferralsAndCommissionsPage() {
   const [payoutMethod, setPayoutMethod] = useState<Payout["payoutMethod"]>("bank_transfer");
   const [payoutRef, setPayoutRef] = useState("");
   const [payoutNotes, setPayoutNotes] = useState("");
+  const [isSubmittingPartner, setIsSubmittingPartner] = useState(false);
+  const [isSubmittingRule, setIsSubmittingRule] = useState(false);
+  const [isSubmittingPayout, setIsSubmittingPayout] = useState(false);
+
+  // Commission rule options for dropdown
+  const commissionRuleOptions = useMemo(() =>
+    commissionRules.map((r) => ({
+      value: r.id,
+      label: `${r.name} (${r.value}% / ${r.calculationType})`,
+    })),
+  [commissionRules]);
 
   const totalReferralRevenue = partners.reduce((acc, p) => acc + p.totalRevenueGenerated, 0);
   const totalCommissionPaid = partners.reduce((acc, p) => acc + p.totalCommissionPaid, 0);
@@ -81,6 +94,7 @@ export default function ReferralsAndCommissionsPage() {
   const handleCreatePartner = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!partnerName) return;
+    setIsSubmittingPartner(true);
 
     const result = await createPartner({
       name: partnerName,
@@ -90,18 +104,23 @@ export default function ReferralsAndCommissionsPage() {
       code: partnerCode || undefined,
       commissionRuleId: partnerRuleId || commissionRules[0]?.id,
     });
-    if (!result.success) return;
+    if (!result.success) {
+      setIsSubmittingPartner(false);
+      return;
+    }
 
     setIsPartnerModalOpen(false);
     setPartnerName("");
     setPartnerEmail("");
     setPartnerPhone("");
     setPartnerCode("");
+    setIsSubmittingPartner(false);
   };
 
   const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ruleName) return;
+    setIsSubmittingRule(true);
 
     const result = await createCommissionRule({
       name: ruleName,
@@ -111,10 +130,14 @@ export default function ReferralsAndCommissionsPage() {
       isDefault: false,
       active: true,
     });
-    if (!result.success) return;
+    if (!result.success) {
+      setIsSubmittingRule(false);
+      return;
+    }
 
     setIsRuleModalOpen(false);
     setRuleName("");
+    setIsSubmittingRule(false);
   };
 
   const handleOpenPayout = (partner: ReferralPartner) => {
@@ -124,11 +147,12 @@ export default function ReferralsAndCommissionsPage() {
     setIsPayoutModalOpen(true);
   };
 
-  const handleSubmitPayout = (e: React.FormEvent) => {
+  const handleSubmitPayout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPartnerForPayout || payoutAmount <= 0) return;
+    setIsSubmittingPayout(true);
 
-    createPayout(
+    await createPayout(
       selectedPartnerForPayout.id,
       payoutAmount,
       payoutMethod,
@@ -137,6 +161,7 @@ export default function ReferralsAndCommissionsPage() {
     );
 
     setIsPayoutModalOpen(false);
+    setIsSubmittingPayout(false);
   };
 
   return (
@@ -594,8 +619,15 @@ export default function ReferralsAndCommissionsPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white">
-                Save Rule
+              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmittingRule}>
+                {isSubmittingRule ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Rule"
+                )}
               </Button>
             </DialogFooter>
           </form>
@@ -668,8 +700,15 @@ export default function ReferralsAndCommissionsPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-emerald-600 text-white">
-                Confirm & Record Payout
+              <Button type="submit" size="sm" className="bg-emerald-600 text-white" disabled={isSubmittingPayout}>
+                {isSubmittingPayout ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  "Confirm & Record Payout"
+                )}
               </Button>
             </DialogFooter>
           </form>
@@ -751,17 +790,13 @@ export default function ReferralsAndCommissionsPage() {
 
             <div className="space-y-1">
               <label className="font-semibold text-slate-700">Assigned Commission Rule</label>
-              <select
+              <SearchableSelect
                 value={partnerRuleId}
-                onChange={(e) => setPartnerRuleId(e.target.value)}
-                className="w-full h-9 rounded-md border border-slate-200 px-3 bg-white text-xs"
-              >
-                {commissionRules.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name} ({r.value}% / {r.calculationType})
-                  </option>
-                ))}
-              </select>
+                onChange={setPartnerRuleId}
+                options={commissionRuleOptions}
+                placeholder="Select a commission rule"
+                className="text-xs"
+              />
             </div>
 
             <DialogFooter className="pt-3 border-t border-slate-100">
@@ -773,8 +808,15 @@ export default function ReferralsAndCommissionsPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white">
-                Register Partner
+              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmittingPartner}>
+                {isSubmittingPartner ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Registering...
+                  </>
+                ) : (
+                  "Register Partner"
+                )}
               </Button>
             </DialogFooter>
           </form>

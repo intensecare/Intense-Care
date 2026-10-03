@@ -16,6 +16,7 @@ import {
   X,
   ShieldCheck,
   PlusCircle,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,9 @@ export default function ServicesPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isAddingItem, setIsAddingItem] = useState(false);
 
   // New Service Form State
   const [name, setName] = useState("");
@@ -55,6 +59,7 @@ export default function ServicesPage() {
   const handleCreateService = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+    setIsCreating(true);
 
     const result = await createService({
       name,
@@ -74,11 +79,13 @@ export default function ServicesPage() {
     setIsCreateOpen(false);
     setName("");
     setDescription("");
+    setIsCreating(false);
   };
 
   const handleUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedService) return;
+    setIsUpdating(true);
     await updateService(selectedService.id, {
       name,
       category,
@@ -87,11 +94,13 @@ export default function ServicesPage() {
       estimatedDurationHours: Number(estimatedDurationHours) || 4,
     });
     setIsEditOpen(false);
+    setIsUpdating(false);
   };
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!task.trim() || !selectedService) return;
+    setIsAddingItem(true);
 
     await addChecklistItemToService(selectedService.id, {
       area: area.trim() || "General",
@@ -101,6 +110,7 @@ export default function ServicesPage() {
 
     setTask("");
     setIsAddItemOpen(false);
+    setIsAddingItem(false);
   };
 
   const openEditModal = () => {
@@ -417,8 +427,15 @@ export default function ServicesPage() {
                 <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-slate-900 text-white">
-                  Create Package
+                <Button type="submit" className="bg-slate-900 text-white" disabled={isCreating}>
+                  {isCreating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    "Create Package"
+                  )}
                 </Button>
               </div>
             </form>
@@ -494,8 +511,15 @@ export default function ServicesPage() {
                 <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-slate-900 text-white">
-                  Save Changes
+                <Button type="submit" className="bg-slate-900 text-white" disabled={isUpdating}>
+                  {isUpdating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Changes"
+                  )}
                 </Button>
               </div>
             </form>
@@ -554,8 +578,15 @@ export default function ServicesPage() {
                 <Button type="button" variant="outline" onClick={() => setIsAddItemOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-slate-900 text-white">
-                  Add to Rubric
+                <Button type="submit" className="bg-slate-900 text-white" disabled={isAddingItem}>
+                  {isAddingItem ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Adding...
+                    </>
+                  ) : (
+                    "Add to Rubric"
+                  )}
                 </Button>
               </div>
             </form>

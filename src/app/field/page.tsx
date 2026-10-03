@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   X,
   Upload,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 import { ImageLightboxModal } from "@/components/common/ImageLightboxModal";
@@ -74,6 +75,7 @@ export default function FieldStaffPage() {
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [lightboxPhoto, setLightboxPhoto] = useState<{ url: string; title: string; notes?: string } | null>(null);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
 
   const cameraInputRef = React.useRef<HTMLInputElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -126,7 +128,9 @@ export default function FieldStaffPage() {
 
   const handleMarkArrived = async () => {
     if (!currentJob) return;
+    setIsProcessingAction(true);
     const res = transitionJobStatus(currentJob.id, "ARRIVED");
+    setIsProcessingAction(false);
     if (!res.success) {
       showToast(res.message);
       return;
@@ -140,7 +144,7 @@ export default function FieldStaffPage() {
     }
   };
 
-  const handleStartJob = () => {
+  const handleStartJob = async () => {
     if (!currentJob) return;
     if (currentJob.otpVerification.status !== "verified") {
       if (isLeadForJob) {
@@ -150,11 +154,13 @@ export default function FieldStaffPage() {
       }
       return;
     }
+    setIsProcessingAction(true);
     const res = transitionJobStatus(currentJob.id, "IN_PROGRESS");
+    setIsProcessingAction(false);
     showToast(res.success ? "Cleaning timer started! Checklists active." : res.message);
   };
 
-  const handleCompleteWork = () => {
+  const handleCompleteWork = async () => {
     if (!currentJob) return;
     const pendingCritical = currentChecklist.filter(
       (i) => i.critical && i.status !== "completed" && i.status !== "skipped"
@@ -165,7 +171,9 @@ export default function FieldStaffPage() {
       );
       return;
     }
+    setIsProcessingAction(true);
     const res = transitionJobStatus(currentJob.id, "WORK_COMPLETED");
+    setIsProcessingAction(false);
     showToast(res.success ? "Work marked complete! Submitted to Quality Control." : res.message);
   };
 
@@ -368,10 +376,20 @@ export default function FieldStaffPage() {
             {currentJob.status === "ASSIGNED" && (
               <Button
                 onClick={handleMarkArrived}
+                disabled={isProcessingAction}
                 className="w-full h-12 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-sm"
               >
-                <MapPin className="h-4 w-4 mr-2" />
-                Mark Arrived at Property
+                {isProcessingAction ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <MapPin className="h-4 w-4 mr-2" />
+                    Mark Arrived at Property
+                  </>
+                )}
               </Button>
             )}
 
@@ -403,10 +421,20 @@ export default function FieldStaffPage() {
             {currentJob.status === "CUSTOMER_VERIFIED" && (
               <Button
                 onClick={handleStartJob}
+                disabled={isProcessingAction}
                 className="w-full h-12 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm"
               >
-                <Play className="h-4 w-4 mr-2" />
-                Start Job & Begin Cleaning
+                {isProcessingAction ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    Start Job & Begin Cleaning
+                  </>
+                )}
               </Button>
             )}
 
@@ -423,10 +451,20 @@ export default function FieldStaffPage() {
 
                 <Button
                   onClick={handleCompleteWork}
+                  disabled={isProcessingAction}
                   className="w-full h-12 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-sm"
                 >
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Complete Cleaning Work (Submit for QC)
+                  {isProcessingAction ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      Complete Cleaning Work (Submit for QC)
+                    </>
+                  )}
                 </Button>
               </div>
             )}

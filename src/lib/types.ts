@@ -162,7 +162,7 @@ export interface JobPhoto {
 
 export interface QualityIssue {
   id: string;
-  qualityCheckId: string;
+  qualityCheckId?: string; // null for customer attention requests without a formal QC record
   jobId: string;
   area: string;
   itemDescription: string;

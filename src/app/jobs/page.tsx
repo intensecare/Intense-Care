@@ -26,10 +26,12 @@ import {
   UserPlus,
   Building2,
   X,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Dialog,
   DialogContent,
@@ -76,8 +78,54 @@ function JobsPageInner() {
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [paymentFilter, setPaymentFilter] = useState<string>("ALL");
   const [workerFilter, setWorkerFilter] = useState<string>("ALL");
+
+  // Status filter options with dynamic count
+  const statusOptions = useMemo(() => [
+    { value: "ALL", label: `All Statuses (${allJobs.length})` },
+    { value: "DRAFT", label: "Draft" },
+    { value: "SCHEDULED", label: "Scheduled" },
+    { value: "ASSIGNED", label: "Workers Assigned" },
+    { value: "ARRIVED", label: "Arrived (OTP Pending)" },
+    { value: "CUSTOMER_VERIFIED", label: "OTP Verified" },
+    { value: "IN_PROGRESS", label: "In Progress" },
+    { value: "WORK_COMPLETED", label: "Work Completed (QC Ready)" },
+    { value: "QUALITY_CHECK", label: "Quality Check" },
+    { value: "REWORK_REQUIRED", label: "Rework Required" },
+    { value: "CUSTOMER_APPROVAL", label: "Customer Approval" },
+    { value: "COMPLETED", label: "Completed" },
+    { value: "FEEDBACK_REQUESTED", label: "Feedback Collected" },
+    { value: "CANCELLED", label: "Cancelled" },
+  ], [allJobs.length]);
+
+  // Worker filter options
+  const workerOptions = useMemo(() => [
+    { value: "ALL", label: "All Workers" },
+    { value: "UNASSIGNED", label: "Unassigned" },
+    ...fieldWorkers.map((w) => ({ value: w.id, label: w.name })),
+  ], [fieldWorkers]);
+
+  // Service selection options
+  const serviceOptions = useMemo(() =>
+    services.map((s) => ({
+      value: s.id,
+      label: `${s.name} (${formatCurrency(s.basePrice)} • ~${s.estimatedDurationHours} hrs)`,
+    })),
+  [services]);
+
+  // Referral partner options
+  const partnerOptions = useMemo(() => [
+    { value: "", label: "Direct Booking (No Referral)" },
+    ...partners.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
+  ], [partners]);
+
+  // Customer selection options
+  const customerOptions = useMemo(() =>
+    customers.map((c) => ({ value: c.id, label: `${c.name} (${c.phone})` })),
+  [customers]);
+
   const [isCreateOpen, setIsCreateOpen] = useState(createParam === "true");
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // New Job Form State
   const [isInlineCustomer, setIsInlineCustomer] = useState(customers.length === 0);
@@ -104,6 +152,11 @@ function JobsPageInner() {
   const customerProperties = useMemo(() => {
     return properties.filter((p) => p.customerId === selectedCustomerId);
   }, [properties, selectedCustomerId]);
+
+  // Property selection options (filtered by selected customer)
+  const propertyOptions = useMemo(() =>
+    customerProperties.map((p) => ({ value: p.id, label: `${p.title} - ${p.address}` })),
+  [customerProperties]);
 
   // Filtered Jobs
   const filteredJobs = useMemo(() => {
@@ -137,6 +190,7 @@ function JobsPageInner() {
   const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    setIsSubmitting(true);
 
     let targetCustId = selectedCustomerId;
     let targetPropId = selectedPropertyId;
@@ -145,6 +199,7 @@ function JobsPageInner() {
       if (isInlineCustomer || customers.length === 0) {
         if (!inlineName || !inlinePhone || !inlineAddress) {
           setFormError("Please enter customer name, phone number, and property address.");
+          setIsSubmitting(false);
           return;
         }
         const custResult = await createCustomer({
@@ -155,6 +210,7 @@ function JobsPageInner() {
         });
         if (!custResult.success || !custResult.customer) {
           setFormError(custResult.message);
+          setIsSubmitting(false);
           return;
         }
         targetCustId = custResult.customer.id;
@@ -166,28 +222,38 @@ function JobsPageInner() {
         });
         if (!propResult.success || !propResult.property) {
           setFormError(propResult.message);
+          setIsSubmitting(false);
           return;
         }
         targetPropId = propResult.property.id;
       } else {
-        if (!targetCustId || !targetPropId) {
-          setFormError("Please select a customer and property location.");
+        if (!targetCustId) {
+          setFormError("Please select a customer.");
+          setIsSubmitting(false);
+          return;
+        }
+        if (!targetPropId) {
+          setFormError("Please select a property location for the selected customer.");
+          setIsSubmitting(false);
           return;
         }
       }
 
       const targetService = selectedServiceId || services[0]?.id;
-      if (!targetService) {
-        setFormError("No service package available. Create one on the Services page first.");
+      if (!targetService || !selectedServiceId) {
+        setFormError("Please select a service package.");
+        setIsSubmitting(false);
         return;
       }
 
       if (!timeFrom || !timeTo) {
         setFormError("Please set both the start and end time of the service window.");
+        setIsSubmitting(false);
         return;
       }
       if (timeFrom >= timeTo) {
         setFormError("The end time must be after the start time.");
+        setIsSubmitting(false);
         return;
       }
 
@@ -204,6 +270,7 @@ function JobsPageInner() {
 
       if (!result.success) {
         setFormError(result.message);
+        setIsSubmitting(false);
         return;
       }
 
@@ -214,8 +281,10 @@ function JobsPageInner() {
       setInlinePhone("");
       setInlineAddress("");
       setAssignedStaffIds([]);
+      setIsSubmitting(false);
     } catch {
       setFormError("Something went wrong while saving the booking. Please retry.");
+      setIsSubmitting(false);
     }
   };
 
@@ -270,26 +339,13 @@ function JobsPageInner() {
           </div>
 
           {/* Status Filter */}
-          <select
+          <SearchableSelect
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-9 rounded-md border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-slate-900"
-          >
-            <option value="ALL">All Statuses ({allJobs.length})</option>
-            <option value="DRAFT">Draft</option>
-            <option value="SCHEDULED">Scheduled</option>
-            <option value="ASSIGNED">Workers Assigned</option>
-            <option value="ARRIVED">Arrived (OTP Pending)</option>
-            <option value="CUSTOMER_VERIFIED">OTP Verified</option>
-            <option value="IN_PROGRESS">In Progress</option>
-            <option value="WORK_COMPLETED">Work Completed (QC Ready)</option>
-            <option value="QUALITY_CHECK">Quality Check</option>
-            <option value="REWORK_REQUIRED">Rework Required</option>
-            <option value="CUSTOMER_APPROVAL">Customer Approval</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="FEEDBACK_REQUESTED">Feedback Collected</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
+            onChange={setStatusFilter}
+            options={statusOptions}
+            placeholder="All Statuses"
+            className="h-9"
+          />
 
           {/* Payment Filter (super_admin only — money data is redacted for other roles) */}
           {currentRole === "super_admin" && (
@@ -306,19 +362,13 @@ function JobsPageInner() {
           )}
 
           {/* Worker Filter */}
-          <select
+          <SearchableSelect
             value={workerFilter}
-            onChange={(e) => setWorkerFilter(e.target.value)}
-            className="h-9 rounded-md border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-slate-900"
-          >
-            <option value="ALL">All Workers</option>
-            <option value="UNASSIGNED">Unassigned</option>
-            {fieldWorkers.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </select>
+            onChange={setWorkerFilter}
+            options={workerOptions}
+            placeholder="All Workers"
+            className="h-9"
+          />
         </div>
       </div>
 
@@ -561,22 +611,18 @@ function JobsPageInner() {
                   <label className="text-xs font-semibold text-slate-700">
                     Select Customer *
                   </label>
-                  <select
+                  <SearchableSelect
                     value={selectedCustomerId}
-                    onChange={(e) => {
-                      setSelectedCustomerId(e.target.value);
-                      const matchProp = properties.find((p) => p.customerId === e.target.value);
+                    onChange={(value) => {
+                      setSelectedCustomerId(value);
+                      const matchProp = properties.find((p) => p.customerId === value);
                       if (matchProp) setSelectedPropertyId(matchProp.id);
                     }}
-                    className="w-full h-9 rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    options={customerOptions}
+                    placeholder="Search customer by name or phone..."
                     required
-                  >
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.phone})
-                      </option>
-                    ))}
-                  </select>
+                    name="customerId"
+                  />
                 </div>
 
                 {/* Property Selection */}
@@ -584,22 +630,15 @@ function JobsPageInner() {
                   <label className="text-xs font-semibold text-slate-700">
                     Service Property *
                   </label>
-                  <select
+                  <SearchableSelect
                     value={selectedPropertyId}
-                    onChange={(e) => setSelectedPropertyId(e.target.value)}
-                    className="w-full h-9 rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    onChange={setSelectedPropertyId}
+                    options={propertyOptions}
+                    placeholder="Select a property"
                     required
-                  >
-                    {customerProperties.length > 0 ? (
-                      customerProperties.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.title} - {p.address}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="">No properties registered</option>
-                    )}
-                  </select>
+                    name="propertyId"
+                    emptyMessage="No properties registered for this customer"
+                  />
                 </div>
               </div>
             )}
@@ -610,18 +649,14 @@ function JobsPageInner() {
                 <label className="text-xs font-semibold text-slate-700">
                   Cleaning Service Package *
                 </label>
-                <select
+                <SearchableSelect
                   value={selectedServiceId}
-                  onChange={(e) => setSelectedServiceId(e.target.value)}
-                  className="w-full h-9 rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                  onChange={setSelectedServiceId}
+                  options={serviceOptions}
+                  placeholder="Select a service package"
                   required
-                >
-                  {services.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({formatCurrency(s.basePrice)} • ~{s.estimatedDurationHours} hrs)
-                    </option>
-                  ))}
-                </select>
+                  name="serviceId"
+                />
               </div>
 
               {/* Date */}
@@ -708,18 +743,12 @@ function JobsPageInner() {
                 <label className="text-xs font-semibold text-slate-700">
                   Referral Partner Attribution
                 </label>
-                <select
+                <SearchableSelect
                   value={referralPartnerId}
-                  onChange={(e) => setReferralPartnerId(e.target.value)}
-                  className="w-full h-9 rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                >
-                  <option value="">Direct Booking (No Referral)</option>
-                  {partners.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.code})
-                    </option>
-                  ))}
-                </select>
+                  onChange={setReferralPartnerId}
+                  options={partnerOptions}
+                  placeholder="Direct Booking (No Referral)"
+                />
               </div>
             </div>
 
@@ -749,8 +778,16 @@ function JobsPageInner() {
                 type="submit"
                 size="sm"
                 className="bg-slate-900 text-white"
+                disabled={isSubmitting}
               >
-                Schedule & Dispatch Job
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Scheduling...
+                  </>
+                ) : (
+                  "Schedule & Dispatch Job"
+                )}
               </Button>
             </DialogFooter>
           </form>

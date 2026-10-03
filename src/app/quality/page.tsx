@@ -18,6 +18,7 @@ import {
   Check,
   X,
   FileSpreadsheet,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,8 @@ export default function QualityManagementPage() {
   const [auditScore, setAuditScore] = useState<number>(95);
   const [auditDecision, setAuditDecision] = useState<"PASS" | "REWORK_REQUIRED">("PASS");
   const [auditNotes, setAuditNotes] = useState("");
+  const [isSubmittingAudit, setIsSubmittingAudit] = useState(false);
+  const [isProcessingRework, setIsProcessingRework] = useState(false);
   const [issuesList, setIssuesList] = useState<
     {
       area: string;
@@ -122,11 +125,12 @@ export default function QualityManagementPage() {
     }
   };
 
-  const handleSubmitAudit = (e: React.FormEvent) => {
+  const handleSubmitAudit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auditModalJobId) return;
+    setIsSubmittingAudit(true);
 
-    submitQualityCheck(
+    await submitQualityCheck(
       auditModalJobId,
       auditScore,
       auditDecision,
@@ -135,6 +139,7 @@ export default function QualityManagementPage() {
     );
 
     setAuditModalJobId(null);
+    setIsSubmittingAudit(false);
   };
 
   return (
@@ -267,6 +272,7 @@ export default function QualityManagementPage() {
                         {(job.status === "REWORK_REQUIRED" || job.status === "REWORK_COMPLETED" || job.status === "REINSPECTION") && (
                           <Button
                             size="sm"
+                            disabled={isProcessingRework}
                             onClick={() => {
                               setPromptConfig({
                                 isOpen: true,
@@ -274,15 +280,26 @@ export default function QualityManagementPage() {
                                 description: "Enter QC reinspection verification notes:",
                                 placeholder: "Rework tasks verified",
                                 defaultValue: "Rework tasks verified to 100% standard.",
-                                onSubmit: (note) => {
-                                  reinspectAndPassQC(job.id, note || "Rework tasks verified");
+                                onSubmit: async (note) => {
+                                  setIsProcessingRework(true);
+                                  await reinspectAndPassQC(job.id, note || "Rework tasks verified");
+                                  setIsProcessingRework(false);
                                 },
                               });
                             }}
                             className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium h-8 text-xs"
                           >
-                            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                            Reinspect & Pass
+                            {isProcessingRework ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                Processing...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                                Reinspect & Pass
+                              </>
+                            )}
                           </Button>
                         )}
 
@@ -356,6 +373,7 @@ export default function QualityManagementPage() {
                           <Button
                             size="sm"
                             variant="outline"
+                            disabled={isProcessingRework}
                             onClick={() => {
                               setPromptConfig({
                                 isOpen: true,
@@ -363,14 +381,23 @@ export default function QualityManagementPage() {
                                 description: "Enter resolution & correction notes for this item:",
                                 placeholder: "Rework verified by technician",
                                 defaultValue: "Rework verified by technician",
-                                onSubmit: (note) => {
-                                  completeReworkTask(task.id, note || "Rework verified by technician");
+                                onSubmit: async (note) => {
+                                  setIsProcessingRework(true);
+                                  await completeReworkTask(task.id, note || "Rework verified by technician");
+                                  setIsProcessingRework(false);
                                 },
                               });
                             }}
                             className="h-6 text-[10px] px-2 text-emerald-700 bg-white"
                           >
-                            Mark Done
+                            {isProcessingRework ? (
+                              <>
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                Processing...
+                              </>
+                            ) : (
+                              "Mark Done"
+                            )}
                           </Button>
                         </div>
                       )}
@@ -597,8 +624,15 @@ export default function QualityManagementPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white font-medium">
-                Save & Submit Quality Audit
+              <Button type="submit" size="sm" className="bg-slate-900 text-white font-medium" disabled={isSubmittingAudit}>
+                {isSubmittingAudit ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  "Save & Submit Quality Audit"
+                )}
               </Button>
             </DialogFooter>
           </form>

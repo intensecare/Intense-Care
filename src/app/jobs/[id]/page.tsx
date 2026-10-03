@@ -164,6 +164,7 @@ export default function JobDetailPage() {
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
 
   // --- Staff assignment (reuses the server PATCH /api/jobs/[id] assignment
   // path — same validation, double-booking 409 and status sync as the
@@ -324,7 +325,7 @@ export default function JobDetailPage() {
     (action) => currentRole === "super_admin" || action.allowedRoles.includes(currentRole)
   );
 
-  const handleExecuteTransition = (targetStatus: any) => {
+  const handleExecuteTransition = async (targetStatus: any) => {
     setActionError(null);
     if (targetStatus === "CUSTOMER_VERIFIED" || (job.status === "ARRIVED" && targetStatus === "IN_PROGRESS")) {
       setIsOtpModalOpen(true);
@@ -337,10 +338,12 @@ export default function JobDetailPage() {
       return;
     }
 
+    setIsTransitioning(true);
     const res = transitionJobStatus(job.id, targetStatus);
     if (!res.success) {
       setActionError(res.message);
     }
+    setIsTransitioning(false);
   };
 
   const handlePhotoUploadSubmit = async (e: React.FormEvent) => {
@@ -456,6 +459,7 @@ export default function JobDetailPage() {
                   : "default"
               }
               onClick={() => handleExecuteTransition(action.status)}
+              disabled={isTransitioning}
               className={
                 action.buttonVariant === "destructive"
                   ? ""
@@ -464,8 +468,17 @@ export default function JobDetailPage() {
                   : "bg-blue-600 hover:bg-blue-500 text-white font-medium"
               }
             >
-              {action.label}
-              <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              {isTransitioning ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  {action.label}
+                  <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </>
+              )}
             </Button>
           ))}
 

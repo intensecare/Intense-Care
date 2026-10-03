@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -14,9 +14,11 @@ import {
   Mail,
   Building2,
   Share2,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +33,7 @@ export default function CustomersPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form State
   const [name, setName] = useState("");
@@ -42,6 +45,12 @@ export default function CustomersPage() {
   const [partnerId, setPartnerId] = useState("");
   const [notes, setNotes] = useState("");
 
+  // Partner options for dropdown
+  const partnerOptions = useMemo(() => [
+    { value: "", label: "Direct / None" },
+    ...partners.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
+  ], [partners]);
+
   const filteredCustomers = customers.filter(
     (c) =>
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -52,6 +61,7 @@ export default function CustomersPage() {
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !phone) return;
+    setIsSubmitting(true);
 
     const result = await createCustomer({
       name,
@@ -63,7 +73,10 @@ export default function CustomersPage() {
       referralPartnerId: partnerId || undefined,
       notes,
     });
-    if (!result.success) return;
+    if (!result.success) {
+      setIsSubmitting(false);
+      return;
+    }
 
     setIsCreateOpen(false);
     setName("");
@@ -71,6 +84,7 @@ export default function CustomersPage() {
     setEmail("");
     setAddress("");
     setNotes("");
+    setIsSubmitting(false);
   };
 
   return (
@@ -269,18 +283,12 @@ export default function CustomersPage() {
 
             <div className="space-y-1">
               <label className="font-semibold text-slate-700">Referral Partner Attribution</label>
-              <select
+              <SearchableSelect
                 value={partnerId}
-                onChange={(e) => setPartnerId(e.target.value)}
-                className="w-full h-9 rounded-md border border-slate-200 px-3 bg-white"
-              >
-                <option value="">Direct / None</option>
-                {partners.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.code})
-                  </option>
-                ))}
-              </select>
+                onChange={setPartnerId}
+                options={partnerOptions}
+                placeholder="Direct / None"
+              />
             </div>
 
             <div className="space-y-1">
@@ -302,8 +310,15 @@ export default function CustomersPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white">
-                Save Customer
+              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Customer"
+                )}
               </Button>
             </DialogFooter>
           </form>

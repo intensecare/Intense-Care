@@ -8,7 +8,7 @@ import { PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
 import { Expense } from "@/lib/types";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
-import { DollarSign, FileText, CheckCircle2, TrendingUp, AlertTriangle, Plus, CreditCard } from "lucide-react";
+import { DollarSign, FileText, CheckCircle2, TrendingUp, AlertTriangle, Plus, CreditCard, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -38,6 +38,8 @@ export default function FinancePage() {
   const [expDesc, setExpDesc] = useState("");
   const [expMethod, setExpMethod] = useState<Expense["paymentMethod"]>("card");
   const [expRef, setExpRef] = useState("");
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [isSubmittingExpense, setIsSubmittingExpense] = useState(false);
 
   const totalInvoiced = invoices.reduce((acc, i) => acc + i.total, 0);
   const totalCollected = invoices.reduce((acc, i) => acc + i.amountPaid, 0);
@@ -54,14 +56,17 @@ export default function FinancePage() {
   const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoiceId || payAmount <= 0) return;
+    setIsSubmittingPayment(true);
 
     await recordPayment(selectedInvoiceId, payAmount, payMethod, payRef);
     setSelectedInvoiceId(null);
+    setIsSubmittingPayment(false);
   };
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (expAmount <= 0 || !expDesc.trim()) return;
+    setIsSubmittingExpense(true);
 
     await createExpense({
       date: new Date().toISOString().split("T")[0],
@@ -76,6 +81,7 @@ export default function FinancePage() {
     setExpAmount(0);
     setExpDesc("");
     setExpRef("");
+    setIsSubmittingExpense(false);
   };
 
   return (
@@ -447,8 +453,15 @@ export default function FinancePage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white">
-                Record Payment
+              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmittingPayment}>
+                {isSubmittingPayment ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Recording...
+                  </>
+                ) : (
+                  "Record Payment"
+                )}
               </Button>
             </DialogFooter>
           </form>
@@ -539,8 +552,15 @@ export default function FinancePage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white">
-                Save Expense
+              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmittingExpense}>
+                {isSubmittingExpense ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Expense"
+                )}
               </Button>
             </DialogFooter>
           </form>

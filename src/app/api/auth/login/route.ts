@@ -44,10 +44,14 @@ export async function POST(request: Request) {
     }
 
     const email = parsed.data.email.toLowerCase().trim();
+    // Use multiple headers for IP detection to prevent spoofing
     const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
+      request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+      request.headers.get("x-real-ip")?.trim() ||
+      request.headers.get("cf-connecting-ip")?.trim() ||
+      "unknown";
     if (rateLimited(`${email}|${ip}`)) {
-      logger.warn("auth.login.rate_limited", { email });
+      logger.warn("auth.login.rate_limited", { email, ip });
       return NextResponse.json(
         { success: false, error: "Too many sign-in attempts. Try again later." },
         { status: 429 }

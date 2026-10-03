@@ -22,6 +22,18 @@ function getSessionSecret(): string {
       "ERP_SESSION_SECRET is not set. Generate one with: openssl rand -hex 32"
     );
   }
+  if (secret.length < 32) {
+    throw new Error(
+      "ERP_SESSION_SECRET must be at least 32 characters long for security. Generate a stronger secret with: openssl rand -hex 32"
+    );
+  }
+  // Check for high entropy (not a simple pattern)
+  const uniqueChars = new Set(secret.split(""));
+  if (uniqueChars.size < 16) {
+    throw new Error(
+      "ERP_SESSION_SECRET appears to have low entropy. Generate a stronger secret with: openssl rand -hex 32"
+    );
+  }
   return secret;
 }
 

@@ -246,7 +246,7 @@ export async function POST(request: Request) {
       const leadWorker = job.assignedStaffIds[0] ?? "";
       const attentionIssue = await prisma.qualityIssue.create({
         data: {
-          qualityCheckId: `qc-cust-${d.jobId}`,
+          qualityCheckId: null, // Customer attention requests don't have a formal QC record
           jobId: d.jobId,
           area: d.category.replace("_", " ").toUpperCase(),
           itemDescription: d.description,

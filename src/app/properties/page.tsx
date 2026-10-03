@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -15,9 +15,11 @@ import {
   Clock,
   Calendar,
   ExternalLink,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +34,7 @@ export default function PropertiesPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form State
   const [customerId, setCustomerId] = useState(customers[0]?.id || "");
@@ -45,6 +48,11 @@ export default function PropertiesPage() {
   const [parking, setParking] = useState("");
   const [recurring, setRecurring] = useState(false);
 
+  // Customer options for dropdown
+  const customerOptions = useMemo(() =>
+    customers.map((c) => ({ value: c.id, label: `${c.name} (${c.phone})` })),
+  [customers]);
+
   const filteredProperties = properties.filter(
     (p) =>
       p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -54,7 +62,8 @@ export default function PropertiesPage() {
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !address) return;
+    if (!title || !address || !customerId) return;
+    setIsSubmitting(true);
 
     const result = await createProperty({
       customerId,
@@ -68,13 +77,17 @@ export default function PropertiesPage() {
       parkingInstructions: parking,
       recurringService: recurring,
     });
-    if (!result.success) return;
+    if (!result.success) {
+      setIsSubmitting(false);
+      return;
+    }
 
     setIsCreateOpen(false);
     setTitle("");
     setAddress("");
     setAccessNotes("");
     setParking("");
+    setIsSubmitting(false);
   };
 
   return (
@@ -207,18 +220,14 @@ export default function PropertiesPage() {
           <form onSubmit={handleCreateSubmit} className="space-y-3 py-2 text-xs">
             <div className="space-y-1">
               <label className="font-semibold text-slate-700">Linked Customer *</label>
-              <select
+              <SearchableSelect
                 value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                className="w-full h-9 rounded-md border border-slate-200 px-3 bg-white"
+                onChange={setCustomerId}
+                options={customerOptions}
+                placeholder="Select a customer"
                 required
-              >
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.phone})
-                  </option>
-                ))}
-              </select>
+                name="customerId"
+              />
             </div>
 
             <div className="space-y-1">
@@ -312,8 +321,15 @@ export default function PropertiesPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white">
-                Save Property
+              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Property"
+                )}
               </Button>
             </DialogFooter>
           </form>

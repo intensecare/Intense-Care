@@ -3,6 +3,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { AppProvider } from "@/lib/app-context";
 import { RouteGuard } from "@/components/common/RouteGuard";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 
 export const metadata: Metadata = {
   title: "Intense Care Deep Cleaning Operations ERP",
@@ -21,9 +22,11 @@ export default function RootLayout({
         <AuthProvider>
           <AppProvider>
             <RouteGuard>
-              <div className="flex flex-col min-h-screen">
-                {children}
-              </div>
+              <ErrorBoundary>
+                <div className="flex flex-col min-h-screen">
+                  {children}
+                </div>
+              </ErrorBoundary>
             </RouteGuard>
           </AppProvider>
         </AuthProvider>
