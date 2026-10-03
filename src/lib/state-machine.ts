@@ -252,8 +252,8 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
         {
           status: "ARRIVED",
           label: "Mark Arrived",
-          description: "Field worker arrived at property",
-          allowedRoles: ["super_admin", "ops_manager", "staff"],
+          description: "Field worker arrived at property (performed in the Field App)",
+          allowedRoles: ["super_admin", "staff"],
         },
         {
           status: "CANCELLED",
@@ -269,8 +269,8 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
         {
           status: "CUSTOMER_VERIFIED",
           label: "Verify Customer OTP",
-          description: "Customer provides 4-digit OTP to authorize property entry",
-          allowedRoles: ["super_admin", "ops_manager", "staff"],
+          description: "Customer provides OTP to the lead worker on site to authorize property entry",
+          allowedRoles: ["super_admin", "staff"],
           requirementNotes: "Customer OTP verification required",
         },
         {
@@ -287,8 +287,8 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
         {
           status: "IN_PROGRESS",
           label: "Start Job",
-          description: "Commence deep cleaning procedures and begin checklist",
-          allowedRoles: ["super_admin", "ops_manager", "staff"],
+          description: "Commence deep cleaning procedures and begin checklist (Field App)",
+          allowedRoles: ["super_admin", "staff"],
         },
       ];
 
@@ -297,8 +297,8 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
         {
           status: "WORK_COMPLETED",
           label: "Mark Work Completed",
-          description: "Checklist done, after photos captured, submit for QC",
-          allowedRoles: ["super_admin", "ops_manager", "staff"],
+          description: "Checklist done, after photos captured, submit for QC (Field App)",
+          allowedRoles: ["super_admin", "staff"],
         },
       ];
 
@@ -345,8 +345,8 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
         {
           status: "REWORK_COMPLETED",
           label: "Mark Rework Completed",
-          description: "Staff completed corrective rework tasks",
-          allowedRoles: ["super_admin", "ops_manager", "staff"],
+          description: "Field worker completed corrective rework tasks (Field App)",
+          allowedRoles: ["super_admin", "staff"],
         },
       ];
 

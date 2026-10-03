@@ -427,6 +427,35 @@ export interface Payout {
  * server, delivered by 2Factor SMS, and verified server-side. The UI reads
  * only masked/derived status from /api/jobs/[id] and the OTP endpoints.
  */
+/**
+ * Live pipeline activity event (GET /api/activity). Written server-side on
+ * every field-worker/QC/customer action so supervisors get a real-time feed
+ * and the job record's Audit tab shows genuine database history.
+ */
+export interface JobActivityEvent {
+  id: string;
+  jobId: string;
+  type:
+    | "STATUS_CHANGED"
+    | "STAFF_ASSIGNED"
+    | "OTP_SENT"
+    | "OTP_VERIFIED"
+    | "CHECKLIST_UPDATED"
+    | "PHOTO_UPLOADED"
+    | "QC_SUBMITTED"
+    | "REWORK_ASSIGNED"
+    | "REWORK_COMPLETED"
+    | "CUSTOMER_SIGNED"
+    | "ATTENTION_REQUESTED"
+    | "FEEDBACK_RECORDED"
+    | "GOOGLE_REVIEW_CLICKED";
+  message: string;
+  actorId?: string | null;
+  actorName: string;
+  actorRole: string;
+  createdAt: string;
+}
+
 export interface JobOTP {
   phone: string; // registered customer phone (masked display only)
   sentToLast4?: string;

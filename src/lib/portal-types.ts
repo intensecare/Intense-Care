@@ -14,6 +14,12 @@ export interface PortalHandover {
     scheduledTimeSlot: string;
   };
   customer: { name: string; phoneMasked: string } | null;
+  /** Server-resolved company identity + Google review URL (public visitors
+   *  have no ERP session, so client-side settings are unavailable). */
+  company: {
+    name: string;
+    googleReviewUrl: string;
+  };
   property: { title: string; address: string } | null;
   qualityCheck: {
     score: number;

@@ -13,6 +13,7 @@ import {
   readJson,
 } from "@/lib/server/serialize";
 import { logger } from "@/lib/server/logger";
+import { recordActivity } from "@/lib/server/activity";
 
 /**
  * GET /api/quality — QC checks, issues, rework tasks, complaints.
@@ -173,6 +174,29 @@ export async function POST(request: Request) {
       }
 
       logger.info("quality.check_submitted", { jobId: d.jobId, decision: d.decision, by: user.id });
+
+      // Supervisor-visible live feed events: the QC verdict and, when rework
+      // is required, the exact instructions heading to the field worker.
+      await recordActivity({
+        jobId: d.jobId,
+        type: "QC_SUBMITTED",
+        message:
+          d.decision === "PASS"
+            ? `QC audit PASSED (${d.score}%) — ready for customer sign-off`
+            : `QC audit flagged rework (${d.score}%) — ${d.issues.length} defect${d.issues.length === 1 ? "" : "s"} assigned to field staff`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
+      if (d.decision === "REWORK_REQUIRED") {
+        for (const issue of d.issues) {
+          await recordActivity({
+            jobId: d.jobId,
+            type: "REWORK_ASSIGNED",
+            message: `Rework assigned [${issue.area}] (${issue.severity}): ${issue.itemDescription}${issue.notes ? ` — ${issue.notes}` : ""}`,
+            actor: { id: user.id, name: user.name, role: user.role },
+          });
+        }
+      }
+
       return ok(serializeQualityCheck(qc), 201);
     }
 
@@ -180,6 +204,13 @@ export async function POST(request: Request) {
       const parsed = CompleteReworkSchema.safeParse(body);
       if (!parsed.success) return fail("Invalid rework payload.", 400);
       const d = parsed.data;
+
+      // Role separation: rework is EXECUTED by the assigned field worker (or
+      // overridden by the owner). The QC desk audits — it never closes its
+      // own rework tasks, which used to make the pipeline state confusing.
+      if (user.role === "ops_manager") {
+        return fail("Rework tasks are completed by the assigned field worker in the Field App.", 403);
+      }
 
       const task = await prisma.reworkTask.findUnique({ where: { id: d.taskId } });
       if (!task) return fail("Rework task not found.", 404);
@@ -196,7 +227,29 @@ export async function POST(request: Request) {
           data: { status: "resolved", resolvedAt: now },
         }),
       ]);
-      return ok({ id: d.taskId, status: "completed" });
+
+      // Pipeline sync: when the LAST open rework task on the job closes,
+      // move the job to REWORK_COMPLETED so the QC queue and the state
+      // machine stay truthful (previously the job stayed REWORK_REQUIRED).
+      const remaining = await prisma.reworkTask.count({
+        where: { jobId: task.jobId, status: { not: "completed" } },
+      });
+      const job = await prisma.job.findUnique({ where: { id: task.jobId }, select: { status: true } });
+      if (remaining === 0 && job && ["REWORK_REQUIRED", "REWORK_COMPLETED"].includes(job.status)) {
+        await prisma.job.update({
+          where: { id: task.jobId },
+          data: { status: "REWORK_COMPLETED", updatedAt: new Date() },
+        });
+      }
+
+      await recordActivity({
+        jobId: task.jobId,
+        type: "REWORK_COMPLETED",
+        message: `Rework completed: ${task.instructions}${d.notes ? ` — ${d.notes}` : ""}${remaining === 0 ? ". All rework done — awaiting QC reinspection." : ` (${remaining} task${remaining === 1 ? "" : "s"} still open)`}`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
+
+      return ok({ id: d.taskId, status: "completed", jobStatus: remaining === 0 ? "REWORK_COMPLETED" : job?.status });
     }
 
     if (action === "reinspect-pass") {
@@ -213,6 +266,12 @@ export async function POST(request: Request) {
           data: { status: "reinspected_pass", resolvedAt: now },
         }),
       ]);
+      await recordActivity({
+        jobId: d.jobId,
+        type: "QC_SUBMITTED",
+        message: `Reinspection passed — handover link sent to customer${d.notes ? ` (${d.notes})` : ""}`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
       return ok({ jobId: d.jobId, status: "CUSTOMER_APPROVAL" });
     }
 
@@ -266,6 +325,13 @@ export async function POST(request: Request) {
       });
       await prisma.job.update({ where: { id: d.jobId }, data: { status: "REWORK_REQUIRED" } });
 
+      await recordActivity({
+        jobId: d.jobId,
+        type: "ATTENTION_REQUESTED",
+        message: `Customer raised an issue (${d.category.replace("_", " ")}): ${d.description} — rework dispatched to field staff`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
+
       return ok(serializeComplaint(complaint), 201);
     }
 
@@ -303,6 +369,24 @@ export async function PATCH(request: Request) {
         completedAt: status === "completed" ? new Date() : undefined,
       },
     });
+
+    // Live feed: report meaningful checklist progress (not unpending noise).
+    if (status === "completed") {
+      await recordActivity({
+        jobId: item.jobId,
+        type: "CHECKLIST_UPDATED",
+        message: `Checklist item completed [${item.area}]: ${item.task}`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
+    } else if (status === "issue") {
+      await recordActivity({
+        jobId: item.jobId,
+        type: "CHECKLIST_UPDATED",
+        message: `Issue flagged on checklist item [${item.area}]: ${item.task}${body.issueNotes ? ` — ${body.issueNotes}` : ""}`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
+    }
+
     return ok({ id: updated.id, status: updated.status });
   } catch (err) {
     return errorResponse(err, "quality.patch.route_error");

@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/app-context";
+// NOTE: the Google review URL comes from the SERVER payload (handover.company)
+// — this page is public, so client-side ERP settings are unavailable here.
 import { BeforeAfterGallery } from "@/components/common/BeforeAfterGallery";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { formatCurrency, formatDateTime, formatTimeSlot } from "@/lib/utils";
@@ -37,7 +39,7 @@ export default function CustomerPortalPage() {
   const params = useParams();
   const token = (params?.token as string) || "";
 
-  const { systemSettings, submitCustomerFeedback } = useApp();
+  const { submitCustomerFeedback } = useApp();
 
   // Server-resolved handover state
   const [handover, setHandover] = useState<PortalHandover | null>(null);
@@ -162,6 +164,14 @@ export default function CustomerPortalPage() {
     }
   };
 
+  // Record the Google review click the instant it happens (fire-and-forget):
+  // many customers tap through without submitting the in-app star form, and
+  // that click is exactly the conversion the ops desk wants to see live.
+  const handleGoogleReviewClick = () => {
+    setGoogleReviewOpened(true);
+    fetch(`/api/portal/${encodeURIComponent(token)}/google-click`, { method: "POST" }).catch(() => {});
+  };
+
   const toggleTag = (tag: string) => {
     setSelectedTags((prev) =>
       prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
@@ -196,6 +206,8 @@ export default function CustomerPortalPage() {
   }
 
   const { job, customer, property, qualityCheck } = handover;
+  const companyName = handover.company?.name || "Intense Care";
+  const googleReviewUrl = handover.company?.googleReviewUrl || "";
 
   // Server-resolved data only — no local-store enrichment. Arrays are
   // defended against absent/legacy payloads: a missing array here used to
@@ -214,11 +226,11 @@ export default function CustomerPortalPage() {
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-sm">
-              IC
+              {companyName.slice(0, 2).toUpperCase()}
             </div>
             <div>
               <div className="text-sm font-bold text-slate-900">
-                Intense Care Deep Clean
+                {companyName}
               </div>
               <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
                 Customer Service Handover
@@ -449,13 +461,56 @@ export default function CustomerPortalPage() {
           </div>
         )}
 
-        {/* POST-SERVICE FEEDBACK & GOOGLE REVIEW SECTION */}
+        {/* THE MAIN EVENT: GOOGLE BUSINESS REVIEW (highlight) */}
+        {isApproved && googleReviewUrl && (
+          <div className="rounded-xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-white to-amber-50/60 p-6 shadow-md space-y-4">
+            <div className="flex items-start gap-4">
+              <div className="h-14 w-14 rounded-2xl bg-white border-2 border-amber-300 flex items-center justify-center shrink-0 shadow-xs">
+                <Star className="h-7 w-7 text-amber-400 fill-amber-400" />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-amber-600">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  One small favor
+                </div>
+                <h3 className="text-xl font-black text-slate-900 leading-tight">
+                  Loved the sparkle? Tell Google about it!
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed max-w-md">
+                  Your public review takes 30 seconds and helps {companyName} reach more homes that need a
+                  deep clean. It means the world to the crew that served you today.
+                </p>
+              </div>
+            </div>
+
+            <a
+              href={googleReviewUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={handleGoogleReviewClick}
+              className="flex items-center justify-center gap-2 w-full h-12 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800 shadow-sm transition-colors"
+            >
+              <Star className="h-4 w-4 text-amber-400 fill-amber-400" />
+              Review Us on Google
+              <ExternalLink className="h-4 w-4" />
+            </a>
+
+            {googleReviewOpened && (
+              <p className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1.5">
+                <Check className="h-3.5 w-3.5" />
+                Google review page opened in a new tab — thank you!
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Optional in-app star feedback (secondary to the Google review) */}
         {isApproved && (
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-5">
             <div>
               <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
                 <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-                Customer Satisfaction Feedback
+                Private Feedback to the Team
               </div>
               <h3 className="text-base font-bold text-slate-900 mt-1">
                 How would you rate your cleaning experience?
@@ -541,35 +596,6 @@ export default function CustomerPortalPage() {
                 Your feedback has been logged. Thank you!
               </div>
             )}
-
-            {/* Official Google Business Review CTA (ungated) */}
-            <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
-              <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                <Sparkles className="h-4 w-4 text-amber-500" />
-                Leave an Official Google Business Review
-              </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Your feedback helps us continuously improve our deep cleaning field services. You can also share your public review on our Google Business Profile.
-              </p>
-              <a
-                href={systemSettings.googleBusinessReviewUrl || ""}
-                target="_blank"
-                rel="noreferrer"
-                onClick={() => setGoogleReviewOpened(true)}
-                style={{ display: systemSettings.googleBusinessReviewUrl ? undefined : "none" }}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 shadow-xs"
-              >
-                <Star className="h-4 w-4 text-amber-400 fill-amber-400" />
-                Review Us on Google Business
-                <ExternalLink className="h-3 w-3" />
-              </a>
-
-              {googleReviewOpened && (
-                <p className="text-[11px] text-emerald-700 font-semibold mt-2">
-                  ✓ Google review page opened in new tab.
-                </p>
-              )}
-            </div>
           </div>
         )}
       </main>

@@ -23,6 +23,7 @@ import {
   X,
   Upload,
   Loader2,
+  Eye,
 } from "lucide-react";
 import Link from "next/link";
 import { ImageLightboxModal } from "@/components/common/ImageLightboxModal";
@@ -43,6 +44,8 @@ export default function FieldStaffPage() {
     transitionJobStatus,
     transitionError,
     refreshJobs,
+    refreshQuality,
+    refreshPhotos,
     sendJobArrivalOTP,
     updateChecklistItem,
     addJobPhoto,
@@ -93,6 +96,19 @@ export default function FieldStaffPage() {
     }
   };
 
+  // Live sync: workers and supervisors see status, checklist, rework and
+  // evidence changes land within seconds — no pull-to-refresh guessing.
+  React.useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshJobs();
+      void refreshQuality();
+      void refreshPhotos();
+    };
+    const interval = setInterval(tick, 8000);
+    return () => clearInterval(interval);
+  }, [refreshJobs, refreshQuality, refreshPhotos]);
+
   const currentJob = jobs.find((j) => j.id === selectedJobId) || assignedJobs[0];
   const customer = customers.find((c) => c.id === currentJob?.customerId);
   const property = properties.find((p) => p.id === currentJob?.propertyId);
@@ -108,12 +124,20 @@ export default function FieldStaffPage() {
 
   // Lead-worker gate: the FIRST entry of assignedStaffIds controls the
   // customer OTP flow (receive via SMS, enter/verify, unlock work). Support
-  // workers on the same job execute it without OTP control. Managers/admins
-  // retain oversight access.
-  const isLeadForJob = isManager
-    ? true
-    : currentJob?.assignedManagerId === currentUser.id ||
-      currentJob?.assignedStaffIds?.[0] === currentUser.id;
+  // workers on the same job execute it without OTP control. The owner may
+  // override; the ops_manager supervises and never verifies entry — the
+  // customer reads the OTP to the worker standing on site.
+  const isLeadForJob =
+    currentUser.role === "super_admin" ||
+    currentJob?.assignedManagerId === currentUser.id ||
+    currentJob?.assignedStaffIds?.[0] === currentUser.id;
+
+  // Role separation: field EXECUTION (arrival, OTP, checklist, photos,
+  // completing work) belongs to the assigned field worker; the owner may
+  // override from the desk. The ops_manager (QC) gets a read-only supervisor
+  // view — dispatch and quality audits are theirs, physical work is not.
+  const canExecuteFieldWork = currentUser.role === "staff" || currentUser.role === "super_admin";
+  const isSupervisor = currentUser.role === "ops_manager";
 
   // Co-assigned workers visible on the job card (dynamic — no hardcoded ids).
   // Server-resolved names first: staff cannot read the user directory, so a
@@ -187,6 +211,24 @@ export default function FieldStaffPage() {
     showToast(res.success ? "Work marked complete! Submitted to Quality Control." : res.message);
   };
 
+  // Rework completion: the server closes the task, resolves the linked QC
+  // defect, and — when it is the last open task — moves the job to
+  // REWORK_COMPLETED for reinspection. The client simply re-syncs.
+  const handleReworkDone = async (taskId: string) => {
+    if (!currentJob) return;
+    setIsProcessingAction(true);
+    const res = await completeReworkTask(taskId, "Corrective work completed on site.");
+    if (!res.success) {
+      setIsProcessingAction(false);
+      showToast(res.message);
+      return;
+    }
+    await refreshJobs();
+    await refreshQuality();
+    setIsProcessingAction(false);
+    showToast("Rework done — the QC desk has been notified for reinspection.");
+  };
+
   const handleAddPhotoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!photoDataUrl || !currentJob) return;
@@ -225,7 +267,7 @@ export default function FieldStaffPage() {
             )}
             <div>
               <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                Field Technician Portal
+                {isSupervisor ? "Field Supervisor (Read-Only)" : "Field Technician Portal"}
               </div>
               <div className="text-sm font-bold text-white flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
@@ -382,8 +424,19 @@ export default function FieldStaffPage() {
               Next Required Step
             </div>
 
-            {/* Step 1: ASSIGNED -> Mark Arrived */}
-            {currentJob.status === "ASSIGNED" && (
+            {/* Supervisor view: ops_manager observes without executing */}
+            {isSupervisor && !["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_REQUIRED", "REWORK_COMPLETED", "REINSPECTION", "CUSTOMER_APPROVAL", "COMPLETED", "CLOSED", "CANCELLED"].includes(currentJob.status) && (
+              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-xs space-y-1">
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Eye className="h-4 w-4" />
+                  Supervisor View — read-only
+                </div>
+                Arrival, OTP verification, checklist and evidence uploads are performed by the assigned field worker on their device. Your desk controls dispatch (Jobs) and quality audits (Quality Control).
+              </div>
+            )}
+
+            {/* Step 1: ASSIGNED -> Mark Arrived (field worker / owner) */}
+            {currentJob.status === "ASSIGNED" && canExecuteFieldWork && (
               <Button
                 onClick={handleMarkArrived}
                 disabled={isProcessingAction}
@@ -404,7 +457,7 @@ export default function FieldStaffPage() {
             )}
 
             {/* Step 2: ARRIVED -> Verify Customer OTP (lead worker only) */}
-            {currentJob.status === "ARRIVED" && (
+            {currentJob.status === "ARRIVED" && canExecuteFieldWork && (
               <div className="space-y-2">
                 {isLeadForJob ? (
                   <>
@@ -427,8 +480,8 @@ export default function FieldStaffPage() {
               </div>
             )}
 
-            {/* Step 3: CUSTOMER_VERIFIED -> Start Job */}
-            {currentJob.status === "CUSTOMER_VERIFIED" && (
+            {/* Step 3: CUSTOMER_VERIFIED -> Start Job (field worker / owner) */}
+            {currentJob.status === "CUSTOMER_VERIFIED" && canExecuteFieldWork && (
               <Button
                 onClick={handleStartJob}
                 disabled={isProcessingAction}
@@ -459,23 +512,29 @@ export default function FieldStaffPage() {
                   <span>Started {new Date(currentJob.startedAt || "").toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
 
-                <Button
-                  onClick={handleCompleteWork}
-                  disabled={isProcessingAction}
-                  className="w-full h-12 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-sm"
-                >
-                  {isProcessingAction ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="h-4 w-4 mr-2" />
-                      Complete Cleaning Work (Submit for QC)
-                    </>
-                  )}
-                </Button>
+                {canExecuteFieldWork ? (
+                  <Button
+                    onClick={handleCompleteWork}
+                    disabled={isProcessingAction}
+                    className="w-full h-12 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-sm"
+                  >
+                    {isProcessingAction ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Complete Cleaning Work (Submit for QC)
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-xs">
+                    The field worker is executing the checklist. Live progress streams to your Quality Control desk.
+                  </div>
+                )}
               </div>
             )}
 
@@ -489,39 +548,72 @@ export default function FieldStaffPage() {
               </div>
             )}
 
+            {/* Step 5: REWORK loop — QC's instructions are shown verbatim with
+                a one-tap “done” action; the server advances the pipeline. */}
             {(currentJob.status === "REWORK_REQUIRED" || currentJob.status === "REWORK_COMPLETED") && (
               <div className="p-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-900 text-xs space-y-2">
                 <div className="font-bold flex items-center gap-1.5 text-rose-700">
                   <AlertTriangle className="h-4 w-4" />
-                  Rework Tasks Flagged by Operations Manager
+                  Rework Required — QC Instructions
                 </div>
                 <p className="text-[11px] text-rose-800">
-                  Please review the defects below, perform corrections, and submit for reinspection.
+                  The Quality Control desk flagged the items below. Fix each one on site, then mark it done — the desk is notified instantly for reinspection.
                 </p>
                 {jobRework.length > 0 && (
                   <div className="space-y-1.5 pt-1">
-                    {jobRework.map((task) => (
-                      <div key={task.id} className="p-2.5 rounded bg-white border border-rose-200 space-y-1.5">
-                        <p className="font-medium text-rose-900">{task.instructions}</p>
-                        <Button
-                          size="sm"
-                          onClick={async () => {
-                            const res = await completeReworkTask(task.id, "Corrective work completed on site.");
-                            showToast(res.success ? "Rework task completed — awaiting reinspection." : res.message);
-                            if (res.success) {
-                              void refreshJobs();
-                              const cur = transitionJobStatus(currentJob.id, "REWORK_COMPLETED");
-                              if (cur.success) void refreshJobs();
-                            }
-                          }}
-                          className="h-7 text-[11px] bg-rose-600 hover:bg-rose-700 text-white"
-                        >
-                          <CheckCircle2 className="h-3 w-3 mr-1" />
-                          Mark This Rework Done
-                        </Button>
-                      </div>
-                    ))}
+                    {jobRework.map((task) => {
+                      const linkedIssue = jobIssues.find((i) => i.reworkTaskId === task.id);
+                      return (
+                        <div key={task.id} className="p-2.5 rounded bg-white border border-rose-200 space-y-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {linkedIssue?.area && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-100 text-slate-700">
+                                {linkedIssue.area}
+                              </span>
+                            )}
+                            {linkedIssue?.severity && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                  linkedIssue.severity === "critical"
+                                    ? "bg-rose-600 text-white"
+                                    : linkedIssue.severity === "major"
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-slate-200 text-slate-700"
+                                }`}
+                              >
+                                {linkedIssue.severity}
+                              </span>
+                            )}
+                          </div>
+                          <p className="font-medium text-rose-900">{task.instructions}</p>
+                          {canExecuteFieldWork ? (
+                            <Button
+                              size="sm"
+                              disabled={isProcessingAction}
+                              onClick={() => handleReworkDone(task.id)}
+                              className="h-8 text-[11px] bg-rose-600 hover:bg-rose-700 text-white"
+                            >
+                              {isProcessingAction ? (
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                              )}
+                              Mark This Rework Done
+                            </Button>
+                          ) : (
+                            <p className="text-[10px] text-slate-400 italic">
+                              The assigned field worker completes this task.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
+                )}
+                {jobRework.length === 0 && (
+                  <p className="text-[11px] text-rose-800 italic">
+                    Syncing rework instructions from the QC desk…
+                  </p>
                 )}
               </div>
             )}
@@ -561,13 +653,18 @@ export default function FieldStaffPage() {
                 <div
                   key={item.id}
                   onClick={() => {
+                    if (!canExecuteFieldWork) return; // read-only for supervisors
                     const newStatus = item.status === "completed" ? "pending" : "completed";
                     updateChecklistItem(item.id, newStatus);
                   }}
-                  className={`p-3 rounded-lg border transition-all cursor-pointer flex items-start gap-3 ${
+                  className={`p-3 rounded-lg border flex items-start gap-3 ${
+                    canExecuteFieldWork ? "cursor-pointer transition-all" : "opacity-90"
+                  } ${
                     item.status === "completed"
                       ? "bg-emerald-50/50 border-emerald-200 text-slate-900"
-                      : "bg-slate-50 border-slate-200 hover:bg-slate-100/70"
+                      : canExecuteFieldWork
+                      ? "bg-slate-50 border-slate-200 hover:bg-slate-100/70"
+                      : "bg-slate-50 border-slate-200"
                   }`}
                 >
                   <div
@@ -606,14 +703,16 @@ export default function FieldStaffPage() {
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
                 Photo Proof ({currentPhotos.length})
               </span>
-              <Button
-                size="sm"
-                onClick={() => setShowPhotoModal(true)}
-                className="h-7 text-xs bg-slate-900 text-white px-2.5 font-medium"
-              >
-                <Camera className="h-3.5 w-3.5 mr-1" />
-                Add Photo
-              </Button>
+              {canExecuteFieldWork && (
+                <Button
+                  size="sm"
+                  onClick={() => setShowPhotoModal(true)}
+                  className="h-7 text-xs bg-slate-900 text-white px-2.5 font-medium"
+                >
+                  <Camera className="h-3.5 w-3.5 mr-1" />
+                  Add Photo
+                </Button>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -644,8 +743,8 @@ export default function FieldStaffPage() {
         </main>
       )}
 
-      {/* OTP Modal — mounted ONLY for the lead worker of the current job */}
-      {currentJob && isLeadForJob && (
+      {/* OTP Modal — mounted ONLY for the lead worker (or owner override) */}
+      {currentJob && isLeadForJob && canExecuteFieldWork && (
         <OTPModal
           job={currentJob}
           isOpen={isOtpOpen}

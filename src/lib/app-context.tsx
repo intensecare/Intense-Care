@@ -87,6 +87,12 @@ interface AppContextType {
   refreshCustomers: () => Promise<void>;
   /** Re-fetches the referral ledger from the server (post-write re-sync; super_admin only). */
   refreshReferrals: () => Promise<void>;
+  /** Re-fetches QC checks, issues, rework tasks and complaints. Live-syncs
+   *  the rework loop: a worker's newly-assigned rework appears without a
+   *  session restart, and QC sees completions land. */
+  refreshQuality: () => Promise<void>;
+  /** Re-fetches the evidence photo collection from the server. */
+  refreshPhotos: () => Promise<void>;
   /** Last server-rejected status transition, for UI error display. */
   transitionError: { jobId: string; message: string } | null;
 
@@ -508,6 +514,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshCustomers = useCallback(async () => {
     const r = await api<Customer[]>("/api/customers");
     if (r.ok && r.data) setCustomers(r.data);
+  }, []);
+
+  /**
+   * Re-fetches the quality collections (checks, issues, rework tasks,
+   * complaints) from the server. Role-scoped server-side; safe to call from
+   * any page's polling loop.
+   */
+  const refreshQuality = useCallback(async () => {
+    const r = await api<{
+      qualityChecks: QualityCheck[];
+      qualityIssues: QualityIssue[];
+      reworkTasks: ReworkTask[];
+      complaints: Complaint[];
+    }>("/api/quality");
+    if (r.ok && r.data) {
+      setQualityChecks(r.data.qualityChecks);
+      setQualityIssues(r.data.qualityIssues);
+      setReworkTasks(r.data.reworkTasks);
+      setComplaints(r.data.complaints);
+    }
+  }, []);
+
+  /** Re-fetches the evidence photo collection (role-scoped server-side). */
+  const refreshPhotos = useCallback(async () => {
+    const r = await api<JobPhoto[]>("/api/photos");
+    if (r.ok && r.data) setPhotos(r.data);
   }, []);
 
   /**
@@ -1553,6 +1585,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         refreshJobs,
         refreshCustomers,
         refreshReferrals,
+        refreshQuality,
+        refreshPhotos,
         transitionError,
         sendJobArrivalOTP,
         verifyJobOTP,

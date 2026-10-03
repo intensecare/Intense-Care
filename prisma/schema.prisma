@@ -465,6 +465,24 @@ model OtpChallenge {
   @@index([expiresAt])
 }
 
+/// Real-time pipeline activity event for a job. Written server-side on every
+/// field-worker action (arrival, OTP verification, checklist ticks, photo
+/// uploads, rework progress) and QC decision so supervisors see a live,
+/// auditable feed without polling raw tables.
+model JobActivityEvent {
+  id        String   @id @default(cuid())
+  jobId     String
+  type      String // STATUS_CHANGED | OTP_VERIFIED | CHECKLIST_UPDATED | PHOTO_UPLOADED | QC_SUBMITTED | REWORK_ASSIGNED | REWORK_COMPLETED | CUSTOMER_SIGNED | FEEDBACK_RECORDED | STAFF_ASSIGNED | ATTENTION_REQUESTED
+  message   String
+  actorId   String?
+  actorName String
+  actorRole String
+  createdAt DateTime @default(now())
+
+  @@index([jobId, createdAt])
+  @@index([createdAt])
+}
+
 /// Audit trail of every outbound SMS dispatch (OTP + completion links).
 /// Sensitive payloads (OTP codes, portal tokens) are masked before logging.
 model SmsLog {

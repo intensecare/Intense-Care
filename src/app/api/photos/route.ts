@@ -5,6 +5,7 @@ import { requireUser, authorizeJobAccess, isManagerRole } from "@/lib/server/aut
 import { uploadJobPhoto, validateImagePayload } from "@/lib/server/cloudinary";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
+import { recordActivity } from "@/lib/server/activity";
 
 const BodySchema = z.object({
   jobId: z.string().min(1).max(64),
@@ -131,6 +132,14 @@ export async function POST(request: Request) {
       photoType,
       publicId: upload.data.publicId,
       by: user.id,
+    });
+
+    // Supervisor-visible live feed event (QC sees evidence land in real time).
+    await recordActivity({
+      jobId,
+      type: "PHOTO_UPLOADED",
+      message: `${photoType === "before" ? "Before" : "After"} photo uploaded for ${area.trim()}${caption?.trim() ? ` — “${caption.trim()}”` : ""}`,
+      actor: { id: user.id, name: user.name, role: user.role },
     });
 
     return NextResponse.json({

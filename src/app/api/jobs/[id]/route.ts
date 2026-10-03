@@ -5,9 +5,10 @@ import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { getOpsDateVisibility } from "@/lib/ops-visibility";
 import { dispatchCutoffTime } from "@/lib/server/policy";
-import { getAllowedTransitions } from "@/lib/state-machine";
+import { getAllowedTransitions, JOB_STATUS_CONFIG } from "@/lib/state-machine";
 import type { Job } from "@/lib/types";
 import { serializeJob, redactJobForOps, withStaffNames } from "@/lib/server/serialize";
+import { recordActivity } from "@/lib/server/activity";
 
 /**
  * Serializes a single job for API responses with the same display data as the
@@ -217,6 +218,18 @@ export async function PATCH(
         data: { assignedStaffIds: ids, status: nextStatus, updatedAt: new Date() },
       });
       logger.info("jobs.assignment_updated", { jobId: id, count: ids.length, by: user.id });
+      // Supervisor-visible activity feed: crew changes are pipeline events.
+      await recordActivity({
+        jobId: id,
+        type: "STAFF_ASSIGNED",
+        message:
+          ids.length > 0
+            ? `Crew updated — ${ids.length} field worker${ids.length === 1 ? "" : "s"} assigned${
+                nextStatus === "ASSIGNED" && existingJob.status !== "ASSIGNED" ? " (job is now Staff Assigned)" : ""
+              }`
+            : "All field workers unassigned (job returned to Scheduled)",
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
       // Redact financial fields for non-super_admin callers on the way out.
       const { user: _u } = await requireUser();
       const full = await prisma.job.findUnique({
@@ -236,6 +249,27 @@ export async function PATCH(
     const status = body?.status;
     if (typeof status !== "string" || status.length === 0 || status.length > 32) {
       return NextResponse.json({ success: false, error: "status is required." }, { status: 400 });
+    }
+
+    // Role separation: field-execution states belong to the assigned field
+    // worker (they are physically on site). The ops_manager runs dispatch and
+    // the QC desk — not arrival, OTP, work progress or rework completion.
+    const FIELD_EXECUTION_STATUSES = [
+      "ARRIVED",
+      "CUSTOMER_VERIFIED",
+      "IN_PROGRESS",
+      "WORK_COMPLETED",
+      "REWORK_COMPLETED",
+    ];
+    if (user.role === "ops_manager" && FIELD_EXECUTION_STATUSES.includes(status)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Field execution actions (arrival, OTP, work progress, rework completion) are performed by the assigned field worker. Use the Quality Control desk for audits and rework.",
+        },
+        { status: 403 }
+      );
     }
 
     const existing = await prisma.job.findUnique({ where: { id } });
@@ -310,6 +344,29 @@ export async function PATCH(
     const job = await prisma.job.update({
       where: { id },
       data: { status, updatedAt: new Date() },
+    });
+
+    // Live pipeline feed: every lifecycle move is a supervisor-visible event.
+    const STATUS_EVENT_MESSAGES: Record<string, string> = {
+      SCHEDULED: "Job scheduled",
+      ASSIGNED: "Field staff assigned to the job",
+      ARRIVED: "Field worker arrived on site — awaiting customer OTP",
+      CUSTOMER_VERIFIED: "Customer OTP verified — property entry authorized",
+      IN_PROGRESS: "Work started — cleaning in progress",
+      WORK_COMPLETED: "Field worker marked work completed — submitted for QC audit",
+      QUALITY_CHECK: "QC inspection started",
+      REWORK_COMPLETED: "Rework completed by field worker — awaiting reinspection",
+      CUSTOMER_APPROVAL: "QC passed — handover link sent to customer",
+      COMPLETED: "Customer approved — job completed",
+      FEEDBACK_REQUESTED: "Feedback & Google review link sent to customer",
+      CLOSED: "Job closed and archived",
+      CANCELLED: "Job cancelled",
+    };
+    await recordActivity({
+      jobId: id,
+      type: "STATUS_CHANGED",
+      message: STATUS_EVENT_MESSAGES[status] || `Job moved to ${JOB_STATUS_CONFIG[status as Job["status"]]?.label || status}`,
+      actor: { id: user.id, name: user.name, role: user.role },
     });
 
     // Server-authoritative commission settlement: when a referred job

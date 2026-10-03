@@ -4,6 +4,7 @@ import { z } from "zod";
 import { recordSignOff } from "@/lib/server/completion-service";
 import { logger } from "@/lib/server/logger";
 import { prisma } from "@/lib/server/prisma";
+import { recordActivity } from "@/lib/server/activity";
 
 const BodySchema = z.object({
   decision: z.enum(["APPROVED", "ATTENTION_REQUESTED"]),
@@ -62,6 +63,17 @@ export async function POST(
       });
       logger.info("portal.sign.completed_job", { jobId: job.id });
     }
+
+    // Live feed: ops/QC see the customer's decision the moment it happens.
+    await recordActivity({
+      jobId: job.id,
+      type: parsed.data.decision === "APPROVED" ? "CUSTOMER_SIGNED" : "ATTENTION_REQUESTED",
+      message:
+        parsed.data.decision === "APPROVED"
+          ? `Customer digitally signed off the completed service${parsed.data.signatoryName ? ` — ${parsed.data.signatoryName}` : ""}`
+          : `Customer requested attention: ${parsed.data.notes || "see handover ticket"}`,
+      actor: { name: parsed.data.signatoryName || "Customer", role: "customer" },
+    });
 
     return NextResponse.json({
       success: true,

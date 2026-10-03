@@ -17,6 +17,7 @@ import { Link2, Copy, Check, Loader2, MessageCircle } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getAllowedTransitions, JOB_STATUS_CONFIG } from "@/lib/state-machine";
 import { formatCurrency, formatDate, formatDateTime, timeAgo, formatTimeSlot, buildWhatsAppShareUrl } from "@/lib/utils";
+import type { JobActivityEvent } from "@/lib/types";
 import {
   Calendar,
   Clock,
@@ -42,6 +43,13 @@ import {
   KeyRound,
   Users,
   UserCheck,
+  Radio,
+  Star,
+  Camera as CameraIcon,
+  ClipboardCheck,
+  RotateCcw,
+  PenLine,
+  UserPlus,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -55,6 +63,55 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+
+/**
+ * Pipeline stage → the tab that matters at that stage. The job file follows
+ * the job: Draft/Scheduled opens Overview, Assigned opens the crew checklist,
+ * execution opens evidence photos, QC states open Quality & Rework, and the
+ * customer-facing stages open Sign-off & Feedback.
+ */
+const STAGE_TAB_MAP: Record<string, string> = {
+  DRAFT: "overview",
+  SCHEDULED: "overview",
+  ASSIGNED: "checklist",
+  ARRIVED: "checklist",
+  CUSTOMER_VERIFIED: "checklist",
+  IN_PROGRESS: "photos",
+  WORK_COMPLETED: "qc",
+  QUALITY_CHECK: "qc",
+  REWORK_REQUIRED: "qc",
+  REWORK_COMPLETED: "qc",
+  REINSPECTION: "qc",
+  PASS: "qc",
+  CUSTOMER_APPROVAL: "approval",
+  COMPLETED: "financials",
+  FEEDBACK_REQUESTED: "approval",
+  CLOSED: "overview",
+  CANCELLED: "overview",
+};
+
+function stageTabFor(status: string, role: string): string | null {
+  const tab = STAGE_TAB_MAP[status] || null;
+  // Non-super_admin roles have no Finance tab — fall back to sign-off.
+  if (tab === "financials" && role !== "super_admin") return "approval";
+  return tab;
+}
+
+const ACTIVITY_ICON: Record<string, { icon: React.ReactNode; tint: string }> = {
+  STATUS_CHANGED: { icon: <ArrowRight className="h-3.5 w-3.5" />, tint: "bg-slate-100 text-slate-600" },
+  STAFF_ASSIGNED: { icon: <UserPlus className="h-3.5 w-3.5" />, tint: "bg-indigo-50 text-indigo-600" },
+  OTP_SENT: { icon: <KeyRound className="h-3.5 w-3.5" />, tint: "bg-amber-50 text-amber-600" },
+  OTP_VERIFIED: { icon: <KeyRound className="h-3.5 w-3.5" />, tint: "bg-emerald-50 text-emerald-600" },
+  CHECKLIST_UPDATED: { icon: <ClipboardCheck className="h-3.5 w-3.5" />, tint: "bg-sky-50 text-sky-600" },
+  PHOTO_UPLOADED: { icon: <CameraIcon className="h-3.5 w-3.5" />, tint: "bg-blue-50 text-blue-600" },
+  QC_SUBMITTED: { icon: <ShieldCheck className="h-3.5 w-3.5" />, tint: "bg-purple-50 text-purple-600" },
+  REWORK_ASSIGNED: { icon: <RotateCcw className="h-3.5 w-3.5" />, tint: "bg-rose-50 text-rose-600" },
+  REWORK_COMPLETED: { icon: <CheckCircle2 className="h-3.5 w-3.5" />, tint: "bg-amber-50 text-amber-600" },
+  CUSTOMER_SIGNED: { icon: <PenLine className="h-3.5 w-3.5" />, tint: "bg-teal-50 text-teal-600" },
+  ATTENTION_REQUESTED: { icon: <AlertTriangle className="h-3.5 w-3.5" />, tint: "bg-rose-50 text-rose-600" },
+  FEEDBACK_RECORDED: { icon: <Star className="h-3.5 w-3.5" />, tint: "bg-amber-50 text-amber-600" },
+  GOOGLE_REVIEW_CLICKED: { icon: <Star className="h-3.5 w-3.5" />, tint: "bg-emerald-50 text-emerald-600" },
+};
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -81,6 +138,8 @@ export default function JobDetailPage() {
     assignStaffToJob,
     fetchStaffDirectory,
     refreshJobs,
+    refreshPhotos,
+    refreshQuality,
     systemSettings,
     sendCompletionLink,
     updateChecklistItem,
@@ -103,6 +162,48 @@ export default function JobDetailPage() {
 
   const [activeTab, setActiveTab] = useState("overview");
 
+  // Live pipeline activity feed for this job (also rendered in the Audit
+  // Log tab). Polled while the tab is visible so supervisors watch field
+  // actions land in near-real time.
+  const [activityEvents, setActivityEvents] = useState<JobActivityEvent[]>([]);
+  React.useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/activity?jobId=${encodeURIComponent(jobId)}&limit=60`);
+        const json = await res.json().catch(() => null);
+        if (!cancelled && res.ok && json?.success) setActivityEvents(json.data ?? []);
+      } catch {
+        // Feed is non-critical; the tab shows a sync note on failure.
+      }
+    };
+    void load();
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void load();
+    }, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [jobId]);
+
+  // Live pipeline sync: re-pull jobs/checklist, photos and QC records while
+  // this job file is open. A worker marking arrival or uploading evidence
+  // becomes visible to the watching manager within one interval — no manual
+  // browser refresh needed.
+  React.useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshJobs();
+      void refreshPhotos();
+      void refreshQuality();
+    };
+    const interval = setInterval(tick, 10000);
+    return () => clearInterval(interval);
+  }, [refreshJobs, refreshPhotos, refreshQuality]);
+
   // Secure customer handover link (generated server-side after QC pass; the
   // ops desk copies and shares it over any channel — no messaging dependency).
   const [handoverLink, setHandoverLink] = useState<string | null>(null);
@@ -111,10 +212,11 @@ export default function JobDetailPage() {
   const [linkError, setLinkError] = useState<string | null>(null);
 
   // Fetch the server-side sign-off/feedback state for this job (completion
-  // invite) whenever the job exists.
+  // invite) — and keep polling so a customer signing or reviewing in the
+  // portal appears here the moment it happens.
   React.useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       try {
         const res = await fetch(`/api/feedback?jobId=${encodeURIComponent(jobId)}`);
         const json = await res.json().catch(() => null);
@@ -124,9 +226,15 @@ export default function JobDetailPage() {
       } catch (e) {
         // Non-fatal: the tab simply shows empty state.
       }
-    })();
+    };
+    void load();
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void load();
+    }, 10000);
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, [jobId]);
 
@@ -246,6 +354,26 @@ export default function JobDetailPage() {
   // Find job
   const job = jobs.find((j) => j.id === jobId);
 
+  // Follow the pipeline: when the job's lifecycle stage changes (or the file
+  // is first opened mid-pipeline), open the section that stage is about —
+  // Draft/Scheduled → Overview, Assigned/Arrived → Checklist, In Progress →
+  // Evidence, QC states → Quality, customer stages → Sign-off & Feedback.
+  const lastStageRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!job) return;
+    if (lastStageRef.current !== job.status) {
+      lastStageRef.current = job.status;
+      const tab = stageTabFor(job.status, currentRole);
+      if (tab) setActiveTab(tab);
+    }
+  }, [job?.status, job, currentRole]);
+
+  // Role separation on this file: field-execution controls (checklist ticks,
+  // evidence uploads, arrival/OTP) belong to the assigned field worker; the
+  // owner may override. The ops_manager runs dispatch + QC and gets a
+  // read-only execution view.
+  const canExecuteFieldWork = currentRole === "super_admin" || currentRole === "staff";
+
   // Ops Managers cannot open jobs outside their dispatch visibility window
   // (past + today + tomorrow after the cutoff). Direct URL access to a future
   // job renders as not-found, mirroring the API's 403.
@@ -307,14 +435,24 @@ export default function JobDetailPage() {
         `Hello${customer?.name ? " " + customer.name : ""}, your deep cleaning service handover is ready. View the before/after photos and approve the completed work here: ${handoverLink}`
       )
     : null;
-  const assignedWorkers = (job.assignedStaffIds || [])
-    .map((id) => users.find((u) => u.id === id))
-    .filter(Boolean) as { id: string; name: string }[];
+  const assignedWorkers = (job.assignedStaffIds || []).map((id, idx) => {
+    const viaStore = users.find((u) => u.id === id);
+    // Staff viewers cannot read the user directory — fall back to the
+    // server-resolved names attached to the job payload.
+    const viaServer =
+      job.assignedStaffNames && job.assignedStaffNames.length === job.assignedStaffIds.length
+        ? job.assignedStaffNames[idx]
+        : undefined;
+    return { id, name: viaStore?.name || viaServer || `Worker ${idx + 1}` };
+  });
   const leadWorker = assignedWorkers[0];
+  // The customer OTP belongs to the lead worker on site (the customer reads
+  // the code to THEM). The ops desk never verifies entry on the customer's
+  // behalf — only the lead worker (or the owner as override) may enter it.
   const isLeadViewer =
     currentUser?.role === "super_admin" ||
-    currentUser?.role === "ops_manager" ||
-    leadWorker?.id === currentUser?.id;
+    leadWorker?.id === currentUser?.id ||
+    (currentUser?.role === "staff" && job.assignedStaffIds?.[0] === currentUser?.id);
   const jobChecklist = checklistItems.filter((item) => item.jobId === job.id);
   const jobPhotos = photos.filter((p) => p.jobId === job.id);
   const qc = qualityChecks.find((q) => q.jobId === job.id);
@@ -332,9 +470,13 @@ export default function JobDetailPage() {
     j.assignedStaffIds.forEach((id) => activeWorkerIds.add(id));
   });
 
-  // Allowed transitions for current user role
+  // Allowed transitions for current user role. The bare ASSIGNED transition
+  // is hidden — the dedicated “Assign Staff” button (which opens the crew
+  // picker and then advances the state) is the single, unambiguous control.
   const allowedTransitions = getAllowedTransitions(job).filter(
-    (action) => currentRole === "super_admin" || action.allowedRoles.includes(currentRole)
+    (action) =>
+      action.status !== "ASSIGNED" &&
+      (currentRole === "super_admin" || action.allowedRoles.includes(currentRole))
   );
 
   const handleExecuteTransition = async (targetStatus: any) => {
@@ -436,7 +578,7 @@ export default function JobDetailPage() {
 
         {/* Dynamic Allowed Actions for Current State */}
         <div className="flex items-center gap-2 flex-wrap">
-          {job.status === "ARRIVED" && job.otpVerification.status !== "verified" && (
+          {job.status === "ARRIVED" && job.otpVerification.status !== "verified" && isLeadViewer && (
             <Button
               size="sm"
               onClick={() => setIsOtpModalOpen(true)}
@@ -579,7 +721,15 @@ export default function JobDetailPage() {
         <JobTimeline job={job} />
       </div>
 
-      {/* Tabbed Job Detail Content */}
+      {/* Tabbed Job Detail Content — the active tab follows the pipeline
+          stage; the live dot shows the file auto-syncs while open. */}
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] text-slate-400">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+        </span>
+        Live — this file auto-syncs every 10s and follows the pipeline stage
+      </div>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="bg-slate-200/70 p-1">
           <TabsTrigger value="overview">Overview & Details</TabsTrigger>
@@ -681,23 +831,13 @@ export default function JobDetailPage() {
 
             </div>
 
-              {/* Worker Assignment & OTP Security Box */}
+              {/* Worker Assignment & OTP Security Box (assignment is driven
+                  by the single “Assign Staff” action in the lifecycle bar) */}
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                     Field Workers & Security Verification
                   </h3>
-                  {canManage && ["DRAFT", "SCHEDULED", "ASSIGNED"].includes(job.status) && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={openAssignmentModal}
-                      className="h-7 text-[11px] gap-1"
-                    >
-                      <UserCheck className="h-3.5 w-3.5" />
-                      {job.assignedStaffIds.length > 0 ? "Manage Crew" : "Assign Staff"}
-                    </Button>
-                  )}
                 </div>
 
               <div className="space-y-1">
@@ -830,36 +970,42 @@ export default function JobDetailPage() {
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {item.status !== "completed" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => updateChecklistItem(item.id, "completed")}
-                          className="h-7 text-[11px] px-2 text-emerald-700 hover:bg-emerald-50"
-                        >
-                          Mark Done
-                        </Button>
-                      )}
-                      {item.status !== "skipped" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setPromptConfig({
-                              isOpen: true,
-                              title: "Skip Checklist Item",
-                              description: `Specify reason for skipping "${item.task}":`,
-                              placeholder: "Client requested to skip",
-                              defaultValue: "Client requested to skip",
-                              onSubmit: (reason) => {
-                                updateChecklistItem(item.id, "skipped", reason || "Client requested to skip");
-                              },
-                            });
-                          }}
-                          className="h-7 text-[11px] px-2 text-slate-500"
-                        >
-                          Skip
-                        </Button>
+                      {canExecuteFieldWork ? (
+                        <>
+                          {item.status !== "completed" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateChecklistItem(item.id, "completed")}
+                              className="h-7 text-[11px] px-2 text-emerald-700 hover:bg-emerald-50"
+                            >
+                              Mark Done
+                            </Button>
+                          )}
+                          {item.status !== "skipped" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setPromptConfig({
+                                  isOpen: true,
+                                  title: "Skip Checklist Item",
+                                  description: `Specify reason for skipping "${item.task}":`,
+                                  placeholder: "Client requested to skip",
+                                  defaultValue: "Client requested to skip",
+                                  onSubmit: (reason) => {
+                                    updateChecklistItem(item.id, "skipped", reason || "Client requested to skip");
+                                  },
+                                });
+                              }}
+                              className="h-7 text-[11px] px-2 text-slate-500"
+                            >
+                              Skip
+                            </Button>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 italic">Field worker execution</span>
                       )}
                     </div>
                   </div>
@@ -871,11 +1017,18 @@ export default function JobDetailPage() {
 
         {/* 3. PHOTOS TAB */}
         <TabsContent value="photos" className="space-y-4">
-          <BeforeAfterGallery
-            photos={jobPhotos}
-            allowUpload={true}
-            onUploadClick={() => setPhotoUploadOpen(true)}
-          />
+          {canExecuteFieldWork ? (
+            <BeforeAfterGallery
+              photos={jobPhotos}
+              allowUpload={true}
+              onUploadClick={() => setPhotoUploadOpen(true)}
+            />
+          ) : (
+            <BeforeAfterGallery
+              photos={jobPhotos}
+              allowUpload={false}
+            />
+          )}
         </TabsContent>
 
         {/* 4. QUALITY CHECK TAB */}
@@ -1009,7 +1162,7 @@ export default function JobDetailPage() {
                           <strong>Instructions:</strong> {issue.reworkInstructions || issue.notes}
                         </p>
 
-                        {task && task.status !== "completed" && (currentRole === "super_admin" || currentRole === "ops_manager" || currentRole === "staff") && (
+                        {task && task.status !== "completed" && canExecuteFieldWork && (
                           <div className="pt-2 flex justify-end">
                             <Button
                               size="sm"
@@ -1224,18 +1377,48 @@ export default function JobDetailPage() {
           </div>
         </TabsContent>
 
-        {/* 7. AUDIT LOG TAB */}
+        {/* 7. AUDIT LOG TAB — the real, server-recorded pipeline activity feed */}
         <TabsContent value="audit" className="space-y-4">
           <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
-              Immutable Action Log for {job.id}
-            </h3>
-
-            <div className="py-6 text-center text-xs text-slate-400">
-              Session-scoped audit entries are recorded in real time; the
-              authoritative, tamper-evident server audit trail is available in
-              Settings → Operations Audit Log.
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Live Action Log for {job.id}
+              </h3>
+              <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                Auto-syncs every 10s
+              </span>
             </div>
+
+            {activityEvents.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-400">
+                No activity recorded for this job yet — every field-worker and QC
+                action (arrival, OTP, checklist ticks, photos, rework, customer
+                sign-off) will appear here as it happens.
+              </div>
+            ) : (
+              <div className="mt-3 space-y-0 divide-y divide-slate-100">
+                {activityEvents.map((event) => {
+                  const meta = ACTIVITY_ICON[event.type] || ACTIVITY_ICON.STATUS_CHANGED;
+                  return (
+                    <div key={event.id} className="py-2.5 flex items-start gap-3 text-xs">
+                      <span className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${meta.tint}`}>
+                        {meta.icon}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-slate-800 font-medium">{event.message}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {event.actorName}
+                          {event.actorRole === "customer" ? " (customer)" : ` · ${event.actorRole.replace("_", " ")}`} · {formatDateTime(event.createdAt)} ({timeAgo(event.createdAt)})
+                        </p>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase tracking-wide text-slate-300 shrink-0 pt-1">
+                        {event.type.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </TabsContent>
       </Tabs>

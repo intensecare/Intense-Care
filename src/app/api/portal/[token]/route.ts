@@ -43,6 +43,12 @@ export async function GET(
       orderBy: [{ area: "asc" }, { id: "asc" }],
     });
 
+    // The Google review URL must be resolved SERVER-side: the portal is a
+    // public page whose visitor has no ERP session, so client-side settings
+    // used to fall back to defaults and the review CTA silently vanished.
+    const settingsRow = await prisma.systemSettings.findUnique({ where: { id: "singleton" } });
+    const settingsData = (settingsRow?.data ?? {}) as { googleBusinessReviewUrl?: string; companyName?: string };
+
     return NextResponse.json({
       success: true,
       data: {
@@ -56,6 +62,10 @@ export async function GET(
         customer: customer
           ? { name: customer.name, phoneMasked: maskPhone(customer.phone) }
           : null,
+        company: {
+          name: settingsData.companyName || "Intense Care",
+          googleReviewUrl: settingsData.googleBusinessReviewUrl || "",
+        },
         property: property
           ? { title: property.title, address: property.address }
           : null,

@@ -5,6 +5,7 @@ import { verifyArrivalOtp } from "@/lib/server/otp-service";
 import { prisma } from "@/lib/server/prisma";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
+import { recordActivity } from "@/lib/server/activity";
 
 const BodySchema = z.object({
   jobId: z.string().min(1).max(64),
@@ -76,6 +77,14 @@ export async function POST(request: Request) {
       from: "ARRIVED",
       to: "CUSTOMER_VERIFIED",
       verifiedBy: user.id,
+    });
+
+    // Supervisor-visible live feed event.
+    await recordActivity({
+      jobId,
+      type: "OTP_VERIFIED",
+      message: "Customer arrival OTP verified — work unlocked",
+      actor: { id: user.id, name: user.name, role: user.role },
     });
 
     return NextResponse.json({

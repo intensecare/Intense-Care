@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/server/prisma";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
+import { recordActivity } from "@/lib/server/activity";
 
 /** Invite tokens are stored only as SHA-256 hashes (see completion-service). */
 function hashToken(token: string): string {
@@ -60,6 +61,22 @@ export async function POST(request: Request) {
       rating: parsed.data.rating,
     });
 
+    // Live feed: ops/QC see customer feedback land the moment it happens.
+    await recordActivity({
+      jobId: invite.jobId,
+      type: "FEEDBACK_RECORDED",
+      message: `Customer rated the service ${parsed.data.rating}/5${parsed.data.comment ? ` — “${parsed.data.comment}”` : ""}`,
+      actor: { name: "Customer", role: "customer" },
+    });
+    if (parsed.data.googleReviewClicked) {
+      await recordActivity({
+        jobId: invite.jobId,
+        type: "GOOGLE_REVIEW_CLICKED",
+        message: "Customer clicked through to Google Business review",
+        actor: { name: "Customer", role: "customer" },
+      });
+    }
+
     return NextResponse.json({
       success: true,
       data: { feedbackAt: updated.feedbackAt?.toISOString() ?? null },
@@ -89,13 +106,20 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" },
     });
 
+    // Full sign-off + feedback snapshot. The job record's Sign-off & Feedback
+    // tab consumes EXACTLY this shape (signStatus/signatoryName/feedback*) —
+    // the previous {rating, tags, comment} shape never matched the page's
+    // field names, so submitted reviews silently never rendered.
     return NextResponse.json({
       success: true,
       data: invite
         ? {
-            rating: invite.feedbackRating,
-            tags: invite.feedbackTags,
-            comment: invite.feedbackComment,
+            signStatus: invite.signStatus,
+            signedAt: invite.signedAt?.toISOString() ?? null,
+            signatoryName: invite.signatoryName ?? null,
+            feedbackRating: invite.feedbackRating,
+            feedbackTags: invite.feedbackTags ?? [],
+            feedbackComment: invite.feedbackComment,
             googleReviewClicked: invite.googleReviewClicked,
             feedbackAt: invite.feedbackAt?.toISOString() ?? null,
           }
