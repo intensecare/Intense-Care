@@ -20,6 +20,7 @@ import {
   Smartphone,
   ExternalLink,
   CheckCircle2,
+  Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
@@ -31,7 +32,11 @@ export function Sidebar() {
   const { currentUser } = useAuth();
   const userRole = currentUser?.role || "super_admin";
   const allowedPaths = ROLE_ROUTE_PERMISSIONS[userRole] || [];
-  const { jobs, qualityIssues, complaints, commissionEntries, systemSettings } = useApp();
+  const { jobs, quotes, qualityIssues, complaints, commissionEntries, systemSettings } = useApp();
+
+  // Quotations live in the pre-sale pipeline — badge counts every quote that
+  // has not yet become a booking (draft/sent/accepted/declined/legacy).
+  const openQuoteCount = quotes.filter((q) => q.status !== "converted_to_job").length;
 
   // Ops Managers live inside the dispatch visibility window — badges must
   // count exactly what the target pages actually display, never the raw list.
@@ -77,6 +82,12 @@ export function Sidebar() {
       {
         group: "Operations",
         items: [
+          {
+            label: "Quotations",
+            href: "/quotations",
+            icon: Receipt,
+            badge: openQuoteCount,
+          },
           {
             label: "Jobs",
             href: "/jobs",

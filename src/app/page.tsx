@@ -8,6 +8,7 @@ import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
 import { formatCurrency, formatDate, timeAgo, toLocalDateString, formatTimeSlot } from "@/lib/utils";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
+import { RevenueTrendChart } from "@/components/common/RevenueTrendChart";
 import {
   Briefcase,
   Clock,
@@ -22,6 +23,7 @@ import {
   ChevronRight,
   ArrowUpRight,
   Sparkles,
+  Receipt,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -47,6 +49,7 @@ export default function DashboardPage() {
     complaints,
     smsGatewayLogs,
     fetchSmsGatewayLog,
+    fetchStaffDirectory,
     currentRole,
     systemSettings,
   } = useApp();
@@ -59,10 +62,13 @@ export default function DashboardPage() {
   });
   const visibleJobs = isOps ? filterJobsForOpsManager(jobs, visibility) : jobs;
 
-  // Load the server SMS gateway trail once for the activity feed.
+  // Load the server SMS gateway trail once for the activity feed, and resolve
+  // the assignment-scoped staff roster (ops managers cannot read the full user
+  // directory — without this the workload panel and worker cards would be empty).
   React.useEffect(() => {
     if (currentRole === "staff") return;
     void fetchSmsGatewayLog();
+    void fetchStaffDirectory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -81,6 +87,13 @@ export default function DashboardPage() {
   const todayJobs = visibleJobs.filter((j) => j.scheduledDate === todayDate);
 
   const inProgressCount = visibleJobs.filter((j) => j.status === "IN_PROGRESS" || j.status === "ARRIVED" || j.status === "CUSTOMER_VERIFIED").length;
+  // Distinct workers currently on an active job (the card title says workers,
+  // so it must count people, not jobs).
+  const activeWorkerCount = new Set(
+    visibleJobs
+      .filter((j) => j.status === "IN_PROGRESS" || j.status === "ARRIVED" || j.status === "CUSTOMER_VERIFIED")
+      .flatMap((j) => j.assignedStaffIds || [])
+  ).size;
   const qcPendingCount = visibleJobs.filter((j) => j.status === "WORK_COMPLETED" || j.status === "QUALITY_CHECK").length;
   const reworkCount = visibleJobs.filter((j) => j.status === "REWORK_REQUIRED").length;
   const approvalCount = visibleJobs.filter((j) => j.status === "CUSTOMER_APPROVAL").length;
@@ -103,22 +116,22 @@ export default function DashboardPage() {
         title="Operations Dispatch & Overview"
         description="Real-time control tower for on-site field workers, customer OTP verification, and independent QC audits."
         actions={
-          <>
-            <Link href="/field">
-              <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs border-zinc-200 text-zinc-700 hover:bg-zinc-100">
-                <Smartphone className="h-3.5 w-3.5 text-rose-500" />
-                Open Field Staff View
-              </Button>
-            </Link>
-            {currentRole === "super_admin" && (
+          currentRole === "super_admin" ? (
+            <>
+              <Link href="/quotations?raise=true">
+                <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs border-zinc-200 text-zinc-700 hover:bg-zinc-100">
+                  <Receipt className="h-3.5 w-3.5 text-rose-500" />
+                  New Quotation
+                </Button>
+              </Link>
               <Link href="/jobs?create=true">
                 <Button size="sm" className="h-9 gap-1.5 text-xs bg-zinc-900 text-white hover:bg-zinc-800 font-medium shadow-xs">
                   <Briefcase className="h-3.5 w-3.5 text-rose-400" />
                   Schedule New Job
                 </Button>
               </Link>
-            )}
-          </>
+            </>
+          ) : undefined
         }
       />
 
@@ -126,12 +139,12 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard
           title="Today's Active Field Workers"
-          value={`${inProgressCount} Active`}
-          subtitle={`${todayJobs.length} jobs dispatched today`}
+          value={`${activeWorkerCount} On Job`}
+          subtitle={`${todayJobs.length} jobs dispatched today · ${inProgressCount} in progress`}
           icon={Clock}
-          change="On schedule"
-          changeType="positive"
-        />
+          change={todayJobs.length > 0 ? "Dispatched" : "No jobs today"}
+          changeType={todayJobs.length > 0 ? "positive" : "neutral"}
+/>
         <StatCard
           title="Quality Control Queue"
           value={`${qcPendingCount} Pending`}
@@ -160,7 +173,10 @@ export default function DashboardPage() {
 
       {/* Row 2: Field status KPIs (financial row is super_admin-only) */}
       {currentRole === "super_admin" ? (
-        <SuperAdminFinanceRow />
+        <>
+          <SuperAdminFinanceRow />
+          <SuperAdminRevenueTrend />
+        </>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatCard
@@ -237,9 +253,14 @@ export default function DashboardPage() {
                   const customer = customers.find((c) => c.id === job.customerId);
                   const property = properties.find((p) => p.id === job.propertyId);
                   const service = services.find((s) => s.id === job.serviceId);
-                  const assignedWorkers = (job.assignedStaffIds || [])
-                    .map((id) => users.find((u) => u.id === id)?.name)
-                    .filter(Boolean) as string[];
+                  // Server resolves names for roles that cannot read /api/users.
+                  const assignedWorkers = (
+                    job.assignedStaffNames && job.assignedStaffNames.length > 0
+                      ? job.assignedStaffNames
+                      : (job.assignedStaffIds || [])
+                          .map((id) => users.find((u) => u.id === id)?.name)
+                          .filter(Boolean)
+                  ) as string[];
 
                   return (
                     <div
@@ -456,13 +477,13 @@ export default function DashboardPage() {
  * ops/staff render path never even evaluates invoice/commission figures.
  */
 function SuperAdminFinanceRow() {
-  const { invoices, commissionEntries, complaints } = useApp();
+  const { invoices, partners, payouts, complaints } = useApp();
 
   const totalRevenue = invoices.reduce((acc, inv) => acc + inv.amountPaid, 0);
   const totalReceivables = invoices.reduce((acc, inv) => acc + inv.balanceDue, 0);
-  const pendingCommissions = commissionEntries
-    .filter((c) => c.status === "COMMISSION_PENDING" || c.status === "APPROVED")
-    .reduce((acc, c) => acc + c.commissionAmount, 0);
+  // Mirror the Referrals module's own "pending" figure (server aggregate over
+  // every unpaid commission state) instead of a hand-picked status subset.
+  const pendingCommissions = partners.reduce((acc, p) => acc + p.totalCommissionPending, 0);
   const unpaidInvoiceCount = invoices.filter((inv) => inv.balanceDue > 0).length;
 
   return (
@@ -486,10 +507,10 @@ function SuperAdminFinanceRow() {
       <StatCard
         title="Pending Partner Payouts"
         value={formatCurrency(pendingCommissions)}
-        subtitle="Approved commission ledger"
+        subtitle="Unsettled commission ledger"
         icon={Share2}
-        change="Ready to disburse"
-        changeType="neutral"
+        change={`${payouts.length} payout${payouts.length === 1 ? "" : "s"} settled`}
+        changeType={pendingCommissions > 0 ? "negative" : "positive"}
       />
       <StatCard
         title="Active Complaints"
@@ -501,4 +522,13 @@ function SuperAdminFinanceRow() {
       />
     </div>
   );
+}
+
+/**
+ * Business-stats graph — super_admin only. Weekly billed (invoices issued)
+ * vs collected (payments received) over the last 8 weeks, dependency-free SVG.
+ */
+function SuperAdminRevenueTrend() {
+  const { invoices, payments } = useApp();
+  return <RevenueTrendChart invoices={invoices} payments={payments} />;
 }

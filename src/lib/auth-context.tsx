@@ -23,6 +23,7 @@ export const ROLE_ROUTE_PERMISSIONS: Record<UserRole, string[]> = {
   super_admin: [
     "/",
     "/jobs",
+    "/quotations",
     "/dispatcher",
     "/calendar",
     "/customers",

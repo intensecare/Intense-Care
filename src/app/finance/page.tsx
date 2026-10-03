@@ -8,7 +8,7 @@ import { PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
 import { Expense, Quote } from "@/lib/types";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
-import { DollarSign, FileText, CheckCircle2, TrendingUp, AlertTriangle, Plus, CreditCard, Loader2, Trash2, Printer } from "lucide-react";
+import { DollarSign, FileText, CheckCircle2, TrendingUp, AlertTriangle, Plus, CreditCard, Loader2, Trash2, Printer, ExternalLink } from "lucide-react";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { QuoteFormDialog } from "@/components/common/QuoteFormDialog";
 import { QuotePreviewModal } from "@/components/common/QuotePreviewModal";
@@ -192,14 +192,24 @@ export default function FinancePage() {
             </Button>
           )}
           {activeTab === "quotes" && (
-            <Button
-              size="sm"
-              onClick={() => setQuoteFormOpen(true)}
-              className="bg-slate-900 text-white text-xs h-8"
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              Raise Quotation
-            </Button>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/quotations"
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded text-xs font-medium border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                title="Open the full Quotations workspace"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Quotations Workspace
+              </Link>
+              <Button
+                size="sm"
+                onClick={() => setQuoteFormOpen(true)}
+                className="bg-slate-900 text-white text-xs h-8"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Raise Quotation
+              </Button>
+            </div>
           )}
         </div>
 
