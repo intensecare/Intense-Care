@@ -210,6 +210,29 @@ export async function POST(request: Request) {
       return ok({ invoice: serializeInvoice(invoice), jobId: job.id }, 201);
     }
 
+    if (action === "delete-expense") {
+      const parsed = z.object({ action: z.literal("delete-expense"), id: z.string().min(1).max(64) }).safeParse(body);
+      if (!parsed.success) return fail("Invalid expense delete payload.", 400);
+      const existing = await prisma.expense.findUnique({ where: { id: parsed.data.id } });
+      if (!existing) return fail("Expense not found.", 404);
+      await prisma.expense.delete({ where: { id: parsed.data.id } });
+      logger.info("finance.expense_deleted", { expenseId: parsed.data.id, by: user.id });
+      return ok({ id: parsed.data.id, deleted: true });
+    }
+
+    if (action === "delete-quote") {
+      const parsed = z.object({ action: z.literal("delete-quote"), id: z.string().min(1).max(64) }).safeParse(body);
+      if (!parsed.success) return fail("Invalid quote delete payload.", 400);
+      const quote = await prisma.quote.findUnique({ where: { id: parsed.data.id } });
+      if (!quote) return fail("Quote not found.", 404);
+      if (quote.status !== "sent") {
+        return fail("Only open quotations can be deleted; converted quotations are part of job history.", 409);
+      }
+      await prisma.quote.delete({ where: { id: parsed.data.id } });
+      logger.info("finance.quote_deleted", { quoteId: parsed.data.id, by: user.id });
+      return ok({ id: parsed.data.id, deleted: true });
+    }
+
     return fail("Unknown action.", 400);
   } catch (err) {
     return errorResponse(err, "finance.post.route_error");

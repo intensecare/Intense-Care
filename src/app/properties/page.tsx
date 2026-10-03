@@ -16,10 +16,13 @@ import {
   Calendar,
   ExternalLink,
   Loader2,
+  Edit2,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 import {
   Dialog,
   DialogContent,
@@ -30,11 +33,18 @@ import {
 } from "@/components/ui/dialog";
 
 export default function PropertiesPage() {
-  const { properties, customers, createProperty } = useApp();
+  const { properties, customers, createProperty, updateProperty, deleteProperty, currentRole } = useApp();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [actionError, setActionError] = useState("");
+
+  const canEdit = currentRole === "super_admin" || currentRole === "ops_manager";
+  const canDelete = currentRole === "super_admin";
+  const isEditing = editingPropertyId !== null;
 
   // Form State
   const [customerId, setCustomerId] = useState(customers[0]?.id || "");
@@ -60,12 +70,47 @@ export default function PropertiesPage() {
       p.city.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleCreateSubmit = async (e: React.FormEvent) => {
+  const resetForm = () => {
+    setTitle("");
+    setAddress("");
+    setAccessNotes("");
+    setParking("");
+    setPropertyType("apartment");
+    setBedrooms(3);
+    setSqFt(1800);
+    setRecurring(false);
+  };
+
+  const openCreate = () => {
+    setEditingPropertyId(null);
+    setActionError("");
+    resetForm();
+    setIsCreateOpen(true);
+  };
+
+  const openEdit = (p: (typeof properties)[number]) => {
+    setEditingPropertyId(p.id);
+    setActionError("");
+    setCustomerId(p.customerId);
+    setTitle(p.title);
+    setPropertyType(p.propertyType);
+    setAddress(p.address);
+    setCity(p.city || "Bengaluru");
+    setBedrooms(p.bedrooms ?? 3);
+    setSqFt(p.carpetAreaSqFt ?? 1800);
+    setAccessNotes(p.accessNotes || "");
+    setParking(p.parkingInstructions || "");
+    setRecurring(p.recurringService || false);
+    setIsCreateOpen(true);
+  };
+
+  const handleSaveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !address || !customerId) return;
     setIsSubmitting(true);
+    setActionError("");
 
-    const result = await createProperty({
+    const payload = {
       customerId,
       title,
       propertyType,
@@ -76,18 +121,30 @@ export default function PropertiesPage() {
       accessNotes,
       parkingInstructions: parking,
       recurringService: recurring,
-    });
+    };
+
+    const result = isEditing && editingPropertyId
+      ? await updateProperty(editingPropertyId, payload)
+      : await createProperty(payload);
+
+    setIsSubmitting(false);
     if (!result.success) {
-      setIsSubmitting(false);
+      setActionError(result.message);
       return;
     }
 
     setIsCreateOpen(false);
-    setTitle("");
-    setAddress("");
-    setAccessNotes("");
-    setParking("");
-    setIsSubmitting(false);
+    setEditingPropertyId(null);
+    resetForm();
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setActionError("");
+    const result = await deleteProperty(deleteTarget.id);
+    if (!result.success) {
+      setActionError(result.message);
+    }
   };
 
   return (
@@ -101,7 +158,7 @@ export default function PropertiesPage() {
         ]}
         actions={
           <Button
-            onClick={() => setIsCreateOpen(true)}
+            onClick={openCreate}
             size="sm"
             className="h-9 gap-1.5 bg-slate-900 text-white font-medium"
           >
@@ -123,6 +180,11 @@ export default function PropertiesPage() {
             className="pl-9 text-xs h-9 bg-slate-50 border-slate-200"
           />
         </div>
+        {actionError && (
+          <p className="mt-2 text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5 max-w-md">
+            {actionError}
+          </p>
+        )}
       </div>
 
       {filteredProperties.length === 0 ? (
@@ -135,7 +197,7 @@ export default function PropertiesPage() {
               : "Try refining your search keywords or register a new property."
           }
           actionLabel="Register Property"
-          onAction={() => setIsCreateOpen(true)}
+          onAction={openCreate}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -154,11 +216,42 @@ export default function PropertiesPage() {
                       {p.propertyType}
                     </span>
                   </div>
-                  {p.recurringService && (
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                      Recurring Clean: {p.recurringFrequency || "Monthly"}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {p.recurringService && (
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        Recurring Clean: {p.recurringFrequency || "Monthly"}
+                      </span>
+                    )}
+                    {(canEdit || canDelete) && (
+                      <>
+                        {canEdit && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={() => openEdit(p)}
+                            title="Edit property"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                            onClick={() => {
+                              setActionError("");
+                              setDeleteTarget({ id: p.id, title: p.title });
+                            }}
+                            title="Delete property"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-1 text-xs">
@@ -207,17 +300,19 @@ export default function PropertiesPage() {
         </div>
       )}
 
-      {/* Register Property Dialog */}
+      {/* Register / Edit Property Dialog */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Register Property</DialogTitle>
+            <DialogTitle>{isEditing ? "Edit Property" : "Register Property"}</DialogTitle>
             <DialogDescription>
-              Add a residence or commercial facility to customer's portfolio.
+              {isEditing
+                ? "Update the property details, gate access notes, or reassign its owner."
+                : "Add a residence or commercial facility to customer's portfolio."}
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleCreateSubmit} className="space-y-3 py-2 text-xs">
+          <form onSubmit={handleSaveSubmit} className="space-y-3 py-2 text-xs">
             <div className="space-y-1">
               <label className="font-semibold text-slate-700">Linked Customer *</label>
               <SearchableSelect
@@ -327,6 +422,8 @@ export default function PropertiesPage() {
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     Saving...
                   </>
+                ) : isEditing ? (
+                  "Save Changes"
                 ) : (
                   "Save Property"
                 )}
@@ -335,6 +432,16 @@ export default function PropertiesPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Property Confirmation */}
+      <ConfirmModal
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Property"
+        description={`Permanently delete "${deleteTarget?.title ?? "this property"}"? Properties linked to booked jobs cannot be deleted.`}
+        confirmText="Delete Property"
+      />
     </AdminLayout>
   );
 }

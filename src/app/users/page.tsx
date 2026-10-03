@@ -501,9 +501,10 @@ export default function UsersAndRolesPage() {
       <ConfirmModal
         isOpen={Boolean(deleteTargetUser)}
         onClose={() => setDeleteTargetUser(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (deleteTargetUser) {
-            void deleteUser(deleteTargetUser.id);
+            const result = await deleteUser(deleteTargetUser.id);
+            if (!result.success) setFormError(result.message);
           }
         }}
         title="Delete User Account"

@@ -158,3 +158,69 @@ export async function OPTIONS() {
   const ctx = await requireUser().catch(() => null);
   return NextResponse.json({ success: true, authenticated: !!ctx });
 }
+
+/**
+ * DELETE /api/users — remove a user account (super_admin ONLY). Guarded like
+ * the service catalog: accounts referenced by job assignments, inspections, or
+ * photo uploads are deactivated instead of deleted so operational history
+ * still resolves names; unreferenced accounts hard-delete. The acting admin
+ * cannot delete themselves, and the last active super_admin is protected.
+ */
+export async function DELETE(request: Request) {
+  try {
+    const { user: acting } = await requireRole(["super_admin"]);
+    const body = await request.json().catch(() => null);
+    const id = typeof body?.id === "string" ? body.id : null;
+    if (!id) {
+      return NextResponse.json({ success: false, error: "User id is required." }, { status: 400 });
+    }
+    if (id === acting.id) {
+      return NextResponse.json(
+        { success: false, error: "You cannot delete your own account." },
+        { status: 409 }
+      );
+    }
+
+    const target = await prisma.user.findUnique({ where: { id } });
+    if (!target) {
+      return NextResponse.json({ success: false, error: "User not found." }, { status: 404 });
+    }
+
+    if (target.role === "super_admin") {
+      const activeSuperAdmins = await prisma.user.count({
+        where: { role: "super_admin", active: true, NOT: { id } },
+      });
+      if (activeSuperAdmins === 0) {
+        return NextResponse.json(
+          { success: false, error: "Cannot delete the last active super_admin account." },
+          { status: 409 }
+        );
+      }
+    }
+
+    const [assignedJobs, inspections, photos] = await Promise.all([
+      prisma.job.count({
+        where: { OR: [{ assignedManagerId: id }, { assignedStaffIds: { has: id } }] },
+      }),
+      prisma.qualityCheck.count({ where: { inspectorId: id } }),
+      prisma.jobPhoto.count({ where: { uploadedByUserId: id } }),
+    ]);
+
+    if (assignedJobs > 0 || inspections > 0 || photos > 0) {
+      if (target.active) {
+        await prisma.user.update({ where: { id }, data: { active: false } });
+      }
+      logger.info("users.retired_instead_of_deleted", { userId: id, assignedJobs, inspections, photos });
+      return NextResponse.json({
+        success: true,
+        data: { id, retired: true },
+      });
+    }
+
+    await prisma.user.delete({ where: { id } });
+    logger.info("users.deleted", { userId: id });
+    return NextResponse.json({ success: true, data: { id, deleted: true } });
+  } catch (err) {
+    return errorResponse(err, "users.delete.route_error");
+  }
+}

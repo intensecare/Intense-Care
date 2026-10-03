@@ -15,10 +15,13 @@ import {
   Building2,
   Share2,
   Loader2,
+  Edit2,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 import {
   Dialog,
   DialogContent,
@@ -29,11 +32,14 @@ import {
 } from "@/components/ui/dialog";
 
 export default function CustomersPage() {
-  const { customers, properties, jobs, partners, createCustomer } = useApp();
+  const { customers, properties, jobs, partners, createCustomer, updateCustomer, deleteCustomer, currentRole } = useApp();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [actionError, setActionError] = useState("");
 
   // Form State
   const [name, setName] = useState("");
@@ -44,6 +50,11 @@ export default function CustomersPage() {
   const [source, setSource] = useState("direct");
   const [partnerId, setPartnerId] = useState("");
   const [notes, setNotes] = useState("");
+  const [status, setStatus] = useState<"active" | "inactive">("active");
+
+  const canEdit = currentRole === "super_admin" || currentRole === "ops_manager";
+  const canDelete = currentRole === "super_admin";
+  const isEditing = editingCustomerId !== null;
 
   // Partner options for dropdown
   const partnerOptions = useMemo(() => [
@@ -58,33 +69,76 @@ export default function CustomersPage() {
       c.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleCreateSubmit = async (e: React.FormEvent) => {
+  const resetForm = () => {
+    setName("");
+    setPhone("");
+    setEmail("");
+    setAddress("");
+    setNotes("");
+    setSource("direct");
+    setPartnerId("");
+    setStatus("active");
+  };
+
+  const openCreate = () => {
+    setEditingCustomerId(null);
+    setActionError("");
+    resetForm();
+    setIsCreateOpen(true);
+  };
+
+  const openEdit = (c: (typeof customers)[number]) => {
+    setEditingCustomerId(c.id);
+    setActionError("");
+    setName(c.name);
+    setPhone(c.phone);
+    setEmail(c.email || "");
+    setAddress(c.address || "");
+    setNotes(c.notes || "");
+    setSource(c.source || "direct");
+    setPartnerId(c.referralPartnerId || "");
+    setStatus(c.status === "inactive" ? "inactive" : "active");
+    setIsCreateOpen(true);
+  };
+
+  const handleSaveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !phone) return;
     setIsSubmitting(true);
 
-    const result = await createCustomer({
+    const payload = {
       name,
       phone,
       email,
       whatsapp: whatsapp || phone,
       address,
       source,
-      referralPartnerId: partnerId || undefined,
+      referralPartnerId: partnerId || null,
       notes,
-    });
+    };
+
+    const result = isEditing && editingCustomerId
+      ? await updateCustomer(editingCustomerId, { ...payload, status })
+      : await createCustomer({ ...payload, referralPartnerId: partnerId || undefined });
+
+    setIsSubmitting(false);
     if (!result.success) {
-      setIsSubmitting(false);
+      setActionError(result.message);
       return;
     }
 
     setIsCreateOpen(false);
-    setName("");
-    setPhone("");
-    setEmail("");
-    setAddress("");
-    setNotes("");
-    setIsSubmitting(false);
+    setEditingCustomerId(null);
+    resetForm();
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setActionError("");
+    const result = await deleteCustomer(deleteTarget.id);
+    if (!result.success) {
+      setActionError(result.message);
+    }
   };
 
   return (
@@ -98,7 +152,7 @@ export default function CustomersPage() {
         ]}
         actions={
           <Button
-            onClick={() => setIsCreateOpen(true)}
+            onClick={openCreate}
             size="sm"
             className="h-9 gap-1.5 bg-slate-900 text-white font-medium"
           >
@@ -120,6 +174,11 @@ export default function CustomersPage() {
             className="pl-9 text-xs h-9 bg-slate-50 border-slate-200"
           />
         </div>
+        {actionError && (
+          <p className="mt-2 text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+            {actionError}
+          </p>
+        )}
       </div>
 
       {/* Customers List */}
@@ -134,7 +193,7 @@ export default function CustomersPage() {
                 : "Try clearing your search query or registering a new customer."
             }
             actionLabel="Register Customer"
-            onAction={() => setIsCreateOpen(true)}
+            onAction={openCreate}
           />
         ) : (
           filteredCustomers.map((c) => {
@@ -175,6 +234,35 @@ export default function CustomersPage() {
                   </div>
 
                   <div className="text-left sm:text-right">
+                    {(canEdit || canDelete) && (
+                      <div className="flex sm:justify-end gap-1.5 mb-1.5">
+                        {canEdit && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={() => openEdit(c)}
+                            title="Edit customer"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                            onClick={() => {
+                              setActionError("");
+                              setDeleteTarget({ id: c.id, name: c.name });
+                            }}
+                            title="Delete customer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    )}
                     <div className="text-xs text-slate-400">Lifetime Revenue</div>
                     <div className="text-base font-bold text-slate-900">
                       {formatCurrency(c.lifetimeRevenue)}
@@ -227,17 +315,19 @@ export default function CustomersPage() {
         )}
       </div>
 
-      {/* Register Customer Modal */}
+      {/* Register / Edit Customer Modal */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Register Customer</DialogTitle>
+            <DialogTitle>{isEditing ? "Edit Customer" : "Register Customer"}</DialogTitle>
             <DialogDescription>
-              Add customer profile and configure referral attribution.
+              {isEditing
+                ? "Update the customer profile, referral attribution, or account status."
+                : "Add customer profile and configure referral attribution."}
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleCreateSubmit} className="space-y-3 py-2 text-xs">
+          <form onSubmit={handleSaveSubmit} className="space-y-3 py-2 text-xs">
             <div className="space-y-1">
               <label className="font-semibold text-slate-700">Customer Full Name *</label>
               <Input
@@ -301,6 +391,20 @@ export default function CustomersPage() {
               />
             </div>
 
+            {isEditing && (
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">Account Status</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as "active" | "inactive")}
+                  className="w-full h-9 rounded-md border border-slate-200 px-2 bg-white text-xs"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            )}
+
             <DialogFooter className="pt-3 border-t border-slate-100">
               <Button
                 type="button"
@@ -316,6 +420,8 @@ export default function CustomersPage() {
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     Saving...
                   </>
+                ) : isEditing ? (
+                  "Save Changes"
                 ) : (
                   "Save Customer"
                 )}
@@ -324,6 +430,16 @@ export default function CustomersPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Customer Confirmation */}
+      <ConfirmModal
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Customer"
+        description={`Permanently delete ${deleteTarget?.name ?? "this customer"}? Customers with booking history cannot be deleted — deactivate them instead.`}
+        confirmText="Delete Customer"
+      />
     </AdminLayout>
   );
 }

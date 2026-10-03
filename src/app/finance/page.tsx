@@ -8,7 +8,8 @@ import { PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
 import { Expense } from "@/lib/types";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
-import { DollarSign, FileText, CheckCircle2, TrendingUp, AlertTriangle, Plus, CreditCard, Loader2 } from "lucide-react";
+import { DollarSign, FileText, CheckCircle2, TrendingUp, AlertTriangle, Plus, CreditCard, Loader2, Trash2 } from "lucide-react";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -23,8 +24,10 @@ import {
 import { Input } from "@/components/ui/input";
 
 export default function FinancePage() {
-  const { invoices, payments, quotes, customers, jobs, expenses, recordPayment, createExpense, convertQuoteToInvoice } = useApp();
+  const { invoices, payments, quotes, customers, jobs, expenses, payouts, partners, recordPayment, createExpense, convertQuoteToInvoice, deleteExpense, deleteQuote } = useApp();
 
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: "expense" | "quote"; id: string; label: string } | null>(null);
+  const [actionError, setActionError] = useState("");
   const [activeTab, setActiveTab] = useState("invoices");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [payAmount, setPayAmount] = useState<number>(0);
@@ -45,7 +48,11 @@ export default function FinancePage() {
   const totalCollected = invoices.reduce((acc, i) => acc + i.amountPaid, 0);
   const totalReceivables = invoices.reduce((acc, i) => acc + i.balanceDue, 0);
   const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
-  const netOperatingIncome = totalCollected - totalExpenses;
+  // Referral commission payouts are a real cash outflow (settled on the
+  // Referrals module) — they must reduce the operating result.
+  const totalCommissionsPaid = payouts.reduce((acc, p) => acc + p.amount, 0);
+  const totalCommissionsPending = partners.reduce((acc, p) => acc + p.totalCommissionPending, 0);
+  const netOperatingIncome = totalCollected - totalExpenses - totalCommissionsPaid;
 
   const handleOpenPaymentModal = (inv: any) => {
     setSelectedInvoiceId(inv.id);
@@ -96,7 +103,7 @@ export default function FinancePage() {
       />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Total Invoiced
@@ -127,6 +134,18 @@ export default function FinancePage() {
           <div className="text-xs text-rose-600 mt-1">{expenses.length} Recorded expenses</div>
         </div>
 
+        <div className="rounded-lg border border-purple-200 bg-purple-50/40 p-4 shadow-xs">
+          <div className="text-xs font-semibold uppercase tracking-wider text-purple-800">
+            Referral Commissions Paid
+          </div>
+          <div className="text-2xl font-bold text-purple-700 mt-2">
+            {formatCurrency(totalCommissionsPaid)}
+          </div>
+          <div className="text-xs text-purple-600 mt-1">
+            {payouts.length} payouts{totalCommissionsPending > 0 ? ` • ${formatCurrency(totalCommissionsPending)} pending` : ""}
+          </div>
+        </div>
+
         <div className="rounded-lg border border-slate-900 bg-slate-900 text-white p-4 shadow-xs">
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
             Net Operating Result
@@ -134,7 +153,7 @@ export default function FinancePage() {
           <div className="text-2xl font-bold mt-2">
             {formatCurrency(netOperatingIncome)}
           </div>
-          <div className="text-xs text-slate-400 mt-1">Collected revenue − Expenses</div>
+          <div className="text-xs text-slate-400 mt-1">Collected revenue − Expenses − Commissions</div>
         </div>
       </div>
 
@@ -334,6 +353,21 @@ export default function FinancePage() {
                           Convert to Invoice
                         </Button>
                       )}
+
+                      {q.status === "sent" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setActionError("");
+                            setDeleteTarget({ kind: "quote", id: q.id, label: q.quoteNumber });
+                          }}
+                          className="text-xs h-8 w-8 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                          title="Delete open quotation"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );
@@ -362,6 +396,7 @@ export default function FinancePage() {
                       <th className="py-3 px-4">Payment Method</th>
                       <th className="py-3 px-4">Reference</th>
                       <th className="py-3 px-4 font-bold text-right">Amount</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -387,6 +422,20 @@ export default function FinancePage() {
                         <td className="py-3 px-4 font-bold text-rose-700 text-right">
                           {formatCurrency(exp.amount)}
                         </td>
+                        <td className="py-3 px-4 text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                            onClick={() => {
+                              setActionError("");
+                              setDeleteTarget({ kind: "expense", id: exp.id, label: exp.description });
+                            }}
+                            title="Delete expense"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -396,6 +445,34 @@ export default function FinancePage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {actionError && (
+        <p className="mt-3 text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+          {actionError}
+        </p>
+      )}
+
+      {/* Delete Expense / Quote Confirmation */}
+      <ConfirmModal
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setActionError("");
+          const result =
+            deleteTarget.kind === "expense"
+              ? await deleteExpense(deleteTarget.id)
+              : await deleteQuote(deleteTarget.id);
+          if (!result.success) setActionError(result.message);
+        }}
+        title={deleteTarget?.kind === "quote" ? "Delete Quotation" : "Delete Expense"}
+        description={
+          deleteTarget?.kind === "quote"
+            ? `Delete open quotation ${deleteTarget?.label ?? ""}? Converted quotations cannot be deleted.`
+            : `Delete expense "${deleteTarget?.label ?? ""}"? This permanently removes it from the books.`
+        }
+        confirmText="Delete"
+      />
 
       {/* Collect Payment Dialog */}
       <Dialog open={!!selectedInvoiceId} onOpenChange={(open) => !open && setSelectedInvoiceId(null)}>

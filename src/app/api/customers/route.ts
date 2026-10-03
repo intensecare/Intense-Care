@@ -120,3 +120,44 @@ export async function PATCH(request: Request) {
     return errorResponse(err, "customers.patch.route_error");
   }
 }
+
+/**
+ * DELETE /api/customers — remove a customer (super_admin ONLY). Customers with
+ * job history are rejected (FK-restricted + financial records must survive);
+ * deactivate them via PATCH { status: "inactive" } instead. Jobless customers
+ * hard-delete together with their property records (schema cascade).
+ */
+export async function DELETE(request: Request) {
+  try {
+    await requireRole(["super_admin"]);
+    const body = await readJson(request);
+    const id = typeof body?.id === "string" ? body.id : null;
+    if (!id) return fail("Customer id is required.", 400);
+
+    const customer = await prisma.customer.findUnique({ where: { id } });
+    if (!customer) return fail("Customer not found.", 404);
+
+    const jobCount = await prisma.job.count({ where: { customerId: id } });
+    if (jobCount > 0) {
+      return fail(
+        `Customer has ${jobCount} job record(s) on file. Deactivate the customer instead of deleting to preserve booking history.`,
+        409
+      );
+    }
+
+    await prisma.customer.delete({ where: { id } });
+
+    // Keep the attribution counter honest (properties cascade with the customer).
+    if (customer.referralPartnerId) {
+      await prisma.referralPartner.update({
+        where: { id: customer.referralPartnerId },
+        data: { totalReferrals: { decrement: 1 } },
+      }).catch(() => null);
+    }
+
+    logger.info("customers.deleted", { customerId: id });
+    return ok({ id, deleted: true });
+  } catch (err) {
+    return errorResponse(err, "customers.delete.route_error");
+  }
+}

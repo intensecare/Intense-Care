@@ -13,7 +13,7 @@ interface RouteGuardProps {
 }
 
 export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
-  const { currentUser, isAuthenticated, logout } = useAuth();
+  const { currentUser, isAuthenticated, isLoading, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -32,9 +32,13 @@ export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
   // effect. Calling router.push during render caused React warnings ("Cannot
   // update a component while rendering a different component") because it
   // triggers a state update in the router during the render phase.
+  //
+  // While the server session is still being resolved (isLoading), auth state is
+  // UNKNOWN — never treat it as logged-out, otherwise a page refresh bounces
+  // the user to /login before the session check completes.
   let redirectTarget: string | null = null;
 
-  if (mounted && !isPublicPath && (!isAuthenticated || !currentUser)) {
+  if (mounted && !isLoading && !isPublicPath && (!isAuthenticated || !currentUser)) {
     redirectTarget = "/login";
   }
 
@@ -82,7 +86,7 @@ export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
     }
   }, [redirectTarget, router]);
 
-  if (!mounted) {
+  if (!mounted || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="text-xs text-slate-400 font-mono">Verifying authentication session...</div>

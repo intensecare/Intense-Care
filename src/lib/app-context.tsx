@@ -83,6 +83,8 @@ interface AppContextType {
 
   /** Re-fetches jobs + checklist from the server (post-write re-sync). */
   refreshJobs: () => Promise<void>;
+  /** Re-fetches the referral ledger from the server (post-write re-sync; super_admin only). */
+  refreshReferrals: () => Promise<void>;
   /** Last server-rejected status transition, for UI error display. */
   transitionError: { jobId: string; message: string } | null;
 
@@ -178,10 +180,23 @@ interface AppContextType {
   }) => Promise<{ success: boolean; message: string; job?: Job }>;
 
   createCustomer: (customerData: Partial<Customer>) => Promise<{ success: boolean; message: string; customer?: Customer }>;
+  updateCustomer: (
+    id: string,
+    updates: Omit<Partial<Customer>, "referralPartnerId"> & { referralPartnerId?: string | null }
+  ) => Promise<{ success: boolean; message: string; customer?: Customer }>;
+  deleteCustomer: (id: string) => Promise<{ success: boolean; message: string }>;
   createProperty: (propertyData: Partial<Property>) => Promise<{ success: boolean; message: string; property?: Property }>;
+  updateProperty: (id: string, updates: Partial<Property>) => Promise<{ success: boolean; message: string; property?: Property }>;
+  deleteProperty: (id: string) => Promise<{ success: boolean; message: string }>;
   createPartner: (partnerData: Partial<ReferralPartner>) => Promise<{ success: boolean; message: string; partner?: ReferralPartner }>;
+  updatePartner: (
+    id: string,
+    updates: Omit<Partial<ReferralPartner>, "commissionRuleId"> & { commissionRuleId?: string | null }
+  ) => Promise<{ success: boolean; message: string; partner?: ReferralPartner }>;
+  deletePartner: (id: string) => Promise<{ success: boolean; message: string }>;
   createCommissionRule: (rule: Partial<CommissionRule>) => Promise<{ success: boolean; message: string; rule?: CommissionRule }>;
   updateCommissionRule: (id: string, updates: Partial<CommissionRule>) => Promise<{ success: boolean; message: string }>;
+  deleteCommissionRule: (id: string) => Promise<{ success: boolean; message: string }>;
   approveCommissionEntry: (id: string) => Promise<{ success: boolean; message: string }>;
   createPayout: (
     partnerId: string,
@@ -198,6 +213,7 @@ interface AppContextType {
   ) => Promise<{ success: boolean; message: string }>;
 
   createExpense: (expense: Omit<Expense, "id" | "createdAt" | "createdBy">) => Promise<{ success: boolean; message: string }>;
+  deleteExpense: (id: string) => Promise<{ success: boolean; message: string }>;
   createQuote: (quote: {
     customerId: string;
     propertyId: string;
@@ -207,6 +223,7 @@ interface AppContextType {
   }) => Promise<{ success: boolean; message: string }>;
   convertQuoteToInvoice: (quoteId: string) => Promise<{ success: boolean; message: string }>;
   convertQuoteToJob: (quoteId: string) => Promise<{ success: boolean; message: string }>;
+  deleteQuote: (id: string) => Promise<{ success: boolean; message: string }>;
   assignStaffToJob: (jobId: string, staffIds: string[]) => Promise<{ success: boolean; message: string }>;
   /** Assignment-scoped roster of active field workers (PUT /api/users), visible
    *  to both super_admin and ops_manager — backs the dispatcher tower and the
@@ -236,7 +253,7 @@ interface AppContextType {
     updates: { name?: string; phone?: string; role?: UserRole; active?: boolean; password?: string }
   ) => Promise<{ success: boolean; message: string }>;
   toggleUserStatus: (id: string) => Promise<void>;
-  deleteUser: (id: string) => Promise<void>;
+  deleteUser: (id: string) => Promise<{ success: boolean; message: string }>;
 
   /** Secure handover link minting (server-side). */
   sendCompletionLink: (
@@ -477,6 +494,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (c.ok && c.data) setChecklistItems(c.data);
   }, []);
 
+  /**
+   * Re-fetches the referral ledger (partners, rules, commission entries,
+   * payouts). Super_admin only at the API boundary — other roles get a 403
+   * that fails silently, making it safe to call after any server-side write
+   * that may have settled a commission (e.g. job completion).
+   */
+  const refreshReferrals = useCallback(async () => {
+    const r = await api<{
+      partners: ReferralPartner[];
+      commissionRules: CommissionRule[];
+      commissionEntries: CommissionEntry[];
+      payouts: Payout[];
+    }>("/api/referrals");
+    if (r.ok && r.data) {
+      setPartners(r.data.partners);
+      setCommissionRules(r.data.commissionRules);
+      setCommissionEntries(r.data.commissionEntries);
+      setPayouts(r.data.payouts);
+    }
+  }, []);
+
   const transitionJobStatus = (
     jobId: string,
     nextStatus: JobStatus,
@@ -514,8 +552,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await logAudit("job", jobId, "STATUS_TRANSITION", `→ ${nextStatus}${overrideNotes ? `: ${overrideNotes}` : ""}`);
 
       // Re-sync from the server so status, timestamps and OTP state stay
-      // authoritative (also refreshes other viewers of the same job).
+      // authoritative (also refreshes other viewers of the same job). Also
+      // re-sync the referral ledger: completing an attributed job settles a
+      // commission entry server-side, and the ledger/partner counters must
+      // reflect that immediately (a no-op 403 for staff/managers-without-access).
       void refreshJobs();
+      void refreshReferrals();
     })();
 
     return { success: true, message: `Job transitioned to ${nextStatus}` };
@@ -980,6 +1022,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Customer created.", customer: r.data };
   };
 
+  const updateCustomer = async (
+    id: string,
+    updates: Omit<Partial<Customer>, "referralPartnerId"> & { referralPartnerId?: string | null }
+  ) => {
+    const r = await api<Customer>("/api/customers", {
+      method: "PATCH",
+      body: JSON.stringify({ id, ...updates }),
+    });
+    if (!r.ok || !r.data) return { success: false, message: r.error || "Could not update the customer." };
+    setCustomers((prev) => prev.map((c) => (c.id === id ? (r.data as Customer) : c)));
+    await logAudit("customer", id, "CUSTOMER_UPDATED", `Customer ${r.data.name} updated`);
+    return { success: true, message: "Customer updated.", customer: r.data };
+  };
+
+  const deleteCustomer = async (id: string) => {
+    const r = await api<{ deleted?: boolean }>("/api/customers", {
+      method: "DELETE",
+      body: JSON.stringify({ id }),
+    });
+    if (!r.ok) return { success: false, message: r.error || "Could not delete the customer." };
+    setCustomers((prev) => prev.filter((c) => c.id !== id));
+    // The DB cascades the customer's property records — mirror that locally so
+    // the Properties page doesn't show ghost properties until a refresh.
+    setProperties((prev) => prev.filter((p) => p.customerId !== id));
+    await logAudit("customer", id, "CUSTOMER_DELETED", "Customer record deleted");
+    return { success: true, message: "Customer deleted." };
+  };
+
   const createProperty = async (propertyData: Partial<Property>) => {
     const r = await api<Property>("/api/properties", {
       method: "POST",
@@ -1005,6 +1075,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Property created.", property: r.data };
   };
 
+  const updateProperty = async (id: string, updates: Partial<Property>) => {
+    const r = await api<Property>("/api/properties", {
+      method: "PATCH",
+      body: JSON.stringify({ id, ...updates }),
+    });
+    if (!r.ok || !r.data) return { success: false, message: r.error || "Could not update the property." };
+    setProperties((prev) => prev.map((p) => (p.id === id ? (r.data as Property) : p)));
+    return { success: true, message: "Property updated.", property: r.data };
+  };
+
+  const deleteProperty = async (id: string) => {
+    const r = await api("/api/properties", {
+      method: "DELETE",
+      body: JSON.stringify({ id }),
+    });
+    if (!r.ok) return { success: false, message: r.error || "Could not delete the property." };
+    setProperties((prev) => prev.filter((p) => p.id !== id));
+    return { success: true, message: "Property deleted." };
+  };
+
   // --- Referrals --------------------------------------------------------------------
   const createPartner = async (partnerData: Partial<ReferralPartner>) => {
     const r = await api<ReferralPartner>("/api/referrals", {
@@ -1023,6 +1113,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPartners((prev) => [r.data as ReferralPartner, ...prev]);
     await logAudit("customer", r.data.id, "PARTNER_REGISTERED", `Partner ${r.data.name} (Code: ${r.data.code})`);
     return { success: true, message: "Partner registered.", partner: r.data };
+  };
+
+  const updatePartner = async (
+    id: string,
+    updates: Omit<Partial<ReferralPartner>, "commissionRuleId"> & { commissionRuleId?: string | null }
+  ) => {
+    const r = await api<ReferralPartner>("/api/referrals", {
+      method: "POST",
+      body: JSON.stringify({ action: "update-partner", id, ...updates }),
+    });
+    if (!r.ok || !r.data) return { success: false, message: r.error || "Partner update failed." };
+    setPartners((prev) => prev.map((p) => (p.id === id ? (r.data as ReferralPartner) : p)));
+    await logAudit("customer", id, "PARTNER_UPDATED", "Referral partner details updated");
+    return { success: true, message: "Partner updated.", partner: r.data };
+  };
+
+  const deletePartner = async (id: string) => {
+    const r = await api("/api/referrals", {
+      method: "POST",
+      body: JSON.stringify({ action: "delete-partner", id }),
+    });
+    if (!r.ok) return { success: false, message: r.error || "Could not delete the partner." };
+    setPartners((prev) => prev.filter((p) => p.id !== id));
+    // The server detaches customer attribution in the DB; mirror it locally.
+    setCustomers((prev) =>
+      prev.map((c) =>
+        c.referralPartnerId === id ? { ...c, referralPartnerId: undefined, referralCode: undefined } : c
+      )
+    );
+    await logAudit("customer", id, "PARTNER_DELETED", "Referral partner deleted");
+    return { success: true, message: "Partner deleted." };
   };
 
   const createCommissionRule = async (rule: Partial<CommissionRule>) => {
@@ -1053,6 +1174,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCommissionRules((prev) => prev.map((x) => (x.id === id ? { ...x, ...updates } : x)));
     await logAudit("commission", id, "RULE_UPDATED", "Commission rule updated");
     return { success: true, message: "Rule updated." };
+  };
+
+  const deleteCommissionRule = async (id: string) => {
+    const r = await api("/api/referrals", {
+      method: "POST",
+      body: JSON.stringify({ action: "delete-rule", id }),
+    });
+    if (!r.ok) return { success: false, message: r.error || "Could not delete the rule." };
+    setCommissionRules((prev) => prev.filter((rule) => rule.id !== id));
+    await logAudit("commission", id, "RULE_DELETED", "Commission rule deleted");
+    return { success: true, message: "Rule deleted." };
   };
 
   const approveCommissionEntry = async (id: string) => {
@@ -1136,6 +1268,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Expense recorded." };
   };
 
+  const deleteExpense = async (id: string) => {
+    const r = await api("/api/finance", {
+      method: "POST",
+      body: JSON.stringify({ action: "delete-expense", id }),
+    });
+    if (!r.ok) return { success: false, message: r.error || "Could not delete the expense." };
+    setExpenses((prev) => prev.filter((e) => e.id !== id));
+    await logAudit("payment", id, "EXPENSE_DELETED", "Expense entry deleted");
+    return { success: true, message: "Expense deleted." };
+  };
+
   const createQuote = async (quote: {
     customerId: string;
     propertyId: string;
@@ -1164,6 +1307,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const convertQuoteToJob = async (quoteId: string) => {
     return convertQuoteToInvoice(quoteId);
+  };
+
+  const deleteQuote = async (id: string) => {
+    const r = await api("/api/finance", {
+      method: "POST",
+      body: JSON.stringify({ action: "delete-quote", id }),
+    });
+    if (!r.ok) return { success: false, message: r.error || "Could not delete the quotation." };
+    setQuotes((prev) => prev.filter((q) => q.id !== id));
+    await logAudit("payment", id, "QUOTE_DELETED", "Open quotation deleted");
+    return { success: true, message: "Quotation deleted." };
   };
 
   // --- Services & rubrics (company-authored, DB-backed) ----------------------------
@@ -1275,8 +1429,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteUser = async (id: string) => {
-    await updateUser(id, { active: false });
+    const r = await api<{ retired?: boolean; deleted?: boolean }>("/api/users", {
+      method: "DELETE",
+      body: JSON.stringify({ id }),
+    });
+    if (!r.ok) return { success: false, message: r.error || "Could not delete the user." };
+    if (r.data?.retired) {
+      // Referenced by jobs/inspections/photos: deactivated instead of deleted to
+      // preserve operational history. Re-sync the directory from the server.
+      const ur = await api<User[]>("/api/users");
+      if (ur.ok && ur.data) setUsers(ur.data);
+      return {
+        success: true,
+        message: "User has operational history and was deactivated instead of deleted.",
+      };
+    }
     setUsers((prev) => prev.filter((u) => u.id !== id));
+    await logAudit("customer", id, "USER_DELETED", "User account deleted");
+    return { success: true, message: "User deleted." };
   };
 
   // --- Settings -------------------------------------------------------------------------
@@ -1323,6 +1493,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         smsGatewayLogs,
         transitionJobStatus,
         refreshJobs,
+        refreshReferrals,
         transitionError,
         sendJobArrivalOTP,
         verifyJobOTP,
@@ -1340,15 +1511,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         submitCustomerFeedback,
         createJob,
         createCustomer,
+        updateCustomer,
+        deleteCustomer,
         createProperty,
+        updateProperty,
+        deleteProperty,
         createPartner,
+        updatePartner,
+        deletePartner,
         createCommissionRule,
         updateCommissionRule,
+        deleteCommissionRule,
         approveCommissionEntry,
         createPayout,
         recordPayment,
         createExpense,
+        deleteExpense,
         createQuote,
+        deleteQuote,
         convertQuoteToInvoice,
         convertQuoteToJob,
         assignStaffToJob,

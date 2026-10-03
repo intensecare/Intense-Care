@@ -7,6 +7,9 @@ import { useRouter, usePathname } from "next/navigation";
 interface AuthContextType {
   currentUser: User | null;
   isAuthenticated: boolean;
+  /** True while the server session is being resolved (page load / refresh).
+   *  Guards must NOT redirect to /login until this settles. */
+  isLoading: boolean;
   /** Verifies credentials against the database via POST /api/auth/login. */
   login: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
@@ -155,6 +158,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         currentUser,
         isAuthenticated: !!currentUser,
+        isLoading: !isLoaded,
         login,
         logout,
         hasPermission,

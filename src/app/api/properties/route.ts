@@ -27,6 +27,7 @@ const CreateSchema = z.object({
 
 const UpdateSchema = z.object({
   id: z.string().min(1).max(64),
+  customerId: z.string().min(1).max(64).optional(),
   title: z.string().min(1).max(200).optional(),
   address: z.string().min(1).max(500).optional(),
   propertyType: z.enum(["apartment", "villa", "office", "penthouse", "commercial", "duplex"]).optional(),
@@ -107,13 +108,46 @@ export async function PATCH(request: Request) {
     const { id, ...rest } = parsed.data;
     const data: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(rest)) {
-      if (v !== undefined) {
-        data[k === "carpetAreaSqFt" ? "areaSqFt" : k] = v;
+      if (v === undefined) continue;
+      if (k === "customerId") {
+        // Ownership reassignment requires the target customer to exist.
+        const customer = await prisma.customer.findUnique({ where: { id: String(v) } });
+        if (!customer) return fail("Customer not found.", 404);
       }
+      data[k === "carpetAreaSqFt" ? "areaSqFt" : k] = v;
     }
     const updated = await prisma.property.update({ where: { id }, data });
     return ok(serializeProperty(updated));
   } catch (err) {
     return errorResponse(err, "properties.patch.route_error");
+  }
+}
+
+/**
+ * DELETE /api/properties — remove a property (super_admin ONLY). Properties
+ * tied to booked jobs are rejected (FK-restricted job history must survive).
+ */
+export async function DELETE(request: Request) {
+  try {
+    await requireRole(["super_admin"]);
+    const body = await readJson(request);
+    const id = typeof body?.id === "string" ? body.id : null;
+    if (!id) return fail("Property id is required.", 400);
+
+    const property = await prisma.property.findUnique({ where: { id } });
+    if (!property) return fail("Property not found.", 404);
+
+    const jobCount = await prisma.job.count({ where: { propertyId: id } });
+    if (jobCount > 0) {
+      return fail(
+        `Property has ${jobCount} scheduled/completed job(s) linked to it and cannot be deleted.`,
+        409
+      );
+    }
+
+    await prisma.property.delete({ where: { id } });
+    return ok({ id, deleted: true });
+  } catch (err) {
+    return errorResponse(err, "properties.delete.route_error");
   }
 }

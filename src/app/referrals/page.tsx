@@ -21,6 +21,8 @@ import {
   Users,
   Settings,
   Loader2,
+  Edit2,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -35,6 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 
 export default function ReferralsAndCommissionsPage() {
   const {
@@ -44,8 +47,11 @@ export default function ReferralsAndCommissionsPage() {
     payouts,
     jobs,
     createPartner,
+    updatePartner,
+    deletePartner,
     createCommissionRule,
     updateCommissionRule,
+    deleteCommissionRule,
     approveCommissionEntry,
     createPayout,
   } = useApp();
@@ -55,6 +61,10 @@ export default function ReferralsAndCommissionsPage() {
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   const [isPayoutModalOpen, setIsPayoutModalOpen] = useState(false);
   const [selectedPartnerForPayout, setSelectedPartnerForPayout] = useState<ReferralPartner | null>(null);
+  const [editingPartnerId, setEditingPartnerId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: "partner" | "rule"; id: string; name: string } | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [partnerStatus, setPartnerStatus] = useState<"active" | "inactive">("active");
 
   // New Partner Form State
   const [partnerName, setPartnerName] = useState("");
@@ -91,30 +101,82 @@ export default function ReferralsAndCommissionsPage() {
   const totalCommissionPaid = partners.reduce((acc, p) => acc + p.totalCommissionPaid, 0);
   const totalCommissionPending = partners.reduce((acc, p) => acc + p.totalCommissionPending, 0);
 
-  const handleCreatePartner = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!partnerName) return;
-    setIsSubmittingPartner(true);
+  const isEditingPartner = editingPartnerId !== null;
 
-    const result = await createPartner({
-      name: partnerName,
-      partnerType,
-      email: partnerEmail,
-      phone: partnerPhone,
-      code: partnerCode || undefined,
-      commissionRuleId: partnerRuleId || commissionRules[0]?.id,
-    });
-    if (!result.success) {
-      setIsSubmittingPartner(false);
-      return;
-    }
-
-    setIsPartnerModalOpen(false);
+  const openCreatePartner = () => {
+    setEditingPartnerId(null);
+    setActionError("");
     setPartnerName("");
     setPartnerEmail("");
     setPartnerPhone("");
     setPartnerCode("");
+    setPartnerType("interior_designer");
+    setPartnerRuleId("");
+    setPartnerStatus("active");
+    setIsPartnerModalOpen(true);
+  };
+
+  const openEditPartner = (p: ReferralPartner) => {
+    setEditingPartnerId(p.id);
+    setActionError("");
+    setPartnerName(p.name);
+    setPartnerType(p.partnerType);
+    setPartnerEmail(p.email || "");
+    setPartnerPhone(p.phone || "");
+    setPartnerCode(p.code);
+    setPartnerRuleId(p.commissionRuleId || "");
+    setPartnerStatus(p.status === "inactive" ? "inactive" : "active");
+    setIsPartnerModalOpen(true);
+  };
+
+  const handleCreatePartner = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!partnerName) return;
+    setIsSubmittingPartner(true);
+    setActionError("");
+
+    const result = isEditingPartner && editingPartnerId
+      ? await updatePartner(editingPartnerId, {
+          name: partnerName,
+          partnerType,
+          email: partnerEmail,
+          phone: partnerPhone,
+          commissionRuleId: partnerRuleId || null,
+          status: partnerStatus,
+        })
+      : await createPartner({
+          name: partnerName,
+          partnerType,
+          email: partnerEmail,
+          phone: partnerPhone,
+          code: partnerCode || undefined,
+          commissionRuleId: partnerRuleId || commissionRules[0]?.id,
+        });
+
     setIsSubmittingPartner(false);
+    if (!result.success) {
+      setActionError(result.message);
+      return;
+    }
+
+    setIsPartnerModalOpen(false);
+    setEditingPartnerId(null);
+    setPartnerName("");
+    setPartnerEmail("");
+    setPartnerPhone("");
+    setPartnerCode("");
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setActionError("");
+    const result =
+      deleteTarget.kind === "partner"
+        ? await deletePartner(deleteTarget.id)
+        : await deleteCommissionRule(deleteTarget.id);
+    if (!result.success) {
+      setActionError(result.message);
+    }
   };
 
   const handleCreateRule = async (e: React.FormEvent) => {
@@ -176,7 +238,7 @@ export default function ReferralsAndCommissionsPage() {
         actions={
           <div className="flex gap-2">
             <Button
-              onClick={() => setIsPartnerModalOpen(true)}
+              onClick={openCreatePartner}
               className="bg-slate-900 text-white hover:bg-slate-800 h-9 text-xs"
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
@@ -239,6 +301,11 @@ export default function ReferralsAndCommissionsPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        {actionError && (
+          <p className="text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+            {actionError}
+          </p>
+        )}
         <TabsList className="bg-slate-200/70 p-1">
           <TabsTrigger value="partners">Partner Directory ({partners.length})</TabsTrigger>
           <TabsTrigger value="ledger">
@@ -290,7 +357,14 @@ export default function ReferralsAndCommissionsPage() {
                     {partners.map((p) => (
                       <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
                         <td className="py-3 px-4">
-                          <div className="font-semibold text-slate-900">{p.name}</div>
+                          <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                            {p.name}
+                            {p.status === "inactive" && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-200 text-slate-600">
+                                Inactive
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-slate-400 font-mono">{p.phone}</div>
                         </td>
                         <td className="py-3 px-4 capitalize text-slate-600">
@@ -325,6 +399,27 @@ export default function ReferralsAndCommissionsPage() {
                               Disburse Payout
                             </Button>
                           )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={() => openEditPartner(p)}
+                            title="Edit partner"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                            onClick={() => {
+                              setActionError("");
+                              setDeleteTarget({ kind: "partner", id: p.id, name: p.name });
+                            }}
+                            title="Delete partner"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                           <Link href={`/partner-portal/${p.code}`} target="_blank">
                             <Button variant="outline" size="sm" className="h-7 text-xs">
                               <ExternalLink className="h-3 w-3 mr-1" />
@@ -464,9 +559,23 @@ export default function ReferralsAndCommissionsPage() {
                     <span className="font-bold text-slate-900 text-sm">
                       {rule.name}
                     </span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-200 text-slate-700">
-                      {rule.calculationType}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-200 text-slate-700">
+                        {rule.calculationType}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                        onClick={() => {
+                          setActionError("");
+                          setDeleteTarget({ kind: "rule", id: rule.id, name: rule.name });
+                        }}
+                        title="Delete rule"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="text-slate-600">
@@ -715,13 +824,15 @@ export default function ReferralsAndCommissionsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Register Partner Dialog */}
+      {/* Register / Edit Partner Dialog */}
       <Dialog open={isPartnerModalOpen} onOpenChange={setIsPartnerModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Register Referral Partner</DialogTitle>
+            <DialogTitle>{isEditingPartner ? "Edit Referral Partner" : "Register Referral Partner"}</DialogTitle>
             <DialogDescription>
-              Create a new partner account for attribution, tracking, and commission payouts.
+              {isEditingPartner
+                ? "Update partner details, commission rule assignment, or account status."
+                : "Create a new partner account for attribution, tracking, and commission payouts."}
             </DialogDescription>
           </DialogHeader>
 
@@ -761,7 +872,11 @@ export default function ReferralsAndCommissionsPage() {
                   onChange={(e) => setPartnerCode(e.target.value.toUpperCase())}
                   placeholder="E.g., LUXE10"
                   className="text-xs font-mono uppercase"
+                  disabled={isEditingPartner}
                 />
+                {isEditingPartner && (
+                  <p className="text-[10px] text-slate-400">Referral codes are permanent — portal links would break if changed.</p>
+                )}
               </div>
             </div>
 
@@ -799,6 +914,20 @@ export default function ReferralsAndCommissionsPage() {
               />
             </div>
 
+            {isEditingPartner && (
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">Account Status</label>
+                <select
+                  value={partnerStatus}
+                  onChange={(e) => setPartnerStatus(e.target.value as "active" | "inactive")}
+                  className="w-full h-9 rounded-md border border-slate-200 px-3 bg-white text-xs"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            )}
+
             <DialogFooter className="pt-3 border-t border-slate-100">
               <Button
                 type="button"
@@ -812,8 +941,10 @@ export default function ReferralsAndCommissionsPage() {
                 {isSubmittingPartner ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Registering...
+                    Saving...
                   </>
+                ) : isEditingPartner ? (
+                  "Save Changes"
                 ) : (
                   "Register Partner"
                 )}
@@ -822,6 +953,20 @@ export default function ReferralsAndCommissionsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Partner / Rule Confirmation */}
+      <ConfirmModal
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteConfirm}
+        title={deleteTarget?.kind === "rule" ? "Delete Commission Rule" : "Delete Referral Partner"}
+        description={
+          deleteTarget?.kind === "rule"
+            ? `Delete the rule "${deleteTarget?.name ?? ""}"? Rules assigned to partners cannot be deleted — deactivate instead.`
+            : `Permanently delete partner "${deleteTarget?.name ?? ""}"? Partners with commission history cannot be deleted — mark them inactive instead.`
+        }
+        confirmText="Delete"
+      />
     </AdminLayout>
   );
 }

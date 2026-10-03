@@ -71,6 +71,29 @@ const UpdateRuleSchema = z.object({
   active: z.boolean().optional(),
 });
 
+const UpdatePartnerSchema = z.object({
+  action: z.literal("update-partner"),
+  id: z.string().min(1).max(64),
+  name: z.string().min(2).max(160).optional(),
+  partnerType: z
+    .enum(["customer", "employee", "real_estate_agent", "interior_designer", "corporate_partner", "influencer"])
+    .optional(),
+  email: z.string().max(200).optional(),
+  phone: z.string().max(32).optional(),
+  status: z.enum(["active", "inactive"]).optional(),
+  commissionRuleId: z.string().max(64).nullable().optional(),
+});
+
+const DeletePartnerSchema = z.object({
+  action: z.literal("delete-partner"),
+  id: z.string().min(1).max(64),
+});
+
+const DeleteRuleSchema = z.object({
+  action: z.literal("delete-rule"),
+  id: z.string().min(1).max(64),
+});
+
 const ApproveSchema = z.object({
   action: z.literal("approve-entry"),
   id: z.string().min(1).max(64),
@@ -132,11 +155,73 @@ export async function POST(request: Request) {
     if (action === "update-rule") {
       const parsed = UpdateRuleSchema.safeParse(body);
       if (!parsed.success) return fail("Invalid rule update.", 400);
-      const { id, ...rest } = parsed.data;
+      const { action: _action, id, ...rest } = parsed.data;
       const data: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(rest)) if (v !== undefined) data[k] = v;
       const updated = await prisma.commissionRule.update({ where: { id }, data });
       return ok(serializeCommissionRule(updated));
+    }
+
+    if (action === "update-partner") {
+      const parsed = UpdatePartnerSchema.safeParse(body);
+      if (!parsed.success) return fail("Invalid partner update.", 400);
+      const { action: _action, id, ...rest } = parsed.data;
+      const data: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(rest)) if (v !== undefined) data[k] = v;
+      const updated = await prisma.referralPartner.update({ where: { id }, data });
+      logger.info("referrals.partner_updated", { partnerId: id, fields: Object.keys(data) });
+      return ok(serializePartner(updated));
+    }
+
+    if (action === "delete-partner") {
+      const parsed = DeletePartnerSchema.safeParse(body);
+      if (!parsed.success) return fail("Invalid partner delete payload.", 400);
+      const { id } = parsed.data;
+
+      const partner = await prisma.referralPartner.findUnique({ where: { id } });
+      if (!partner) return fail("Partner not found.", 404);
+
+      // Hard delete only for partners with no financial footprint; ledger rows
+      // and attributed jobs are history and must survive the partner.
+      const [entryCount, attributedJobs] = await Promise.all([
+        prisma.commissionEntry.count({ where: { partnerId: id } }),
+        prisma.job.count({ where: { referralPartnerId: id } }),
+      ]);
+      if (entryCount > 0 || attributedJobs > 0 || partner.totalCommissionPaid > 0 || partner.totalCommissionEarned > 0) {
+        return fail(
+          "Partner has commission history or attributed jobs and cannot be deleted. Set the partner to INACTIVE instead.",
+          409
+        );
+      }
+
+      // Detach customer attribution before removing the partner record.
+      await prisma.$transaction([
+        prisma.customer.updateMany({
+          where: { referralPartnerId: id },
+          data: { referralPartnerId: null, referralCode: null },
+        }),
+        prisma.referralPartner.delete({ where: { id } }),
+      ]);
+      logger.info("referrals.partner_deleted", { partnerId: id });
+      return ok({ id, deleted: true });
+    }
+
+    if (action === "delete-rule") {
+      const parsed = DeleteRuleSchema.safeParse(body);
+      if (!parsed.success) return fail("Invalid rule delete payload.", 400);
+      const { id } = parsed.data;
+
+      const inUse = await prisma.referralPartner.count({ where: { commissionRuleId: id } });
+      if (inUse > 0) {
+        return fail(
+          `${inUse} partner(s) are assigned to this rule. Reassign them or deactivate the rule instead.`,
+          409
+        );
+      }
+
+      await prisma.commissionRule.delete({ where: { id } });
+      logger.info("referrals.rule_deleted", { ruleId: id });
+      return ok({ id, deleted: true });
     }
 
     if (action === "approve-entry") {
