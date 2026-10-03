@@ -83,6 +83,8 @@ interface AppContextType {
 
   /** Re-fetches jobs + checklist from the server (post-write re-sync). */
   refreshJobs: () => Promise<void>;
+  /** Re-fetches the customer directory from the server (post-write re-sync). */
+  refreshCustomers: () => Promise<void>;
   /** Re-fetches the referral ledger from the server (post-write re-sync; super_admin only). */
   refreshReferrals: () => Promise<void>;
   /** Last server-rejected status transition, for UI error display. */
@@ -492,6 +494,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (r.ok && r.data) setJobs(r.data);
     const c = await api<JobChecklistItem[]>("/api/checklist");
     if (c.ok && c.data) setChecklistItems(c.data);
+  }, []);
+
+  /**
+   * Re-fetches the customer directory (post-write re-sync). Managers only —
+   * staff get a silent 403 no-op. Keeps lifetime revenue, booking totals and
+   * attribution in step after finance/job writes that touch customer rows.
+   */
+  const refreshCustomers = useCallback(async () => {
+    const r = await api<Customer[]>("/api/customers");
+    if (r.ok && r.data) setCustomers(r.data);
   }, []);
 
   /**
@@ -939,6 +951,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
     await logAudit("job", createdJob.id, "JOB_CREATED", `Booking created (${createdJob.status})`);
+    // The server incremented the customer's booking total — re-sync the
+    // directory so lifetime counters stay accurate without a manual refresh.
+    void refreshCustomers();
     return { success: true, message: "Booking created.", job: createdJob };
   };
 
@@ -1033,10 +1048,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!r.ok || !r.data) return { success: false, message: r.error || "Could not update the customer." };
     setCustomers((prev) => prev.map((c) => (c.id === id ? (r.data as Customer) : c)));
     await logAudit("customer", id, "CUSTOMER_UPDATED", `Customer ${r.data.name} updated`);
+    // Re-attribution moves a lead between partners server-side (counters +
+    // code) — re-sync the referral ledger so the directory stays honest.
+    if (Object.prototype.hasOwnProperty.call(updates, "referralPartnerId")) {
+      void refreshReferrals();
+    }
     return { success: true, message: "Customer updated.", customer: r.data };
   };
 
   const deleteCustomer = async (id: string) => {
+    const target = customers.find((c) => c.id === id);
     const r = await api<{ deleted?: boolean }>("/api/customers", {
       method: "DELETE",
       body: JSON.stringify({ id }),
@@ -1046,6 +1067,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // The DB cascades the customer's property records — mirror that locally so
     // the Properties page doesn't show ghost properties until a refresh.
     setProperties((prev) => prev.filter((p) => p.customerId !== id));
+    // The server decremented the partner's lead counter — re-sync the ledger.
+    if (target?.referralPartnerId) void refreshReferrals();
     await logAudit("customer", id, "CUSTOMER_DELETED", "Customer record deleted");
     return { success: true, message: "Customer deleted." };
   };
@@ -1254,6 +1277,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     const jr = await api<Job[]>("/api/jobs");
     if (jr.ok && jr.data) setJobs(jr.data);
+    // The settlement recomputed the customer's lifetime revenue server-side —
+    // re-sync the directory so the Customers section reflects it immediately.
+    await refreshCustomers();
     return { success: true, message: "Payment recorded." };
   };
 
@@ -1286,21 +1312,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     items: { description: string; quantity: number; unitPrice: number }[];
     validUntil: string;
   }) => {
-    const r = await api("/api/finance", {
+    const r = await api<Quote>("/api/finance", {
       method: "POST",
       body: JSON.stringify({ action: "create-quote", ...quote }),
     });
-    if (!r.ok) return { success: false, message: r.error || "Could not create the quotation." };
+    if (!r.ok || !r.data) return { success: false, message: r.error || "Could not create the quotation." };
+    // Insert the persisted quotation into the local store so it shows up
+    // without a manual refresh.
+    setQuotes((prev) => [r.data as Quote, ...prev]);
     await logAudit("job", "quote", "QUOTE_CREATED", `Quotation created (₹ total per line items)`);
     return { success: true, message: "Quotation created." };
   };
 
   const convertQuoteToInvoice = async (quoteId: string) => {
-    const r = await api("/api/finance", {
+    const r = await api<{ invoice: Invoice; jobId: string }>("/api/finance", {
       method: "POST",
       body: JSON.stringify({ action: "convert-quote", quoteId }),
     });
     if (!r.ok) return { success: false, message: r.error || "Conversion failed." };
+    // The server created a booking + tax invoice and closed the quotation.
+    // Re-sync every affected collection so Jobs, Finance and Customers all
+    // reflect the conversion without a manual refresh.
+    await Promise.all([
+      (async () => {
+        const fr = await api<{
+          invoices: Invoice[];
+          payments: Payment[];
+          expenses: Expense[];
+          quotes: Quote[];
+        }>("/api/finance");
+        if (fr.ok && fr.data) {
+          setInvoices(fr.data.invoices);
+          setPayments(fr.data.payments);
+          setExpenses(fr.data.expenses);
+          setQuotes(fr.data.quotes);
+        }
+      })(),
+      refreshJobs(),
+      refreshCustomers(),
+    ]);
     await logAudit("payment", quoteId, "QUOTE_CONVERTED", "Quotation converted to job + invoice");
     return { success: true, message: "Quotation converted to job + invoice." };
   };
@@ -1493,6 +1543,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         smsGatewayLogs,
         transitionJobStatus,
         refreshJobs,
+        refreshCustomers,
         refreshReferrals,
         transitionError,
         sendJobArrivalOTP,

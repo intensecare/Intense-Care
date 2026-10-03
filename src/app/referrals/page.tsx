@@ -23,6 +23,11 @@ import {
   Loader2,
   Edit2,
   Trash2,
+  Banknote,
+  Phone,
+  Mail,
+  Landmark,
+  History,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -46,6 +51,7 @@ export default function ReferralsAndCommissionsPage() {
     commissionEntries,
     payouts,
     jobs,
+    customers,
     createPartner,
     updatePartner,
     deletePartner,
@@ -65,6 +71,7 @@ export default function ReferralsAndCommissionsPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "partner" | "rule"; id: string; name: string } | null>(null);
   const [actionError, setActionError] = useState("");
   const [partnerStatus, setPartnerStatus] = useState<"active" | "inactive">("active");
+  const [detailPartnerId, setDetailPartnerId] = useState<string | null>(null);
 
   // New Partner Form State
   const [partnerName, setPartnerName] = useState("");
@@ -102,6 +109,10 @@ export default function ReferralsAndCommissionsPage() {
   const totalCommissionPending = partners.reduce((acc, p) => acc + p.totalCommissionPending, 0);
 
   const isEditingPartner = editingPartnerId !== null;
+
+  const detailPartner = detailPartnerId
+    ? partners.find((p) => p.id === detailPartnerId) ?? null
+    : null;
 
   const openCreatePartner = () => {
     setEditingPartnerId(null);
@@ -355,7 +366,12 @@ export default function ReferralsAndCommissionsPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {partners.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
+                      <tr
+                        key={p.id}
+                        onClick={() => setDetailPartnerId(p.id)}
+                        className="hover:bg-slate-50/60 transition-colors cursor-pointer"
+                        title="Open partner details"
+                      >
                         <td className="py-3 px-4">
                           <div className="font-semibold text-slate-900 flex items-center gap-1.5">
                             {p.name}
@@ -393,7 +409,10 @@ export default function ReferralsAndCommissionsPage() {
                           {p.totalCommissionPending > 0 && (
                             <Button
                               size="sm"
-                              onClick={() => handleOpenPayout(p)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenPayout(p);
+                              }}
                               className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
                             >
                               Disburse Payout
@@ -403,7 +422,10 @@ export default function ReferralsAndCommissionsPage() {
                             variant="outline"
                             size="sm"
                             className="h-7 w-7 p-0"
-                            onClick={() => openEditPartner(p)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditPartner(p);
+                            }}
                             title="Edit partner"
                           >
                             <Edit2 className="h-3.5 w-3.5" />
@@ -412,7 +434,8 @@ export default function ReferralsAndCommissionsPage() {
                             variant="outline"
                             size="sm"
                             className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setActionError("");
                               setDeleteTarget({ kind: "partner", id: p.id, name: p.name });
                             }}
@@ -420,7 +443,11 @@ export default function ReferralsAndCommissionsPage() {
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
-                          <Link href={`/partner-portal/${p.code}`} target="_blank">
+                          <Link
+                            href={`/partner-portal/${p.code}`}
+                            target="_blank"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <Button variant="outline" size="sm" className="h-7 text-xs">
                               <ExternalLink className="h-3 w-3 mr-1" />
                               Partner View
@@ -951,6 +978,239 @@ export default function ReferralsAndCommissionsPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Partner Detail Dialog */}
+      <Dialog open={detailPartner !== null} onOpenChange={(open) => !open && setDetailPartnerId(null)}>
+        <DialogContent className="sm:max-w-lg">
+          {detailPartner && (() => {
+            const rule = commissionRules.find((r) => r.id === detailPartner.commissionRuleId);
+            const partnerEntries = commissionEntries.filter((e) => e.partnerId === detailPartner.id);
+            const partnerPayouts = payouts.filter((x) => x.partnerId === detailPartner.id);
+            const attributedCustomers = customers.filter((c) => c.referralPartnerId === detailPartner.id);
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-base">
+                    {detailPartner.name}
+                    <span className="font-mono text-xs bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">
+                      {detailPartner.code}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        detailPartner.status === "active"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-200 text-slate-600"
+                      }`}
+                    >
+                      {detailPartner.status}
+                    </span>
+                  </DialogTitle>
+                  <DialogDescription>
+                    Full partner file: performance counters, commission ledger and payout history.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 py-2 text-xs max-h-[60vh] overflow-y-auto">
+                  <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
+                    <span className="capitalize bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">
+                      {detailPartner.partnerType.replace("_", " ")}
+                    </span>
+                    {detailPartner.email && (
+                      <span className="flex items-center gap-1">
+                        <Mail className="h-3 w-3 text-slate-400" />
+                        {detailPartner.email}
+                      </span>
+                    )}
+                    {detailPartner.phone && (
+                      <span className="flex items-center gap-1 font-mono">
+                        <Phone className="h-3 w-3 text-slate-400" />
+                        {detailPartner.phone}
+                      </span>
+                    )}
+                    <span>Registered {formatDate(detailPartner.createdAt)}</span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-[11px]">
+                    <div className="p-2 rounded bg-slate-50 border border-slate-100">
+                      <div className="font-bold text-slate-900 text-sm">{detailPartner.totalReferrals}</div>
+                      <div className="text-slate-400">Attributed leads</div>
+                    </div>
+                    <div className="p-2 rounded bg-slate-50 border border-slate-100">
+                      <div className="font-bold text-slate-900 text-sm">{detailPartner.totalConversions}</div>
+                      <div className="text-slate-400">Conversions</div>
+                    </div>
+                    <div className="p-2 rounded bg-slate-50 border border-slate-100">
+                      <div className="font-bold text-slate-900 text-sm">{formatCurrency(detailPartner.totalRevenueGenerated)}</div>
+                      <div className="text-slate-400">Revenue generated</div>
+                    </div>
+                    <div className="p-2 rounded bg-emerald-50 border border-emerald-100">
+                      <div className="font-bold text-emerald-700 text-sm">{formatCurrency(detailPartner.totalCommissionEarned)}</div>
+                      <div className="text-emerald-600/70">Commission earned</div>
+                    </div>
+                    <div className="p-2 rounded bg-amber-50 border border-amber-100">
+                      <div className="font-bold text-amber-700 text-sm">{formatCurrency(detailPartner.totalCommissionPending)}</div>
+                      <div className="text-amber-600/70">Pending</div>
+                    </div>
+                    <div className="p-2 rounded bg-slate-50 border border-slate-100">
+                      <div className="font-bold text-slate-900 text-sm">{formatCurrency(detailPartner.totalCommissionPaid)}</div>
+                      <div className="text-slate-400">Paid out</div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <strong className="text-slate-800 flex items-center gap-1">
+                        <Settings className="h-3 w-3 text-slate-400" />
+                        Commission rule
+                      </strong>
+                      {rule ? (
+                        <span className="text-slate-600">
+                          {rule.name} — {rule.calculationType === "percentage" ? `${rule.value}%` : formatCurrency(rule.value)}{" "}
+                          ({rule.calculationType.replace("_", " ")})
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">Default active rule applied at settlement</span>
+                      )}
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <strong className="text-slate-800 flex items-center gap-1">
+                        <Landmark className="h-3 w-3 text-slate-400" />
+                        Bank / Payout details
+                      </strong>
+                      {detailPartner.bankDetails ? (
+                        <span className="text-slate-600 block truncate">
+                          {detailPartner.bankDetails.accountName}
+                          {detailPartner.bankDetails.upiId ? ` · UPI: ${detailPartner.bankDetails.upiId}` : ""}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">Not recorded</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded bg-blue-50/60 border border-blue-100 text-blue-900">
+                    <strong className="flex items-center gap-1">
+                      <Users className="h-3 w-3" />
+                      {attributedCustomers.length} attributed customer lead(s)
+                    </strong>
+                    {attributedCustomers.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {attributedCustomers.map((c) => (
+                          <Link
+                            key={c.id}
+                            href={`/customers/${c.id}`}
+                            className="block text-[11px] text-blue-700 hover:underline"
+                          >
+                            {c.name} ({c.phone})
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <h4 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <History className="h-3 w-3" />
+                      Commission Ledger ({partnerEntries.length})
+                    </h4>
+                    {partnerEntries.length === 0 ? (
+                      <p className="text-[11px] text-slate-400">No commission entries yet.</p>
+                    ) : (
+                      <div className="divide-y divide-slate-100 rounded-lg border border-slate-100">
+                        {partnerEntries.map((e) => (
+                          <div key={e.id} className="p-2.5 flex items-center justify-between gap-2">
+                            <div>
+                              <Link
+                                href={`/jobs/${e.jobId}`}
+                                className="font-mono text-[11px] text-blue-600 hover:underline"
+                              >
+                                {e.jobId}
+                              </Link>
+                              <div className="text-[10px] text-slate-400">{formatDate(e.createdAt)}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <div className="font-bold text-emerald-700">{formatCurrency(e.commissionAmount)}</div>
+                                <div className="text-[10px] text-slate-400">on {formatCurrency(e.bookingAmount)}</div>
+                              </div>
+                              <span
+                                className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                  e.status === "PAID"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : e.status === "APPROVED"
+                                    ? "bg-blue-100 text-blue-800"
+                                    : "bg-amber-100 text-amber-800"
+                                }`}
+                              >
+                                {e.status.replace("_", " ")}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {partnerPayouts.length > 0 && (
+                    <div className="space-y-1.5">
+                      <h4 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <Banknote className="h-3 w-3" />
+                        Payouts ({partnerPayouts.length})
+                      </h4>
+                      <div className="divide-y divide-slate-100 rounded-lg border border-slate-100">
+                        {partnerPayouts.map((x) => (
+                          <div key={x.id} className="p-2.5 flex items-center justify-between gap-2">
+                            <div>
+                              <div className="font-bold text-slate-900">{formatCurrency(x.amount)}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">{x.referenceNumber}</div>
+                            </div>
+                            <div className="text-right text-[10px] text-slate-500">
+                              <div className="uppercase">{x.payoutMethod.replace("_", " ")}</div>
+                              <div>{formatDate(x.paidAt)}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter className="pt-3 border-t border-slate-100">
+                  {detailPartner.totalCommissionPending > 0 && (
+                    <Button
+                      size="sm"
+                      className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                      onClick={() => {
+                        const target = detailPartner;
+                        setDetailPartnerId(null);
+                        handleOpenPayout(target);
+                      }}
+                    >
+                      Disburse Payout
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => {
+                      const target = detailPartner;
+                      setDetailPartnerId(null);
+                      openEditPartner(target);
+                    }}
+                  >
+                    <Edit2 className="h-3.5 w-3.5 mr-1" />
+                    Edit Partner
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setDetailPartnerId(null)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

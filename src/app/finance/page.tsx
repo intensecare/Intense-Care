@@ -24,12 +24,15 @@ import {
 import { Input } from "@/components/ui/input";
 
 export default function FinancePage() {
-  const { invoices, payments, quotes, customers, jobs, expenses, payouts, partners, recordPayment, createExpense, convertQuoteToInvoice, deleteExpense, deleteQuote } = useApp();
+  const { invoices, payments, quotes, customers, jobs, expenses, payouts, partners, properties, services, recordPayment, createExpense, convertQuoteToInvoice, deleteExpense, deleteQuote } = useApp();
 
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "expense" | "quote"; id: string; label: string } | null>(null);
   const [actionError, setActionError] = useState("");
   const [activeTab, setActiveTab] = useState("invoices");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [detailInvoiceId, setDetailInvoiceId] = useState<string | null>(null);
+  const [detailQuoteId, setDetailQuoteId] = useState<string | null>(null);
+  const [detailExpenseId, setDetailExpenseId] = useState<string | null>(null);
   const [payAmount, setPayAmount] = useState<number>(0);
   const [payMethod, setPayMethod] = useState<any>("upi");
   const [payRef, setPayRef] = useState("");
@@ -43,6 +46,10 @@ export default function FinancePage() {
   const [expRef, setExpRef] = useState("");
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [isSubmittingExpense, setIsSubmittingExpense] = useState(false);
+
+  const detailInvoice = detailInvoiceId ? invoices.find((i) => i.id === detailInvoiceId) ?? null : null;
+  const detailQuote = detailQuoteId ? quotes.find((q) => q.id === detailQuoteId) ?? null : null;
+  const detailExpense = detailExpenseId ? expenses.find((e) => e.id === detailExpenseId) ?? null : null;
 
   const totalInvoiced = invoices.reduce((acc, i) => acc + i.total, 0);
   const totalCollected = invoices.reduce((acc, i) => acc + i.amountPaid, 0);
@@ -207,7 +214,12 @@ export default function FinancePage() {
                       const cust = customers.find((c) => c.id === inv.customerId);
 
                       return (
-                        <tr key={inv.id} className="hover:bg-slate-50/60 transition-colors">
+                        <tr
+                          key={inv.id}
+                          onClick={() => setDetailInvoiceId(inv.id)}
+                          className="hover:bg-slate-50/60 transition-colors cursor-pointer"
+                          title="Open invoice details"
+                        >
                           <td className="py-3 px-4 font-mono font-bold text-slate-900">
                             {inv.invoiceNumber}
                           </td>
@@ -238,7 +250,10 @@ export default function FinancePage() {
                             {inv.balanceDue > 0 && (
                               <Button
                                 size="sm"
-                                onClick={() => handleOpenPaymentModal(inv)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenPaymentModal(inv);
+                                }}
                                 className="h-7 text-xs bg-slate-900 text-white font-medium"
                               >
                                 Collect Payment
@@ -323,7 +338,11 @@ export default function FinancePage() {
                 const cust = customers.find((c) => c.id === q.customerId);
 
                 return (
-                  <div key={q.id} className="p-4 flex items-center justify-between text-xs hover:bg-slate-50/60">
+                  <div
+                    key={q.id}
+                    onClick={() => setDetailQuoteId(q.id)}
+                    className="p-4 flex items-center justify-between text-xs hover:bg-slate-50/60 cursor-pointer"
+                  >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-slate-900">{q.quoteNumber}</span>
@@ -347,7 +366,10 @@ export default function FinancePage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => convertQuoteToInvoice(q.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            convertQuoteToInvoice(q.id);
+                          }}
                           className="text-xs h-8 border-slate-300"
                         >
                           Convert to Invoice
@@ -358,7 +380,8 @@ export default function FinancePage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setActionError("");
                             setDeleteTarget({ kind: "quote", id: q.id, label: q.quoteNumber });
                           }}
@@ -401,7 +424,12 @@ export default function FinancePage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {expenses.map((exp) => (
-                      <tr key={exp.id} className="hover:bg-slate-50/60 transition-colors">
+                      <tr
+                        key={exp.id}
+                        onClick={() => setDetailExpenseId(exp.id)}
+                        className="hover:bg-slate-50/60 transition-colors cursor-pointer"
+                        title="Open expense details"
+                      >
                         <td className="py-3 px-4 text-slate-500 font-mono">
                           {formatDate(exp.date)}
                         </td>
@@ -427,7 +455,8 @@ export default function FinancePage() {
                             variant="outline"
                             size="sm"
                             className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setActionError("");
                               setDeleteTarget({ kind: "expense", id: exp.id, label: exp.description });
                             }}
@@ -451,6 +480,306 @@ export default function FinancePage() {
           {actionError}
         </p>
       )}
+
+      {/* Invoice Detail Dialog */}
+      <Dialog open={detailInvoice !== null} onOpenChange={(open) => !open && setDetailInvoiceId(null)}>
+        <DialogContent className="sm:max-w-lg">
+          {detailInvoice && (() => {
+            const cust = customers.find((c) => c.id === detailInvoice.customerId);
+            const invoicePayments = payments.filter((p) => p.invoiceId === detailInvoice.id);
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-base">
+                    <FileText className="h-4 w-4 text-slate-700" />
+                    {detailInvoice.invoiceNumber}
+                    <PaymentStatusBadge status={detailInvoice.status} />
+                  </DialogTitle>
+                  <DialogDescription>Tax invoice with settlement history.</DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 py-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <span className="text-[11px] text-slate-400">Customer</span>
+                      {cust ? (
+                        <Link href={`/customers/${cust.id}`} className="block font-semibold text-slate-800 hover:underline">
+                          {cust.name}
+                        </Link>
+                      ) : (
+                        <div className="font-semibold text-slate-800">—</div>
+                      )}
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <span className="text-[11px] text-slate-400">Job</span>
+                      <Link href={`/jobs/${detailInvoice.jobId}`} className="block font-mono font-semibold text-blue-600 hover:underline">
+                        {detailInvoice.jobId}
+                      </Link>
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <span className="text-[11px] text-slate-400">Issued</span>
+                      <div className="font-semibold text-slate-800">{formatDate(detailInvoice.issuedAt)}</div>
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <span className="text-[11px] text-slate-400">Due date</span>
+                      <div className="font-semibold text-slate-800">{formatDate(detailInvoice.dueDate)}</div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
+                    <div className="p-2.5 flex justify-between">
+                      <span className="text-slate-500">Subtotal</span>
+                      <span className="font-semibold text-slate-800">{formatCurrency(detailInvoice.subtotal)}</span>
+                    </div>
+                    <div className="p-2.5 flex justify-between">
+                      <span className="text-slate-500">GST</span>
+                      <span className="font-semibold text-slate-800">{formatCurrency(detailInvoice.tax)}</span>
+                    </div>
+                    {detailInvoice.discount > 0 && (
+                      <div className="p-2.5 flex justify-between">
+                        <span className="text-slate-500">Discount</span>
+                        <span className="font-semibold text-slate-800">− {formatCurrency(detailInvoice.discount)}</span>
+                      </div>
+                    )}
+                    <div className="p-2.5 flex justify-between bg-slate-50">
+                      <span className="font-bold text-slate-900">Total</span>
+                      <span className="font-bold text-slate-900">{formatCurrency(detailInvoice.total)}</span>
+                    </div>
+                    <div className="p-2.5 flex justify-between">
+                      <span className="text-slate-500">Amount paid</span>
+                      <span className="font-semibold text-emerald-700">{formatCurrency(detailInvoice.amountPaid)}</span>
+                    </div>
+                    <div className="p-2.5 flex justify-between">
+                      <span className="text-slate-500">Balance due</span>
+                      <span className={detailInvoice.balanceDue > 0 ? "font-bold text-rose-600" : "font-semibold text-slate-400"}>
+                        {formatCurrency(detailInvoice.balanceDue)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <h4 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                      Settlements ({invoicePayments.length})
+                    </h4>
+                    {invoicePayments.length === 0 ? (
+                      <p className="text-[11px] text-slate-400">No payments recorded against this invoice yet.</p>
+                    ) : (
+                      <div className="divide-y divide-slate-100 rounded-lg border border-slate-100">
+                        {invoicePayments.map((p) => (
+                          <div key={p.id} className="p-2.5 flex items-center justify-between">
+                            <div>
+                              <div className="font-bold text-emerald-700">{formatCurrency(p.amount)}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">{p.transactionReference}</div>
+                            </div>
+                            <div className="text-right text-[10px] text-slate-500">
+                              <div className="uppercase">{p.paymentMethod.replace("_", " ")}</div>
+                              <div>{formatDateTime(p.paidAt)}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <DialogFooter className="pt-3 border-t border-slate-100">
+                  {detailInvoice.balanceDue > 0 && (
+                    <Button
+                      size="sm"
+                      className="text-xs bg-slate-900 text-white"
+                      onClick={() => {
+                        const target = detailInvoice;
+                        setDetailInvoiceId(null);
+                        handleOpenPaymentModal(target);
+                      }}
+                    >
+                      <CreditCard className="h-3.5 w-3.5 mr-1" />
+                      Collect Payment
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => setDetailInvoiceId(null)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Quote Detail Dialog */}
+      <Dialog open={detailQuote !== null} onOpenChange={(open) => !open && setDetailQuoteId(null)}>
+        <DialogContent className="sm:max-w-lg">
+          {detailQuote && (() => {
+            const cust = customers.find((c) => c.id === detailQuote.customerId);
+            const property = properties.find((p) => p.id === detailQuote.propertyId);
+            const service = services.find((s) => s.id === detailQuote.serviceId);
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-base">
+                    <FileText className="h-4 w-4 text-blue-600" />
+                    {detailQuote.quoteNumber}
+                    <span className="px-2 py-0.2 rounded text-[10px] font-bold uppercase bg-blue-50 text-blue-800">
+                      {detailQuote.status}
+                    </span>
+                  </DialogTitle>
+                  <DialogDescription>Quotation details and conversion actions.</DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 py-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <span className="text-[11px] text-slate-400">Customer</span>
+                      {cust ? (
+                        <Link href={`/customers/${cust.id}`} className="block font-semibold text-slate-800 hover:underline">
+                          {cust.name}
+                        </Link>
+                      ) : (
+                        <div className="font-semibold text-slate-800">—</div>
+                      )}
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <span className="text-[11px] text-slate-400">Property</span>
+                      <div className="font-semibold text-slate-800 truncate">
+                        {property ? property.title : detailQuote.propertyId}
+                      </div>
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <span className="text-[11px] text-slate-400">Service package</span>
+                      <div className="font-semibold text-slate-800">{service ? service.name : detailQuote.serviceId}</div>
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                      <span className="text-[11px] text-slate-400">Valid until</span>
+                      <div className="font-semibold text-slate-800">{formatDate(detailQuote.validUntil)}</div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
+                    <div className="p-2.5 flex justify-between">
+                      <span className="text-slate-500">Subtotal</span>
+                      <span className="font-semibold text-slate-800">{formatCurrency(detailQuote.subtotal)}</span>
+                    </div>
+                    <div className="p-2.5 flex justify-between">
+                      <span className="text-slate-500">GST</span>
+                      <span className="font-semibold text-slate-800">{formatCurrency(detailQuote.tax)}</span>
+                    </div>
+                    <div className="p-2.5 flex justify-between bg-slate-50">
+                      <span className="font-bold text-slate-900">Total</span>
+                      <span className="font-bold text-slate-900">{formatCurrency(detailQuote.total)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <DialogFooter className="pt-3 border-t border-slate-100">
+                  {detailQuote.status === "sent" && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs border-slate-300"
+                        onClick={() => {
+                          const id = detailQuote.id;
+                          setDetailQuoteId(null);
+                          void convertQuoteToInvoice(id);
+                        }}
+                      >
+                        Convert to Invoice
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                        onClick={() => {
+                          const q = detailQuote;
+                          setDetailQuoteId(null);
+                          setActionError("");
+                          setDeleteTarget({ kind: "quote", id: q.id, label: q.quoteNumber });
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" />
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => setDetailQuoteId(null)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Expense Detail Dialog */}
+      <Dialog open={detailExpense !== null} onOpenChange={(open) => !open && setDetailExpenseId(null)}>
+        <DialogContent className="sm:max-w-md">
+          {detailExpense && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-base">
+                  <DollarSign className="h-4 w-4 text-rose-500" />
+                  {formatCurrency(detailExpense.amount)}
+                  <span className="px-2 py-0.2 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-700">
+                    {detailExpense.category}
+                  </span>
+                </DialogTitle>
+                <DialogDescription>Operational expense record.</DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-2 py-2 text-xs">
+                <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                  <span className="text-[11px] text-slate-400">Description</span>
+                  <div className="font-semibold text-slate-800">{detailExpense.description}</div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                    <span className="text-[11px] text-slate-400">Date</span>
+                    <div className="font-semibold text-slate-800">{formatDate(detailExpense.date)}</div>
+                  </div>
+                  <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                    <span className="text-[11px] text-slate-400">Payment method</span>
+                    <div className="font-semibold text-slate-800 capitalize">
+                      {detailExpense.paymentMethod.replace("_", " ")}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                    <span className="text-[11px] text-slate-400">Reference</span>
+                    <div className="font-mono font-semibold text-slate-800">
+                      {detailExpense.reference || "—"}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
+                    <span className="text-[11px] text-slate-400">Recorded</span>
+                    <div className="font-semibold text-slate-800">{formatDate(detailExpense.createdAt)}</div>
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="pt-3 border-t border-slate-100">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                  onClick={() => {
+                    const exp = detailExpense;
+                    setDetailExpenseId(null);
+                    setActionError("");
+                    setDeleteTarget({ kind: "expense", id: exp.id, label: exp.description });
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1" />
+                  Delete Expense
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setDetailExpenseId(null)}>
+                  Close
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Expense / Quote Confirmation */}
       <ConfirmModal

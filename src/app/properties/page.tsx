@@ -1,10 +1,13 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
+import Link from "next/link";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
+import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
+import { formatDate } from "@/lib/utils";
 import {
   Building2,
   MapPin,
@@ -13,16 +16,18 @@ import {
   KeyRound,
   Car,
   Clock,
-  Calendar,
-  ExternalLink,
-  Loader2,
+  History,
   Edit2,
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
+import {
+  PropertyFormDialog,
+  type PropertyFormPayload,
+} from "@/components/common/PropertyFormDialog";
+import type { Property } from "@/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -33,35 +38,17 @@ import {
 } from "@/components/ui/dialog";
 
 export default function PropertiesPage() {
-  const { properties, customers, createProperty, updateProperty, deleteProperty, currentRole } = useApp();
+  const { properties, customers, jobs, createProperty, updateProperty, deleteProperty, currentRole } = useApp();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [detailPropertyId, setDetailPropertyId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [actionError, setActionError] = useState("");
 
   const canEdit = currentRole === "super_admin" || currentRole === "ops_manager";
   const canDelete = currentRole === "super_admin";
-  const isEditing = editingPropertyId !== null;
-
-  // Form State
-  const [customerId, setCustomerId] = useState(customers[0]?.id || "");
-  const [title, setTitle] = useState("");
-  const [propertyType, setPropertyType] = useState<any>("apartment");
-  const [address, setAddress] = useState("");
-  const [city, setCity] = useState("Bengaluru");
-  const [bedrooms, setBedrooms] = useState(3);
-  const [sqFt, setSqFt] = useState(1800);
-  const [accessNotes, setAccessNotes] = useState("");
-  const [parking, setParking] = useState("");
-  const [recurring, setRecurring] = useState(false);
-
-  // Customer options for dropdown
-  const customerOptions = useMemo(() =>
-    customers.map((c) => ({ value: c.id, label: `${c.name} (${c.phone})` })),
-  [customers]);
 
   const filteredProperties = properties.filter(
     (p) =>
@@ -70,73 +57,30 @@ export default function PropertiesPage() {
       p.city.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const resetForm = () => {
-    setTitle("");
-    setAddress("");
-    setAccessNotes("");
-    setParking("");
-    setPropertyType("apartment");
-    setBedrooms(3);
-    setSqFt(1800);
-    setRecurring(false);
-  };
-
   const openCreate = () => {
-    setEditingPropertyId(null);
     setActionError("");
-    resetForm();
-    setIsCreateOpen(true);
+    setEditingProperty(null);
+    setFormOpen(true);
   };
 
-  const openEdit = (p: (typeof properties)[number]) => {
-    setEditingPropertyId(p.id);
+  const openEdit = (p: Property) => {
     setActionError("");
-    setCustomerId(p.customerId);
-    setTitle(p.title);
-    setPropertyType(p.propertyType);
-    setAddress(p.address);
-    setCity(p.city || "Bengaluru");
-    setBedrooms(p.bedrooms ?? 3);
-    setSqFt(p.carpetAreaSqFt ?? 1800);
-    setAccessNotes(p.accessNotes || "");
-    setParking(p.parkingInstructions || "");
-    setRecurring(p.recurringService || false);
-    setIsCreateOpen(true);
+    setEditingProperty(p);
+    setFormOpen(true);
   };
 
-  const handleSaveSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !address || !customerId) return;
-    setIsSubmitting(true);
-    setActionError("");
-
-    const payload = {
-      customerId,
-      title,
-      propertyType,
-      address,
-      city,
-      bedrooms,
-      carpetAreaSqFt: sqFt,
-      accessNotes,
-      parkingInstructions: parking,
-      recurringService: recurring,
-    };
-
-    const result = isEditing && editingPropertyId
-      ? await updateProperty(editingPropertyId, payload)
+  const handleFormSubmit = async (
+    payload: PropertyFormPayload
+  ): Promise<{ success: boolean; message: string }> => {
+    const result = editingProperty
+      ? await updateProperty(editingProperty.id, payload)
       : await createProperty(payload);
-
-    setIsSubmitting(false);
-    if (!result.success) {
-      setActionError(result.message);
-      return;
-    }
-
-    setIsCreateOpen(false);
-    setEditingPropertyId(null);
-    resetForm();
+    return { success: result.success, message: result.message };
   };
+
+  const detailProperty = detailPropertyId
+    ? properties.find((p) => p.id === detailPropertyId) ?? null
+    : null;
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
@@ -207,7 +151,9 @@ export default function PropertiesPage() {
             return (
               <div
                 key={p.id}
-                className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs hover:border-slate-300 transition-all space-y-3"
+                onClick={() => setDetailPropertyId(p.id)}
+                className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all space-y-3 cursor-pointer"
+                title="Open property details"
               >
                 <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                   <div className="flex items-center gap-2">
@@ -229,7 +175,10 @@ export default function PropertiesPage() {
                             variant="outline"
                             size="sm"
                             className="h-7 w-7 p-0"
-                            onClick={() => openEdit(p)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEdit(p);
+                            }}
                             title="Edit property"
                           >
                             <Edit2 className="h-3.5 w-3.5" />
@@ -240,7 +189,8 @@ export default function PropertiesPage() {
                             variant="outline"
                             size="sm"
                             className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setActionError("");
                               setDeleteTarget({ id: p.id, title: p.title });
                             }}
@@ -300,136 +250,178 @@ export default function PropertiesPage() {
         </div>
       )}
 
-      {/* Register / Edit Property Dialog */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{isEditing ? "Edit Property" : "Register Property"}</DialogTitle>
-            <DialogDescription>
-              {isEditing
-                ? "Update the property details, gate access notes, or reassign its owner."
-                : "Add a residence or commercial facility to customer's portfolio."}
-            </DialogDescription>
-          </DialogHeader>
+      {/* Register / Edit Property (shared dialog) */}
+      <PropertyFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        customers={customers}
+        editing={editingProperty}
+        onSubmit={handleFormSubmit}
+      />
 
-          <form onSubmit={handleSaveSubmit} className="space-y-3 py-2 text-xs">
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Linked Customer *</label>
-              <SearchableSelect
-                value={customerId}
-                onChange={setCustomerId}
-                options={customerOptions}
-                placeholder="Select a customer"
-                required
-                name="customerId"
-              />
-            </div>
+      {/* Property Detail Dialog */}
+      <Dialog open={detailProperty !== null} onOpenChange={(open) => !open && setDetailPropertyId(null)}>
+        <DialogContent className="sm:max-w-lg">
+          {detailProperty && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-base">
+                  <Building2 className="h-4 w-4 text-blue-600" />
+                  {detailProperty.title}
+                  <span className="capitalize px-2 py-0.2 rounded text-[10px] font-semibold bg-blue-50 text-blue-700">
+                    {detailProperty.propertyType}
+                  </span>
+                </DialogTitle>
+                <DialogDescription>
+                  Full property record: owner, access instructions and booking history.
+                </DialogDescription>
+              </DialogHeader>
 
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Property Nickname / Title *</label>
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="E.g., Sobha Dream Acres 3BHK"
-                required
-                className="text-xs"
-              />
-            </div>
+              <div className="space-y-3 py-2 text-xs max-h-[60vh] overflow-y-auto">
+                <div className="flex items-start gap-1.5 text-slate-600">
+                  <MapPin className="h-3.5 w-3.5 text-rose-500 shrink-0 mt-0.5" />
+                  <span>
+                    {detailProperty.address}
+                    {detailProperty.city ? ` (${detailProperty.city})` : ""}
+                    {detailProperty.postalCode ? ` ${detailProperty.postalCode}` : ""}
+                  </span>
+                </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">Type</label>
-                <select
-                  value={propertyType}
-                  onChange={(e) => setPropertyType(e.target.value as any)}
-                  className="w-full h-9 rounded-md border border-slate-200 px-2 bg-white"
-                >
-                  <option value="apartment">Apartment</option>
-                  <option value="villa">Villa</option>
-                  <option value="duplex">Duplex</option>
-                  <option value="penthouse">Penthouse</option>
-                  <option value="office">Commercial Office</option>
-                </select>
+                {(() => {
+                  const owner = customers.find((c) => c.id === detailProperty.customerId);
+                  return owner ? (
+                    <Link
+                      href={`/customers/${owner.id}`}
+                      className="block p-2.5 rounded-lg border border-slate-100 bg-slate-50/70 hover:border-slate-300 transition-colors"
+                    >
+                      <span className="text-[11px] text-slate-400">Owner / Client</span>
+                      <div className="font-semibold text-slate-800">
+                        {owner.name} <span className="font-mono text-slate-500">({owner.phone})</span>
+                      </div>
+                    </Link>
+                  ) : null;
+                })()}
+
+                <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-500">
+                  <div className="p-2 rounded bg-slate-50 border border-slate-100">
+                    <strong className="text-slate-800">{detailProperty.bedrooms ?? 3}</strong> Bedrooms
+                  </div>
+                  <div className="p-2 rounded bg-slate-50 border border-slate-100">
+                    <strong className="text-slate-800">{detailProperty.bathrooms ?? 2}</strong> Bathrooms
+                  </div>
+                  <div className="p-2 rounded bg-slate-50 border border-slate-100">
+                    <strong className="text-slate-800">{detailProperty.carpetAreaSqFt ?? 1000}</strong> sq ft
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 text-[11px]">
+                  {detailProperty.accessNotes && (
+                    <div className="p-2 rounded bg-slate-50 border border-slate-100 text-slate-600">
+                      <strong className="text-slate-800 flex items-center gap-1">
+                        <KeyRound className="h-3 w-3 text-amber-500" />
+                        Access:
+                      </strong>
+                      {detailProperty.accessNotes}
+                    </div>
+                  )}
+                  {detailProperty.parkingInstructions && (
+                    <div className="p-2 rounded bg-slate-50 border border-slate-100 text-slate-600">
+                      <strong className="text-slate-800 flex items-center gap-1">
+                        <Car className="h-3 w-3 text-blue-500" />
+                        Parking:
+                      </strong>
+                      {detailProperty.parkingInstructions}
+                    </div>
+                  )}
+                  {detailProperty.preferredTime && (
+                    <div className="p-2 rounded bg-slate-50 border border-slate-100 text-slate-600 flex items-center gap-1">
+                      <Clock className="h-3 w-3 text-slate-400" />
+                      <strong className="text-slate-800">Preferred time:</strong>
+                      {detailProperty.preferredTime}
+                    </div>
+                  )}
+                  {detailProperty.recurringService && (
+                    <div className="p-2 rounded bg-emerald-50 border border-emerald-200 text-emerald-800">
+                      <strong>Recurring clean:</strong> {detailProperty.recurringFrequency || "monthly"}
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 space-y-2">
+                  <h4 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <History className="h-3 w-3" />
+                    Booking History
+                  </h4>
+                  {(() => {
+                    const propertyJobs = jobs.filter((j) => j.propertyId === detailProperty.id);
+                    if (propertyJobs.length === 0) {
+                      return (
+                        <p className="text-[11px] text-slate-400">
+                          No bookings recorded for this property yet.
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="divide-y divide-slate-100 rounded-lg border border-slate-100">
+                        {propertyJobs.map((j) => (
+                          <div key={j.id} className="p-2.5 flex items-center justify-between gap-2">
+                            <div>
+                              <div className="font-semibold text-slate-800">
+                                {formatDate(j.scheduledDate)}
+                              </div>
+                              <div className="text-[10px] text-slate-400">{j.scheduledTimeSlot}</div>
+                            </div>
+                            <JobStatusBadge status={j.status} />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div className="text-[10px] text-slate-400">
+                  Registered: {formatDate(detailProperty.createdAt)}
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">Bedrooms</label>
-                <Input
-                  type="number"
-                  value={bedrooms}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) => setBedrooms(e.target.value === "" ? 0 : Number(e.target.value))}
-                  className="text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Full Postal Address *</label>
-              <Input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="Flat / Unit, Tower, Community, Locality..."
-                required
-                className="text-xs"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Access Instructions (Gate codes, intercom)</label>
-              <Input
-                value={accessNotes}
-                onChange={(e) => setAccessNotes(e.target.value)}
-                placeholder="E.g., Visitor pass code at gate 2"
-                className="text-xs"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Parking Instructions</label>
-              <Input
-                value={parking}
-                onChange={(e) => setParking(e.target.value)}
-                placeholder="E.g., Basement 2 visitor parking"
-                className="text-xs"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <input
-                type="checkbox"
-                id="rec"
-                checked={recurring}
-                onChange={(e) => setRecurring(e.target.checked)}
-              />
-              <label htmlFor="rec" className="text-slate-700 font-medium">
-                Recurring deep cleaning agreement
-              </label>
-            </div>
-
-            <DialogFooter className="pt-3 border-t border-slate-100">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsCreateOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Saving...
-                  </>
-                ) : isEditing ? (
-                  "Save Changes"
-                ) : (
-                  "Save Property"
+              <DialogFooter className="pt-3 border-t border-slate-100">
+                {canEdit && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => {
+                      const target = detailProperty;
+                      setDetailPropertyId(null);
+                      openEdit(target);
+                    }}
+                  >
+                    <Edit2 className="h-3.5 w-3.5 mr-1" />
+                    Edit Property
+                  </Button>
                 )}
-              </Button>
-            </DialogFooter>
-          </form>
+                {canDelete && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                    onClick={() => {
+                      const target = detailProperty;
+                      setDetailPropertyId(null);
+                      setActionError("");
+                      setDeleteTarget({ id: target.id, title: target.title });
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    Delete
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={() => setDetailPropertyId(null)}>
+                  Close
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

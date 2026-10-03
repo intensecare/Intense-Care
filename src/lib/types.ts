@@ -84,6 +84,54 @@ export interface Customer {
   createdAt: string;
 }
 
+/** Referral attribution summary attached to the customer detail snapshot. */
+export interface CustomerPartnerSummary {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+}
+
+/** Serialized booking row on the customer detail snapshot: the hydrated Job
+ *  shape plus display joins (service name, property title). */
+export interface CustomerDetailJob extends Job {
+  customerName?: string;
+  customerPhone?: string;
+  propertyTitle?: string;
+  service?: {
+    id: string;
+    name: string;
+    basePrice: number;
+    estimatedDurationHours: number;
+  };
+}
+
+/** Server-computed aggregates for the customer detail view. Financial fields
+ *  are only present for super_admin responses. */
+export interface CustomerDetailStats {
+  totalBookings: number;
+  completedJobs: number;
+  activeJobs: number;
+  lifetimeRevenue?: number;
+  billedTotal?: number;
+  collected?: number;
+  outstanding?: number;
+}
+
+/** GET /api/customers/[id] — the 360° customer file consumed by the detail
+ *  page. Invoices/payments/quotes are super_admin-only and omitted otherwise. */
+export interface CustomerDetailSnapshot {
+  customer: Customer;
+  properties: Property[];
+  jobs: CustomerDetailJob[];
+  partner: CustomerPartnerSummary | null;
+  stats: CustomerDetailStats;
+  invoices?: Invoice[];
+  payments?: Payment[];
+  quotes?: Quote[];
+  complaints?: Complaint[];
+}
+
 export type PropertyType =
   | "apartment"
   | "villa"

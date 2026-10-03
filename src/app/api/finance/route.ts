@@ -98,33 +98,54 @@ export async function POST(request: Request) {
       const invoice = await prisma.invoice.findUnique({ where: { id: d.invoiceId } });
       if (!invoice) return fail("Invoice not found.", 404);
 
-      const payment = await prisma.payment.create({
-        data: {
-          invoiceId: d.invoiceId,
-          jobId: invoice.jobId,
-          customerId: invoice.customerId,
-          amount: d.amount,
-          paymentMethod: d.paymentMethod,
-          transactionReference: d.reference,
-        },
-      });
+      // Atomic settlement: the payment receipt, the invoice/job status, and
+      // the customer's lifetime-revenue counter commit together. The counter
+      // is RECOMPUTED from the payment ledger inside the transaction, so
+      // Customer.lifetimeRevenue can never drift from actual collections.
+      const { payment, lifetimeRevenue } = await prisma.$transaction(async (tx) => {
+        const created = await tx.payment.create({
+          data: {
+            invoiceId: d.invoiceId,
+            jobId: invoice.jobId,
+            customerId: invoice.customerId,
+            amount: d.amount,
+            paymentMethod: d.paymentMethod,
+            transactionReference: d.reference,
+          },
+        });
 
-      const amountPaid = invoice.amountPaid + d.amount;
-      const balanceDue = Math.max(0, invoice.total - amountPaid);
-      const status = balanceDue === 0 ? "PAID" : amountPaid > 0 ? "PARTIAL" : "UNPAID";
+        const amountPaid = invoice.amountPaid + d.amount;
+        const balanceDue = Math.max(0, invoice.total - amountPaid);
+        const status = balanceDue === 0 ? "PAID" : amountPaid > 0 ? "PARTIAL" : "UNPAID";
 
-      await prisma.$transaction([
-        prisma.invoice.update({
+        await tx.invoice.update({
           where: { id: d.invoiceId },
           data: { amountPaid, balanceDue, status },
-        }),
-        prisma.job.update({
+        });
+        await tx.job.update({
           where: { id: invoice.jobId },
           data: { paymentStatus: status },
-        }),
-      ]);
+        });
 
-      logger.info("finance.payment_recorded", { invoiceId: d.invoiceId, amount: d.amount, by: user.id });
+        const agg = await tx.payment.aggregate({
+          where: { customerId: invoice.customerId },
+          _sum: { amount: true },
+        });
+        const revenue = agg._sum.amount ?? 0;
+        await tx.customer.update({
+          where: { id: invoice.customerId },
+          data: { lifetimeRevenue: revenue },
+        });
+
+        return { payment: created, lifetimeRevenue: revenue };
+      });
+
+      logger.info("finance.payment_recorded", {
+        invoiceId: d.invoiceId,
+        amount: d.amount,
+        customerLifetimeRevenue: lifetimeRevenue,
+        by: user.id,
+      });
       return ok(serializePayment(payment), 201);
     }
 
@@ -202,6 +223,11 @@ export async function POST(request: Request) {
             balanceDue: quote.total,
             dueDate: quote.validUntil,
           },
+        });
+        // The converted booking counts toward the customer's booking total.
+        await tx.customer.update({
+          where: { id: quote.customerId },
+          data: { totalBookings: { increment: 1 } },
         });
         await tx.quote.update({ where: { id: quote.id }, data: { status: "converted" } });
         return { job: createdJob, invoice: createdInvoice };

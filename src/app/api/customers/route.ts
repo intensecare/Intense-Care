@@ -114,6 +114,46 @@ export async function PATCH(request: Request) {
     for (const [k, v] of Object.entries(rest)) {
       if (v !== undefined) data[k] = v;
     }
+
+    // Referral re-attribution must keep the partner lead counters honest:
+    // decrement the previous partner, increment the new one, and sync the
+    // stored referral code with the partner's actual code (the create path
+    // does this; the update path used to silently skip it).
+    if (Object.prototype.hasOwnProperty.call(data, "referralPartnerId")) {
+      const nextPartnerId = (data.referralPartnerId as string | null) || null;
+      const existing = await prisma.customer.findUnique({ where: { id } });
+      if (!existing) return fail("Customer not found.", 404);
+      const prevPartnerId = existing.referralPartnerId || null;
+
+      if (nextPartnerId !== prevPartnerId) {
+        if (nextPartnerId) {
+          const partner = await prisma.referralPartner.findUnique({ where: { id: nextPartnerId } });
+          if (!partner) return fail("Referral partner not found.", 404);
+          data.referralCode = partner.code;
+        } else {
+          data.referralCode = null;
+        }
+        const counterOps = [];
+        if (prevPartnerId) {
+          counterOps.push(
+            prisma.referralPartner.update({
+              where: { id: prevPartnerId },
+              data: { totalReferrals: { decrement: 1 } },
+            })
+          );
+        }
+        if (nextPartnerId) {
+          counterOps.push(
+            prisma.referralPartner.update({
+              where: { id: nextPartnerId },
+              data: { totalReferrals: { increment: 1 } },
+            })
+          );
+        }
+        if (counterOps.length > 0) await prisma.$transaction(counterOps);
+      }
+    }
+
     const updated = await prisma.customer.update({ where: { id }, data });
     return ok(serializeCustomer(updated));
   } catch (err) {

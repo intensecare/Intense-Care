@@ -244,6 +244,12 @@ export async function POST(request: Request) {
         },
       });
 
+      // The booking counts toward the customer's lifetime booking total.
+      await tx.customer.update({
+        where: { id: customerId },
+        data: { totalBookings: { increment: 1 } },
+      });
+
       // Referred booking: count the referral on the partner immediately.
       if (d.referralPartnerId) {
         await tx.referralPartner.update({
