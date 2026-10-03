@@ -427,6 +427,51 @@ export interface Payout {
  * server, delivered by 2Factor SMS, and verified server-side. The UI reads
  * only masked/derived status from /api/jobs/[id] and the OTP endpoints.
  */
+/** One job assignment inside the staff directory (read-only operational
+ *  view — amounts/payment are financial and intentionally omitted). */
+export interface StaffDirectoryJob {
+  id: string;
+  status: JobStatus;
+  scheduledDate: string;
+  scheduledTimeSlot: string;
+  customerName: string | null;
+  propertyTitle: string | null;
+  serviceName: string | null;
+  isLead: boolean;
+  crewSize: number;
+}
+
+/**
+ * One field worker in GET /api/users/staff-directory. Every figure is
+ * server-computed from the database (assignments, rework tasks, photo
+ * uploads) — nothing is hardcoded in the client.
+ */
+export interface StaffDirectoryEntry {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  active: boolean;
+  role: string;
+  createdAt: string;
+  stats: {
+    totalJobs: number;
+    activeJobs: number;
+    completedJobs: number;
+    upcomingJobs: number;
+    leadJobs: number;
+    openReworkTasks: number;
+    photosUploaded: number;
+  };
+  jobs: StaffDirectoryJob[];
+  openRework: {
+    id: string;
+    jobId: string;
+    instructions: string;
+    createdAt: string;
+  }[];
+}
+
 /**
  * Live pipeline activity event (GET /api/activity). Written server-side on
  * every field-worker/QC/customer action so supervisors get a real-time feed

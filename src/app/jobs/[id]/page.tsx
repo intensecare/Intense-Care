@@ -63,6 +63,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { compressImageForUpload } from "@/lib/image-compress";
 
 /**
  * Pipeline stage → the tab that matters at that stage. The job file follows
@@ -506,11 +507,15 @@ export default function JobDetailPage() {
 
     setPhotoUploading(true);
     setPhotoError(null);
+    // Shrink the photo in the browser first: raw camera files exceed the
+    // platform's request-size limit and were the cause of intermittent
+    // failed uploads.
+    const prepared = await compressImageForUpload(photoDataUrl);
     const res = await addJobPhoto({
       jobId: job.id,
       area: photoArea,
       photoType,
-      imageDataUrl: photoDataUrl,
+      imageDataUrl: prepared.dataUrl,
       caption: photoCaption || undefined,
     });
     setPhotoUploading(false);

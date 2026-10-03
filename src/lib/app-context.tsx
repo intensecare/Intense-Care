@@ -286,7 +286,14 @@ async function api<T>(url: string, init?: RequestInit): Promise<{ ok: boolean; d
     });
     const json = (await res.json().catch(() => null)) as ApiEnvelope<T> | null;
     if (!res.ok || !json?.success) {
-      return { ok: false, error: json?.error || `Request failed (${res.status})`, status: res.status };
+      // 413 arrives from the platform as a NON-JSON error page (payload over
+      // the request-size limit) — translate it into something actionable
+      // instead of leaking a bare status code to the user.
+      const fallback =
+        res.status === 413
+          ? "The image is too large to upload. Photos are compressed automatically — please retry."
+          : `Request failed (${res.status})`;
+      return { ok: false, error: json?.error || fallback, status: res.status };
     }
     return { ok: true, data: json.data, status: res.status };
   } catch {

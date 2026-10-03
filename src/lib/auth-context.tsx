@@ -49,6 +49,7 @@ export const ROLE_ROUTE_PERMISSIONS: Record<UserRole, string[]> = {
     "/quality",
     "/reports",
     "/notifications",
+    "/users", // Field Staff Directory (read-only for ops_manager)
     "/field",
   ],
   staff: ["/field"],

@@ -28,6 +28,7 @@ import {
 import Link from "next/link";
 import { ImageLightboxModal } from "@/components/common/ImageLightboxModal";
 import { Button } from "@/components/ui/button";
+import { compressImageForUpload } from "@/lib/image-compress";
 
 export default function FieldStaffPage() {
   const {
@@ -235,11 +236,15 @@ export default function FieldStaffPage() {
 
     setPhotoUploading(true);
     setPhotoError(null);
+    // Shrink the photo in the browser first: raw camera files exceed the
+    // platform's request-size limit and were the cause of intermittent
+    // failed uploads.
+    const prepared = await compressImageForUpload(photoDataUrl);
     const res = await addJobPhoto({
       jobId: currentJob.id,
       area: photoArea,
       photoType,
-      imageDataUrl: photoDataUrl,
+      imageDataUrl: prepared.dataUrl,
       caption: photoCaption || undefined,
     });
     setPhotoUploading(false);
@@ -248,7 +253,10 @@ export default function FieldStaffPage() {
       setShowPhotoModal(false);
       setPhotoDataUrl("");
       setPhotoCaption("");
-      showToast(`${photoType.toUpperCase()} photo uploaded for ${photoArea}!`);
+      const sizeNote = prepared.compressed
+        ? ` (${(prepared.originalBytes / 1024 / 1024).toFixed(1)} MB → ${Math.max(1, Math.round(prepared.finalBytes / 1024))} KB)`
+        : "";
+      showToast(`${photoType.toUpperCase()} photo uploaded for ${photoArea}!${sizeNote}`);
     } else {
       setPhotoError(res.message);
     }

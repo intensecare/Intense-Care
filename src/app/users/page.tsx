@@ -21,9 +21,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
+import {
+  StaffDirectory,
+  StaffDetailDialog,
+  useStaffDirectory,
+} from "@/components/common/StaffDirectory";
 
 export default function UsersAndRolesPage() {
   const { currentRole, users, addUser, updateUser, toggleUserStatus, deleteUser } = useApp();
+  // Server-computed field-staff details — powers the ops_manager directory
+  // and the click-to-reveal worker file in the admin table below.
+  const directory = useStaffDirectory();
+  const [detailWorkerId, setDetailWorkerId] = useState<string | null>(null);
 
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -151,6 +160,30 @@ export default function UsersAndRolesPage() {
     setUserRole(u.role);
   };
 
+  // ops_manager lands here from the sidebar's "Staff Directory" link and gets
+  // the read-only roster with click-to-reveal worker files. Account CRUD below
+  // stays super_admin-only.
+  if (currentRole === "ops_manager") {
+    return (
+      <AdminLayout>
+        <PageHeader
+          title="Field Staff Directory"
+          description="Every field worker's contact details, live workload and quality record — click a name to open their full file."
+          breadcrumbs={[
+            { label: "Operations", href: "/" },
+            { label: "Staff Directory" },
+          ]}
+        />
+        <StaffDirectory
+          entries={directory.entries}
+          loading={directory.loading}
+          error={directory.error}
+          onRetry={directory.refresh}
+        />
+      </AdminLayout>
+    );
+  }
+
   return (
     <AdminLayout>
       <PageHeader
@@ -218,7 +251,18 @@ export default function UsersAndRolesPage() {
                             {u.name.substring(0, 2).toUpperCase()}
                           </div>
                           <div>
-                            <div className="font-bold text-slate-900">{u.name}</div>
+                            {u.role === "staff" ? (
+                              <button
+                                type="button"
+                                onClick={() => setDetailWorkerId(u.id)}
+                                title="Open this worker's full details"
+                                className="font-bold text-slate-900 hover:text-indigo-700 hover:underline"
+                              >
+                                {u.name}
+                              </button>
+                            ) : (
+                              <div className="font-bold text-slate-900">{u.name}</div>
+                            )}
                             <div className="text-[11px] text-slate-500">{u.email}</div>
                           </div>
                         </div>
@@ -512,6 +556,14 @@ export default function UsersAndRolesPage() {
         confirmText="Delete Account"
         cancelText="Cancel"
         variant="destructive"
+      />
+
+      {/* Click-to-reveal worker file (staff rows in the accounts table) */}
+      <StaffDetailDialog
+        entry={
+          (directory.entries || []).find((e) => e.id === detailWorkerId) || null
+        }
+        onClose={() => setDetailWorkerId(null)}
       />
     </AdminLayout>
   );
