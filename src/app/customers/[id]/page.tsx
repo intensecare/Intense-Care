@@ -10,6 +10,7 @@ import { JobStatusBadge, PaymentStatusBadge } from "@/components/common/JobStatu
 import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { CustomerFormDialog } from "@/components/common/CustomerFormDialog";
 import { PropertyFormDialog } from "@/components/common/PropertyFormDialog";
+import { CustomerStatementModal } from "@/components/common/CustomerStatementModal";
 import { useApp } from "@/lib/app-context";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import type { CustomerDetailSnapshot, Invoice, Property, Quote } from "@/lib/types";
@@ -33,6 +34,7 @@ import {
   KeyRound,
   Car,
   Clock,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,6 +64,7 @@ export default function CustomerDetailPage() {
     recordPayment,
     convertQuoteToInvoice,
     deleteQuote,
+    systemSettings,
   } = useApp();
 
   const canEdit = currentRole === "super_admin" || currentRole === "ops_manager";
@@ -84,6 +87,9 @@ export default function CustomerDetailPage() {
     editing: Property | null;
   }>({ open: false, editing: null });
   const [deletePropertyTarget, setDeletePropertyTarget] = useState<Property | null>(null);
+
+  // Printable statement of account (super_admin — contains financials)
+  const [isStatementOpen, setIsStatementOpen] = useState(false);
 
   // Payment collection
   const [payInvoice, setPayInvoice] = useState<Invoice | null>(null);
@@ -255,6 +261,18 @@ export default function CustomerDetailPage() {
         ]}
         actions={
           <div className="flex items-center gap-1.5">
+            {isSuper && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setIsStatementOpen(true)}
+                title="Printable statement of account (invoices, payments, balance)"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5 mr-1" />
+                Statement
+              </Button>
+            )}
             {canEdit && (
               <Button
                 variant="outline"
@@ -911,6 +929,19 @@ export default function CustomerDetailPage() {
         description={`Permanently delete "${deletePropertyTarget?.title ?? "this property"}"? Properties linked to booked jobs cannot be deleted.`}
         confirmText="Delete Property"
       />
+
+      {/* Printable Statement of Account (super_admin — contains financials) */}
+      {isSuper && (
+        <CustomerStatementModal
+          isOpen={isStatementOpen}
+          onClose={() => setIsStatementOpen(false)}
+          customer={customer}
+          invoices={invoices}
+          payments={payments}
+          jobs={jobs}
+          systemSettings={systemSettings}
+        />
+      )}
 
       {/* Collect Payment Dialog */}
       <Dialog open={!!payInvoice} onOpenChange={(open) => !open && setPayInvoice(null)}>

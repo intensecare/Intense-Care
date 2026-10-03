@@ -41,6 +41,16 @@ export interface SystemSettings {
   nextDayDispatchTime: string; // e.g., "20:00" for 8:00 PM
   googleBusinessReviewUrl: string;
   currency: string;
+  /** Company identity printed on tax invoices & customer statements. */
+  companyName: string;
+  /** Short line under the company name (e.g. "Deep Cleaning Field Services"). */
+  companyTagline: string;
+  /** Registered business address printed on statutory documents. */
+  companyAddress: string;
+  /** Support phone printed on documents. */
+  companyPhone: string;
+  /** Support/billing email printed on documents. */
+  companyEmail: string;
   /** Tax rate as a percentage of the taxable value (e.g. 18 for GST 18%). 0 disables tax. */
   taxRatePercent: number;
   /** Tax name shown on invoices, e.g. "GST". */

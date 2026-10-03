@@ -22,6 +22,8 @@ export interface InviteFailure {
 export interface InviteSuccess {
   inviteId: string;
   linkPath: string;
+  /** Fully-qualified shareable URL (server-resolved base + linkPath). */
+  linkUrl: string;
 }
 
 function hashToken(token: string): string {
@@ -53,7 +55,12 @@ export async function sendCompletionInvite(
   if (!job) {
     return { success: false, failure: { kind: "not_found", message: "Job not found." } };
   }
-  if (job.status !== "PASS" && job.status !== "CUSTOMER_APPROVAL" && job.status !== "COMPLETED") {
+  // Link minting stays available through the customer-approval window —
+  // including FEEDBACK_REQUESTED (the handover card is still shown and desks
+  // often need to re-share the link at that stage). CLOSED/CANCELLED are too
+  // late and stay rejected.
+  const linkableStatuses = ["PASS", "CUSTOMER_APPROVAL", "COMPLETED", "FEEDBACK_REQUESTED"];
+  if (!linkableStatuses.includes(job.status)) {
     return {
       success: false,
       failure: {
@@ -96,6 +103,7 @@ export async function sendCompletionInvite(
   const token = generateToken();
   const baseUrl = resolveBaseUrl(options.baseUrl ?? null);
   const linkPath = `/portal/${token}`;
+  const linkUrl = `${baseUrl}${linkPath}`;
 
   const invite = await prisma.completionInvite.create({
     data: {
@@ -117,6 +125,7 @@ export async function sendCompletionInvite(
     data: {
       inviteId: invite.id,
       linkPath,
+      linkUrl,
     },
   };
 }

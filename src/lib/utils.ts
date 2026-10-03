@@ -120,3 +120,60 @@ export function formatTimeSlot(slot?: string | null): string {
   };
   return `${to12(m[1], m[2])} - ${to12(m[3], m[4])}`;
 }
+
+const ONES_IN_WORDS = [
+  "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+  "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+  "Seventeen", "Eighteen", "Nineteen",
+];
+const TENS_IN_WORDS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+
+function twoDigitsInWords(n: number): string {
+  if (n < 20) return ONES_IN_WORDS[n];
+  return `${TENS_IN_WORDS[Math.floor(n / 10)]}${n % 10 ? " " + ONES_IN_WORDS[n % 10] : ""}`;
+}
+
+function threeDigitsInWords(n: number): string {
+  const hundreds = Math.floor(n / 100);
+  const rest = n % 100;
+  const parts: string[] = [];
+  if (hundreds) parts.push(`${ONES_IN_WORDS[hundreds]} Hundred`);
+  if (rest) parts.push(twoDigitsInWords(rest));
+  return parts.join(" ");
+}
+
+/**
+ * Renders an amount in Indian-format words for statutory documents, e.g.
+ * 125430 → "One Lakh Twenty Five Thousand Four Hundred Thirty". Whole rupees
+ * only (invoices store whole-rupee figures). Returns "" for non-positive or
+ * unparseable input so callers can skip the line entirely.
+ */
+export function amountInWords(amount: number): string {
+  const n = Math.round(Number(amount));
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const crore = Math.floor(n / 10_000_000);
+  const lakh = Math.floor(n / 100_000) % 100;
+  const thousand = Math.floor(n / 1_000) % 100;
+  const rest = n % 1_000;
+  const parts: string[] = [];
+  if (crore) parts.push(`${threeDigitsInWords(crore)} Crore`);
+  if (lakh) parts.push(`${twoDigitsInWords(lakh)} Lakh`);
+  if (thousand) parts.push(`${twoDigitsInWords(thousand)} Thousand`);
+  if (rest) parts.push(threeDigitsInWords(rest));
+  return parts.join(" ");
+}
+
+/**
+ * Builds a wa.me deep link with a prefilled message. `phone` is normalized to
+ * WhatsApp's international format (digits only; a bare 10-digit Indian number
+ * gets the 91 country code). Without a phone the universal share endpoint is
+ * used so the sender picks the chat themselves.
+ */
+export function buildWhatsAppShareUrl(phone: string | undefined | null, message: string): string {
+  const digits = (phone || "").replace(/\D/g, "");
+  const normalized = digits.length === 10 ? `91${digits}` : digits;
+  const text = encodeURIComponent(message);
+  return normalized
+    ? `https://wa.me/${normalized}?text=${text}`
+    : `https://wa.me/?text=${text}`;
+}

@@ -13,10 +13,10 @@ import { ImageLightboxModal } from "@/components/common/ImageLightboxModal";
 import { PromptModal } from "@/components/common/PromptModal";
 import { useApp } from "@/lib/app-context";
 import { getOpsDateVisibility } from "@/lib/ops-visibility";
-import { Link2, Copy, Check, Loader2 } from "lucide-react";
+import { Link2, Copy, Check, Loader2, MessageCircle } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getAllowedTransitions, JOB_STATUS_CONFIG } from "@/lib/state-machine";
-import { formatCurrency, formatDate, formatDateTime, timeAgo, formatTimeSlot } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, timeAgo, formatTimeSlot, buildWhatsAppShareUrl } from "@/lib/utils";
 import {
   Calendar,
   Clock,
@@ -137,7 +137,10 @@ export default function JobDetailPage() {
     const res = await sendCompletionLink(job.id);
     setLinkBusy(false);
     if (res.success && res.linkPath) {
-      setHandoverLink(`${window.location.origin}${res.linkPath}`);
+      // Prefer the server-resolved absolute URL (APP_BASE_URL / forwarded host):
+      // it stays correct even when the desk mints the link from a different
+      // environment than the one customers will open it from.
+      setHandoverLink(res.linkUrl || `${window.location.origin}${res.linkPath}`);
       setLinkCopied(false);
     } else {
       setLinkError(res.message);
@@ -295,6 +298,15 @@ export default function JobDetailPage() {
   const customer = customers.find((c) => c.id === job.customerId);
   const property = properties.find((p) => p.id === job.propertyId);
   const service = services.find((s) => s.id === job.serviceId);
+
+  // One-tap WhatsApp share of the handover link (wa.me deep link with the
+  // message prefilled; the desk just hits send).
+  const handoverWhatsAppUrl = handoverLink
+    ? buildWhatsAppShareUrl(
+        customer?.whatsapp || customer?.phone,
+        `Hello${customer?.name ? " " + customer.name : ""}, your deep cleaning service handover is ready. View the before/after photos and approve the completed work here: ${handoverLink}`
+      )
+    : null;
   const assignedWorkers = (job.assignedStaffIds || [])
     .map((id) => users.find((u) => u.id === id))
     .filter(Boolean) as { id: string; name: string }[];
@@ -539,6 +551,12 @@ export default function JobDetailPage() {
                   {linkCopied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
                   {linkCopied ? "Copied" : "Copy"}
                 </Button>
+                <a href={handoverWhatsAppUrl ?? "#"} target="_blank" rel="noreferrer">
+                  <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1 text-emerald-700 hover:bg-emerald-50">
+                    <MessageCircle className="h-3 w-3" />
+                    WhatsApp
+                  </Button>
+                </a>
                 <Link href={handoverLink.replace(window.location.origin, "")} target="_blank">
                   <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1">
                     <ExternalLink className="h-3 w-3" />
@@ -550,7 +568,7 @@ export default function JobDetailPage() {
 
             {handoverLink && (
               <p className="text-[10px] text-teal-700">
-                Each new link invalidates sharing of the previous one. The link expires automatically.
+                Generating a new link keeps the older ones valid until they expire, so the customer can never be locked out mid-review. Links expire automatically after the configured window.
               </p>
             )}
           </div>

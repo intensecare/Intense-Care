@@ -32,13 +32,31 @@ export const invitePolicy = {
   expiryDays: () => intFromEnv("PORTAL_LINK_EXPIRY_DAYS", 30, 1, 365),
 } as const;
 
-/** Public origin used in SMS links; falls back to the request origin. */
+/**
+ * Public origin used in customer-facing links (portal handover, statements).
+ *
+ * Resolution order:
+ *  1. APP_BASE_URL env — deliberate override, recommended in production so
+ *     links minted from local/preview environments still point at the
+ *     deployed domain customers can actually reach.
+ *  2. The request's own origin (browser origin on same-origin calls —
+ *     correct in every environment, local and deployed).
+ *  3. Vercel-provided deployment domains (VERCEL_PROJECT_PRODUCTION_URL /
+ *     VERCEL_URL are injected automatically on Vercel).
+ *  4. localhost fallback for bare server-side calls in development.
+ */
 export function resolveBaseUrl(requestOrigin: string | null): string {
   const configured = process.env.APP_BASE_URL;
-  if (configured && configured.startsWith("http")) return configured.replace(/\/$/, "");
+  if (configured && /^https?:\/\//.test(configured)) return configured.replace(/\/$/, "");
   if (requestOrigin && /^https?:\/\//.test(requestOrigin)) {
     return requestOrigin.replace(/\/$/, "");
   }
+  const vercelProduction = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (vercelProduction && !vercelProduction.startsWith("localhost")) {
+    return `https://${vercelProduction.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+  }
+  const vercelUrl = process.env.VERCEL_URL;
+  if (vercelUrl) return `https://${vercelUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
   return "http://localhost:3000";
 }
 

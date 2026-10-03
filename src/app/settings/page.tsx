@@ -41,6 +41,13 @@ export default function SettingsPage() {
   const [taxLabel, setTaxLabel] = useState(systemSettings.taxLabel || "GST");
   const [gstin, setGstin] = useState(systemSettings.gstin || "");
 
+  // Company identity printed on tax invoices and customer statements.
+  const [companyName, setCompanyName] = useState(systemSettings.companyName || "");
+  const [companyTagline, setCompanyTagline] = useState(systemSettings.companyTagline || "");
+  const [companyAddress, setCompanyAddress] = useState(systemSettings.companyAddress || "");
+  const [companyPhone, setCompanyPhone] = useState(systemSettings.companyPhone || "");
+  const [companyEmail, setCompanyEmail] = useState(systemSettings.companyEmail || "");
+
   // Live 2Factor credit check (super_admin) — a delivery failure where the
   // provider accepts sends but messages never arrive (zero route credits,
   // template issues) is invisible in the dispatch logs; this surfaces it.
@@ -79,6 +86,11 @@ export default function SettingsPage() {
       otpMaxRetries,
       resendCooldownSeconds,
       nextDayDispatchTime,
+      companyName: companyName.trim(),
+      companyTagline: companyTagline.trim(),
+      companyAddress: companyAddress.trim(),
+      companyPhone: companyPhone.trim(),
+      companyEmail: companyEmail.trim(),
       taxRatePercent: Math.min(100, Math.max(0, Number(taxRatePercent) || 0)),
       taxLabel: taxLabel.trim() || "GST",
       gstin: gstin.trim(),
@@ -294,6 +306,69 @@ export default function SettingsPage() {
                 rate caps are enforced <strong>server-side</strong> from environment variables (see{" "}
                 <code className="font-mono bg-amber-100 px-1 rounded">.env.example</code>). Values below
                 are operational display defaults only and do not weaken gateway security.
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 space-y-3">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  Company Profile (printed on tax invoices &amp; statements)
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Company Name</label>
+                    <Input
+                      type="text"
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      placeholder="e.g. Intense Care"
+                      className="text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Business Line / Tagline</label>
+                    <Input
+                      type="text"
+                      value={companyTagline}
+                      onChange={(e) => setCompanyTagline(e.target.value)}
+                      placeholder="e.g. Deep Cleaning Field Services"
+                      className="text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">Registered Address</label>
+                  <Input
+                    type="text"
+                    value={companyAddress}
+                    onChange={(e) => setCompanyAddress(e.target.value)}
+                    placeholder="Street, locality, city, state, PIN"
+                    className="text-xs"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Support Phone</label>
+                    <Input
+                      type="text"
+                      value={companyPhone}
+                      onChange={(e) => setCompanyPhone(e.target.value)}
+                      placeholder="e.g. +91 98765 43210"
+                      className="text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700">Support / Billing Email</label>
+                    <Input
+                      type="email"
+                      value={companyEmail}
+                      onChange={(e) => setCompanyEmail(e.target.value)}
+                      placeholder="e.g. billing@yourcompany.com"
+                      className="text-xs font-mono"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-1">

@@ -257,10 +257,11 @@ interface AppContextType {
   toggleUserStatus: (id: string) => Promise<void>;
   deleteUser: (id: string) => Promise<{ success: boolean; message: string }>;
 
-  /** Secure handover link minting (server-side). */
+  /** Secure handover link minting (server-side). linkUrl is the fully-qualified
+   *  shareable URL resolved server-side; linkPath is the relative fallback. */
   sendCompletionLink: (
     jobId: string
-  ) => Promise<{ success: boolean; message: string; linkPath?: string }>;
+  ) => Promise<{ success: boolean; message: string; linkPath?: string; linkUrl?: string }>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -895,8 +896,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // --- Completion link ----------------------------------------------------------
   const sendCompletionLink = async (
     jobId: string
-  ): Promise<{ success: boolean; message: string; linkPath?: string }> => {
-    const r = await api<{ linkPath: string }>(`/api/jobs/${encodeURIComponent(jobId)}/completion-link`, {
+  ): Promise<{ success: boolean; message: string; linkPath?: string; linkUrl?: string }> => {
+    const r = await api<{ linkPath: string; linkUrl?: string }>(`/api/jobs/${encodeURIComponent(jobId)}/completion-link`, {
       method: "POST",
       body: JSON.stringify({}),
     });
@@ -906,6 +907,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       success: true,
       message: "Secure link generated. Copy and share it with the customer.",
       linkPath: r.data?.linkPath,
+      linkUrl: r.data?.linkUrl,
     };
   };
 

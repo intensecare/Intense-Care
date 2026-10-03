@@ -12,6 +12,13 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   nextDayDispatchTime: "20:00",
   googleBusinessReviewUrl: "",
   currency: "INR",
+  // Company identity printed on invoices/statements. Empty until configured on
+  // the Settings page — documents render only real, configured values.
+  companyName: "Intense Care",
+  companyTagline: "Deep Cleaning Field Services",
+  companyAddress: "",
+  companyPhone: "",
+  companyEmail: "",
   taxRatePercent: 18,
   taxLabel: "GST",
   gstin: "",

@@ -9,6 +9,23 @@ import { errorResponse } from "@/lib/server/http";
  * share with the customer over any channel; no server-side messaging is
  * involved. Allowed only after QC pass. Managers/admins only.
  */
+/**
+ * Best-effort public origin of the incoming request. `Origin` is preferred,
+ * but proxies/load balancers (Vercel included) may omit it — the forwarded
+ * host/proto headers are the reliable fallback. This is what keeps generated
+ * links pointing at whichever domain the desk is actually using.
+ */
+function requestOrigin(request: Request): string | null {
+  const origin = request.headers.get("origin");
+  if (origin && /^https?:\/\//.test(origin)) return origin;
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (!host) return null;
+  const proto =
+    request.headers.get("x-forwarded-proto") ??
+    (host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
@@ -16,8 +33,7 @@ export async function POST(
   try {
     await requireRole(["super_admin", "ops_manager"]);
 
-    const origin = request.headers.get("origin");
-    const result = await sendCompletionInvite(params.id, { baseUrl: origin ?? undefined });
+    const result = await sendCompletionInvite(params.id, { baseUrl: requestOrigin(request) ?? undefined });
 
     if (!result.success) {
       const status =
