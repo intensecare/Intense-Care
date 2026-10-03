@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { requireRole } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
@@ -8,6 +9,8 @@ import {
   redactJobForOps,
   serializeInvoice,
   serializeChecklistItem,
+  withStaffNames,
+  type JobOtpResolvedState,
   ok,
   fail,
   readJson,
@@ -24,6 +27,74 @@ const SERVICE_WITH_RUBRIC_INCLUDE = {
   checklistTemplate: { orderBy: { position: "asc" as const } },
 } as const;
 
+/** Include shape shared by every job-list fetch (display joins only). */
+const JOB_LIST_INCLUDE = {
+  customer: { select: { name: true, phone: true } },
+  property: { select: { title: true, address: true } },
+  service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
+} as const;
+
+type JobListRow = Prisma.JobGetPayload<{ include: typeof JOB_LIST_INCLUDE }>;
+
+interface JobDisplayContext {
+  /** id → name; ops_manager/staff cannot read the user directory, so names
+   *  are resolved here rather than in the client. */
+  userNameById: Map<string, string>;
+  verifiedByJob: Map<string, { updatedAt: Date; createdByUserId: string }>;
+  pendingByJob: Set<string>;
+}
+
+/**
+ * Batch-resolves the display data every dispatch surface needs: worker names
+ * and the authoritative OTP verification state per job. Serializing without
+ * this used to hardcode otpVerification.status="none", which clobbered the
+ * verified state on every re-sync and made the field app ask for the
+ * customer's OTP a second time.
+ */
+async function buildJobDisplayContext(jobIds: string[]): Promise<JobDisplayContext> {
+  const [users, challenges] = await Promise.all([
+    prisma.user.findMany({ select: { id: true, name: true } }),
+    jobIds.length
+      ? prisma.otpChallenge.findMany({
+          where: { jobId: { in: jobIds }, status: { in: ["PENDING", "VERIFIED"] } },
+          orderBy: { createdAt: "desc" },
+          select: { jobId: true, status: true, updatedAt: true, createdByUserId: true },
+        })
+      : Promise.resolve(
+          [] as { jobId: string; status: string; updatedAt: Date; createdByUserId: string }[]
+        ),
+  ]);
+
+  const ctx: JobDisplayContext = {
+    userNameById: new Map(users.map((u) => [u.id, u.name])),
+    verifiedByJob: new Map(),
+    pendingByJob: new Set(),
+  };
+  for (const c of challenges) {
+    if (c.status === "VERIFIED") {
+      if (!ctx.verifiedByJob.has(c.jobId)) {
+        ctx.verifiedByJob.set(c.jobId, { updatedAt: c.updatedAt, createdByUserId: c.createdByUserId });
+      }
+    } else if (!ctx.verifiedByJob.has(c.jobId)) {
+      ctx.pendingByJob.add(c.jobId);
+    }
+  }
+  return ctx;
+}
+
+function otpDisplayState(jobId: string, ctx: JobDisplayContext): JobOtpResolvedState | undefined {
+  const verified = ctx.verifiedByJob.get(jobId);
+  if (verified) {
+    return {
+      status: "verified",
+      verifiedAt: verified.updatedAt.toISOString(),
+      verifiedBy: verified.createdByUserId,
+    };
+  }
+  if (ctx.pendingByJob.has(jobId)) return { status: "pending" };
+  return undefined;
+}
+
 /**
  * GET /api/jobs — the operational job register hydrated from the database.
  * Staff receive only jobs they are DIRECTLY assigned to (worker or manager);
@@ -39,27 +110,23 @@ export async function GET() {
     if (user.role === "super_admin") {
       jobs = await prisma.job.findMany({
         orderBy: { updatedAt: "desc" },
-        include: {
-          customer: { select: { name: true, phone: true } },
-          property: { select: { title: true, address: true } },
-          service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
-        },
+        include: JOB_LIST_INCLUDE,
       });
-      return NextResponse.json({ success: true, data: jobs.map(serializeJob) });
+      const ctx = await buildJobDisplayContext(jobs.map((j) => j.id));
+      return NextResponse.json({
+        success: true,
+        data: jobs.map((j) =>
+          withStaffNames(serializeJob(j, otpDisplayState(j.id, ctx)), ctx.userNameById)
+        ),
+      });
     }
 
     // ops_manager + staff: dispatch data only — amounts and payment status
     // are redacted at the API boundary (server-enforced, not UI-hidden).
-    const REDACTED_INCLUDE = {
-      customer: { select: { name: true, phone: true } },
-      property: { select: { title: true, address: true } },
-      service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
-    } as const;
-
     if (user.role === "ops_manager") {
       const all = await prisma.job.findMany({
         orderBy: { updatedAt: "desc" },
-        include: REDACTED_INCLUDE,
+        include: JOB_LIST_INCLUDE,
       });
       const visibility = getOpsDateVisibility(new Date(), {
         nextDayDispatchTime: dispatchCutoffTime(),
@@ -74,11 +141,20 @@ export async function GET() {
           ],
         },
         orderBy: { updatedAt: "desc" },
-        include: REDACTED_INCLUDE,
+        include: JOB_LIST_INCLUDE,
       });
     }
 
-    return NextResponse.json({ success: true, data: jobs.map((j) => redactJobForOps(serializeJob(j))) });
+    const ctx = await buildJobDisplayContext((jobs as JobListRow[]).map((j) => j.id));
+    return NextResponse.json({
+      success: true,
+      data: (jobs as JobListRow[]).map((j) =>
+        withStaffNames(
+          redactJobForOps(serializeJob(j, otpDisplayState(j.id, ctx))),
+          ctx.userNameById
+        )
+      ),
+    });
   } catch (err) {
     return errorResponse(err, "jobs.get.route_error");
   }
@@ -280,11 +356,20 @@ export async function POST(request: Request) {
     });
 
     const isSuperAdmin = user.role === "super_admin";
+    // Fresh job: no OTP challenges exist yet; resolve names for the store.
+    const createdCtx = await buildJobDisplayContext([result.job.id]);
     return NextResponse.json(
       {
         success: true,
         data: {
-          job: full ? (isSuperAdmin ? serializeJob(full) : redactJobForOps(serializeJob(full))) : null,
+          job: full
+            ? withStaffNames(
+                isSuperAdmin
+                  ? serializeJob(full, otpDisplayState(full.id, createdCtx))
+                  : redactJobForOps(serializeJob(full, otpDisplayState(full.id, createdCtx))),
+                createdCtx.userNameById
+              )
+            : null,
           invoice: isSuperAdmin ? serializeInvoice(result.invoice) : undefined,
           checklist: await prisma.jobChecklistItem
             .findMany({ where: { jobId: result.job.id } })

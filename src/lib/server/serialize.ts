@@ -131,6 +131,13 @@ export type SerializedJob = Omit<Job, "otpVerification"> & {
   service?: Pick<Service, "id" | "name" | "basePrice" | "estimatedDurationHours">;
 };
 
+/** Server-resolved OTP display state attached to serialized jobs. */
+export interface JobOtpResolvedState {
+  status: "pending" | "verified";
+  verifiedAt?: string;
+  verifiedBy?: string;
+}
+
 export function serializeJob(
   j: Prisma.JobGetPayload<{
     include: {
@@ -138,7 +145,8 @@ export function serializeJob(
       property: { select: { title: true; address: true } };
       service: { select: { id: true; name: true; basePrice: true; estimatedDurationHours: true } };
     };
-  }>
+  }>,
+  otpResolved?: JobOtpResolvedState | null
 ): SerializedJob {
   return {
     id: j.id,
@@ -153,12 +161,17 @@ export function serializeJob(
     paymentStatus: j.paymentStatus as PaymentStatus,
     status: j.status as JobStatus,
     notes: j.notes ?? undefined,
-    // OTP truth lives server-side; the hydrated store only carries display state.
+    // OTP truth lives server-side. The resolved state (VERIFIED challenge
+    // exists?) is passed in by the route so the client can trust it — a
+    // hardcoded value here used to clobber verified state on every re-sync,
+    // making the field app demand the customer's OTP a second time.
     otpVerification: {
       phone: j.customer.phone,
       attempts: 0,
       maxAttempts: 5,
-      status: "none",
+      status: otpResolved?.status ?? "none",
+      ...(otpResolved?.verifiedAt ? { verifiedAt: otpResolved.verifiedAt } : {}),
+      ...(otpResolved?.verifiedBy ? { verifiedBy: otpResolved.verifiedBy } : {}),
     },
     qualityCheckId: j.qualityCheckId ?? undefined,
     referralAttribution: undefined,
@@ -179,6 +192,23 @@ export function serializeJob(
         }
       : undefined,
   };
+}
+
+/**
+ * Resolves assigned worker ids to display names server-side. Ops managers and
+ * staff cannot read the full user directory (GET /api/users is super_admin
+ * only), so dispatch surfaces previously rendered assigned jobs as
+ * "Unassigned" — the id→name map simply came back empty. Routes attach this
+ * to every serialized job; pages fall back to their local store when absent.
+ */
+export function withStaffNames<T extends { assignedStaffIds: string[] }>(
+  job: T,
+  userNameById?: Map<string, string>
+): T & { assignedStaffNames: string[] } {
+  const names = userNameById
+    ? job.assignedStaffIds.map((id) => userNameById.get(id)).filter((n): n is string => !!n)
+    : [];
+  return { ...job, assignedStaffNames: names };
 }
 
 export function serializeInvoice(i: Prisma.InvoiceGetPayload<object>): Invoice {

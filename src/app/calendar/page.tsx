@@ -124,9 +124,12 @@ export default function CalendarPage() {
             const customer = customers.find((c) => c.id === job.customerId);
             const property = properties.find((p) => p.id === job.propertyId);
             const service = services.find((s) => s.id === job.serviceId);
-            const assignedWorkers = (job.assignedStaffIds || [])
-              .map((id) => users.find((u) => u.id === id)?.name)
-              .filter(Boolean) as string[];
+            // Server-resolved names first (ops managers cannot read the user directory).
+            const assignedWorkers =
+              job.assignedStaffNames ??
+              ((job.assignedStaffIds || [])
+                .map((id) => users.find((u) => u.id === id)?.name)
+                .filter(Boolean) as string[]);
 
             return (
               <div

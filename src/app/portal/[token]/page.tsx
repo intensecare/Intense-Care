@@ -197,9 +197,12 @@ export default function CustomerPortalPage() {
 
   const { job, customer, property, qualityCheck } = handover;
 
-  // Server-resolved data only — no local-store enrichment.
-  const jobPhotos = handover.photos;
-  const jobChecklist = handover.checklist;
+  // Server-resolved data only — no local-store enrichment. Arrays are
+  // defended against absent/legacy payloads: a missing array here used to
+  // crash the whole handover page ("cannot read properties of undefined
+  // (reading 'length')") instead of degrading gracefully.
+  const jobPhotos = handover.photos ?? [];
+  const jobChecklist = handover.checklist ?? [];
   const qcScore = qualityCheck?.score ?? null;
   const qcInspector = null;
   const existingFeedback = null;

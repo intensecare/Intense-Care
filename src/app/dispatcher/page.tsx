@@ -305,7 +305,10 @@ export default function DispatcherPage() {
                       <span className="text-[11px] font-semibold text-slate-500">
                         {assigned.length} assigned
                         {assigned.length > 0 && (
-                          <span className="text-slate-400"> • Lead: {users.find((u) => u.id === assigned[0])?.name}</span>
+                          <span className="text-slate-400">
+                            {" "}
+                            • Lead: {job.assignedStaffNames?.[0] ?? users.find((u) => u.id === assigned[0])?.name}
+                          </span>
                         )}
                       </span>
                     </div>
@@ -395,9 +398,9 @@ export default function DispatcherPage() {
                 const customer = customers.find((c) => c.id === job.customerId);
                 const property = properties.find((p) => p.id === job.propertyId);
                 const service = services.find((s) => s.id === job.serviceId);
-                const leadWorkerName = users.find(
-                  (u) => u.id === job.assignedStaffIds?.[0]
-                )?.name;
+                const leadWorkerName =
+                  job.assignedStaffNames?.[0] ??
+                  users.find((u) => u.id === job.assignedStaffIds?.[0])?.name;
 
                 return (
                   <div

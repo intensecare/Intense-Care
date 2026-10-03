@@ -116,10 +116,20 @@ export default function FieldStaffPage() {
       currentJob?.assignedStaffIds?.[0] === currentUser.id;
 
   // Co-assigned workers visible on the job card (dynamic — no hardcoded ids).
-  const coWorkers = (currentJob?.assignedStaffIds || [])
-    .map((id) => users.find((u) => u.id === id))
-    .filter(Boolean)
-    .map((u, idx) => ({ name: u!.name, lead: idx === 0, isMe: u!.id === currentUser.id }));
+  // Server-resolved names first: staff cannot read the user directory, so a
+  // users-store lookup alone renders empty team cards. Identity (isMe) stays
+  // id-based — names are zipped positionally only when counts align.
+  const assignedIds = currentJob?.assignedStaffIds || [];
+  const serverNames = currentJob?.assignedStaffNames;
+  const nameById = new Map<string, string>();
+  assignedIds.forEach((id, idx) => {
+    const viaServer = serverNames && serverNames.length === assignedIds.length ? serverNames[idx] : undefined;
+    const name = viaServer ?? users.find((u) => u.id === id)?.name;
+    if (name) nameById.set(id, name);
+  });
+  const coWorkers = assignedIds
+    .map((id, idx) => ({ id, name: nameById.get(id) ?? `Worker ${idx + 1}`, lead: idx === 0 }))
+    .map((w) => ({ ...w, isMe: w.id === currentUser.id }));
 
   const showToast = (msg: string) => {
     setSuccessToast(msg);

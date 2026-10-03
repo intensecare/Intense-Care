@@ -13,6 +13,7 @@ import {
   serializePayment,
   serializeQuote,
   serializeComplaint,
+  withStaffNames,
   fail,
 } from "@/lib/server/serialize";
 
@@ -99,6 +100,32 @@ export async function GET(
       ? { id: partner.id, name: partner.name, code: partner.code, status: partner.status }
       : null;
 
+    // Worker names + OTP verification state resolved server-side so booking
+    // rows stay accurate for ops managers (who cannot read the user directory).
+    const [users, verifiedChallenges] = await Promise.all([
+      prisma.user.findMany({ select: { id: true, name: true } }),
+      prisma.otpChallenge.findMany({
+        where: { jobId: { in: visibleJobs.map((j) => j.id) }, status: "VERIFIED" },
+        select: { jobId: true, updatedAt: true, createdByUserId: true },
+      }),
+    ]);
+    const nameById = new Map(users.map((u) => [u.id, u.name]));
+    const verifiedByJob = new Map(
+      verifiedChallenges.map((c) => [
+        c.jobId,
+        {
+          status: "verified" as const,
+          verifiedAt: c.updatedAt.toISOString(),
+          verifiedBy: c.createdByUserId,
+        },
+      ])
+    );
+    const finalizeJob = (j: (typeof visibleJobs)[number]) =>
+      withStaffNames(
+        isSuper ? serializeJob(j, verifiedByJob.get(j.id)) : redactJobForOps(serializeJob(j, verifiedByJob.get(j.id))),
+        nameById
+      );
+
     if (!isSuper) {
       const customerData = serializeCustomer(customer);
       return NextResponse.json({
@@ -106,7 +133,7 @@ export async function GET(
         data: {
           customer: { ...customerData, lifetimeRevenue: undefined },
           properties: properties.map(serializeProperty),
-          jobs: visibleJobs.map((j) => redactJobForOps(serializeJob(j))),
+          jobs: visibleJobs.map(finalizeJob),
           complaints: complaints.map(serializeComplaint),
           partner: partnerSummary,
           stats,
@@ -130,7 +157,7 @@ export async function GET(
       data: {
         customer: serializeCustomer(customer),
         properties: properties.map(serializeProperty),
-        jobs: visibleJobs.map(serializeJob),
+        jobs: visibleJobs.map(finalizeJob),
         invoices: invoices.map(serializeInvoice),
         payments: payments.map(serializePayment),
         quotes: quotes.map(serializeQuote),

@@ -7,6 +7,38 @@ import { getOpsDateVisibility } from "@/lib/ops-visibility";
 import { dispatchCutoffTime } from "@/lib/server/policy";
 import { getAllowedTransitions } from "@/lib/state-machine";
 import type { Job } from "@/lib/types";
+import { serializeJob, redactJobForOps, withStaffNames } from "@/lib/server/serialize";
+
+/**
+ * Serializes a single job for API responses with the same display data as the
+ * list route: resolved staff names and the authoritative OTP verification
+ * state (a hardcoded "none" here used to revert verified jobs after
+ * transitions and re-prompt the customer's OTP).
+ */
+async function serializeJobWithDisplayData(
+  full: Parameters<typeof serializeJob>[0],
+  isSuperAdmin: boolean
+) {
+  const [verified, users] = await Promise.all([
+    prisma.otpChallenge.findFirst({
+      where: { jobId: full.id, status: "VERIFIED" },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.user.findMany({ select: { id: true, name: true } }),
+  ]);
+  const nameMap = new Map(users.map((u) => [u.id, u.name]));
+  const otp = verified
+    ? {
+        status: "verified" as const,
+        verifiedAt: verified.updatedAt.toISOString(),
+        verifiedBy: verified.createdByUserId,
+      }
+    : undefined;
+  const serialized = isSuperAdmin
+    ? serializeJob(full, otp)
+    : redactJobForOps(serializeJob(full, otp));
+  return withStaffNames(serialized, nameMap);
+}
 
 /**
  * GET /api/jobs/[id] — server-side view of a job: lifecycle status, latest OTP
@@ -195,14 +227,9 @@ export async function PATCH(
           service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
         },
       });
-      const { serializeJob, redactJobForOps } = await import("@/lib/server/serialize");
       return NextResponse.json({
         success: true,
-        data: full
-          ? _u.role === "super_admin"
-            ? serializeJob(full)
-            : redactJobForOps(serializeJob(full))
-          : job,
+        data: full ? await serializeJobWithDisplayData(full, _u.role === "super_admin") : job,
       });
     }
 
@@ -313,10 +340,9 @@ export async function PATCH(
         service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
       },
     });
-    const { serializeJob, redactJobForOps } = await import("@/lib/server/serialize");
     return NextResponse.json({
       success: true,
-      data: full ? redactJobForOps(serializeJob(full)) : job,
+      data: full ? await serializeJobWithDisplayData(full, false) : job,
     });
   } catch (err) {
     return errorResponse(err, "jobs.patch.route_error");

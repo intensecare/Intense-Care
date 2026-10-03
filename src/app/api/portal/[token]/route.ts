@@ -36,6 +36,12 @@ export async function GET(
       where: { jobId: job.id },
       orderBy: { uploadedAt: "asc" },
     });
+    // The handover page renders the completed cleaning checklist — without
+    // this the client crashed reading `.length` of undefined.
+    const checklist = await prisma.jobChecklistItem.findMany({
+      where: { jobId: job.id },
+      orderBy: [{ area: "asc" }, { id: "asc" }],
+    });
 
     return NextResponse.json({
       success: true,
@@ -64,6 +70,12 @@ export async function GET(
           thumbnailUrl: p.thumbnailUrl,
           caption: p.caption,
           uploadedAt: p.uploadedAt.toISOString(),
+        })),
+        checklist: checklist.map((c) => ({
+          id: c.id,
+          area: c.area,
+          task: c.task,
+          completed: c.status === "completed",
         })),
         invite: {
           signStatus: invite.signStatus,

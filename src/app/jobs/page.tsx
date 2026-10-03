@@ -410,9 +410,14 @@ function JobsPageInner() {
                   const customer = customers.find((c) => c.id === job.customerId);
                   const property = properties.find((p) => p.id === job.propertyId);
                   const service = services.find((s) => s.id === job.serviceId);
-                  const assignedWorkers = (job.assignedStaffIds || [])
-                    .map((id) => users.find((u) => u.id === id)?.name)
-                    .filter(Boolean) as string[];
+                  // Server-resolved names first — the ops desk (and staff) cannot
+                  // read the user directory, so local resolution comes back empty
+                  // and made assigned jobs display as "Unassigned".
+                  const assignedWorkers =
+                    job.assignedStaffNames ??
+                    ((job.assignedStaffIds || [])
+                      .map((id) => users.find((u) => u.id === id)?.name)
+                      .filter(Boolean) as string[]);
                   const leadWorkerName = assignedWorkers[0];
 
                   return (

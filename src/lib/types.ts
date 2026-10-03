@@ -452,6 +452,9 @@ export interface Job {
    *  only they receive/verify the customer arrival OTP and gate the start-work
    *  flow; other assigned workers execute the job without OTP control. */
   assignedStaffIds: string[];
+  /** Server-resolved display names for assignedStaffIds (attached by the jobs
+   *  API; ops_manager/staff cannot read the full user directory). */
+  assignedStaffNames?: string[];
   /** Job value — super_admin only. The server redacts this field (and
    *  paymentStatus) for ops_manager and staff; treat as optional at runtime. */
   amount?: number;
