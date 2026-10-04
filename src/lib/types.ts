@@ -35,7 +35,8 @@ export type PaymentStatus =
   | "PARTIAL"
   | "PAID"
   | "REFUNDED"
-  | "CANCELLED";
+  | "CANCELLED"
+  | "NOT_APPLICABLE"; // AMC visit jobs — billed under the parent contract, no invoice
 
 export interface SystemSettings {
   nextDayDispatchTime: string; // e.g., "20:00" for 8:00 PM
@@ -140,6 +141,30 @@ export interface CustomerDetailSnapshot {
   payments?: Payment[];
   quotes?: Quote[];
   complaints?: Complaint[];
+  /** §2 AMC contracts held by this customer (super_admin only). */
+  amcContracts?: CustomerAmcContractSummary[];
+}
+
+/** Role-safe AMC contract summary shown on the customer file's AMC tab. */
+export interface CustomerAmcContractSummary {
+  id: string;
+  contractNumber: string;
+  status: string;
+  paymentStatus: string;
+  startDate: string;
+  endDate: string;
+  /** Omitted for ops_manager (financial redaction). */
+  contractValue?: number;
+  visitCount: number;
+  frequency: string;
+  serviceId: string | null;
+  visits: {
+    id: string;
+    visitNumber: number;
+    scheduledDate: string;
+    status: string;
+    jobId: string | null;
+  }[];
 }
 
 export type PropertyType =

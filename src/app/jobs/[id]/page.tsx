@@ -486,6 +486,10 @@ export default function JobDetailPage() {
   const jobIssues = qualityIssues.filter((i) => i.jobId === job.id);
   const jobRework = reworkTasks.filter((r) => r.jobId === job.id);
   const invoice = invoices.find((i) => i.jobId === job.id);
+  // AMC-spawned visit jobs carry no invoice — the contract is the billing
+  // instrument, referenced in the job notes by the spawn helper.
+  const amcContractRef =
+    !invoice && job.notes ? (job.notes.match(/contract (AMC-[A-Z0-9]+)/)?.[1] ?? null) : null;
 
   // Workers already busy on ANOTHER active job with the same date + time window
   // (same conflict rule as the dispatcher tower; server still re-validates).
@@ -1642,6 +1646,28 @@ export default function JobDetailPage() {
                     </Button>
                   )}
                 </div>
+              </div>
+            ) : amcContractRef ? (
+              // AMC-spawned visit job: billed under the parent contract, no
+              // per-visit invoice is ever raised.
+              <div className="p-4 rounded-xl bg-rose-50/60 border border-rose-100 space-y-2">
+                <p className="text-sm text-slate-800 font-medium flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-rose-600" />
+                  Billed under AMC contract
+                  <span className="font-mono text-xs">{amcContractRef}</span>
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  This visit is covered by the annual maintenance contract — no per-visit
+                  invoice is raised. Contract value and payment status are tracked on the
+                  contract itself.
+                </p>
+                <Link
+                  href="/amc"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 hover:underline"
+                >
+                  Open AMC Contracts
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
               </div>
             ) : (
               <div className="py-6 text-center text-xs text-slate-400">

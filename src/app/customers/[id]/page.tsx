@@ -15,7 +15,7 @@ import { QuoteFormDialog } from "@/components/common/QuoteFormDialog";
 import { QuotePreviewModal } from "@/components/common/QuotePreviewModal";
 import { ConvertQuoteDialog } from "@/components/common/ConvertQuoteDialog";
 import { useApp } from "@/lib/app-context";
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, cn } from "@/lib/utils";
 import type { CustomerDetailSnapshot, Invoice, Property, Quote } from "@/lib/types";
 import {
   Users,
@@ -34,6 +34,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
+  ShieldCheck,
   KeyRound,
   Car,
   Clock,
@@ -167,6 +169,7 @@ export default function CustomerDetailPage() {
   const payments = snapshot.payments ?? [];
   const quotes = snapshot.quotes ?? [];
   const complaints = snapshot.complaints ?? [];
+  const amcContracts = snapshot.amcContracts ?? [];
 
   const handleSaveCustomer = async (payload: {
     name: string;
@@ -380,6 +383,7 @@ export default function CustomerDetailPage() {
           <TabsTrigger value="bookings">Bookings ({jobs.length})</TabsTrigger>
           {isSuper && <TabsTrigger value="transactions">Transactions ({invoices.length})</TabsTrigger>}
           {isSuper && <TabsTrigger value="quotations">Quotations ({quotes.length})</TabsTrigger>}
+          {isSuper && <TabsTrigger value="amc">AMC ({amcContracts.length})</TabsTrigger>}
         </TabsList>
 
         {/* 1. OVERVIEW */}
@@ -736,6 +740,90 @@ export default function CustomerDetailPage() {
             </div>
           )}
         </TabsContent>
+
+        {/* 3b. AMC — annual maintenance contracts (super_admin) */}
+        {isSuper && (
+          <TabsContent value="amc" className="space-y-4">
+            {amcContracts.length === 0 ? (
+              <EmptyState
+                icon={ShieldCheck}
+                title="No AMC contracts"
+                description="Annual maintenance contracts for this customer appear here with their visit schedules."
+              />
+            ) : (
+              amcContracts.map((c) => {
+                const done = c.visits.filter((v) => v.status === "COMPLETED").length;
+                return (
+                  <div key={c.id} className="bg-white rounded-lg border border-slate-200 p-4 shadow-xs space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4 text-rose-600" />
+                        <span className="font-mono text-xs font-semibold text-slate-900">{c.contractNumber}</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                          {c.status.replace("_", " ")}
+                        </span>
+                        <span
+                          className={cn(
+                            "px-2 py-0.5 rounded-full text-[10px] font-semibold border",
+                            c.paymentStatus === "PAID"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : c.paymentStatus === "PARTIAL"
+                              ? "bg-amber-50 text-amber-800 border-amber-200"
+                              : "bg-rose-50 text-rose-700 border-rose-200"
+                          )}
+                        >
+                          {c.paymentStatus === "PAID" ? "Paid" : c.paymentStatus === "PARTIAL" ? "Partially Paid" : "Payment Pending"}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs font-semibold text-slate-900">
+                          {c.contractValue != null ? formatCurrency(c.contractValue) : "—"}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {formatDate(c.startDate)} → {formatDate(c.endDate)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {done}/{c.visitCount} visits completed
+                    </div>
+                    {c.visits.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {c.visits.map((v) => (
+                          <span
+                            key={v.id}
+                            title={`Visit ${v.visitNumber} — ${v.status}${v.jobId ? " · job file open" : ""}`}
+                            className={cn(
+                              "px-1.5 py-0.5 rounded text-[9px] font-semibold border",
+                              v.status === "COMPLETED"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : v.status === "REMINDED"
+                                ? "bg-amber-50 text-amber-800 border-amber-200"
+                                : v.status === "RESCHEDULED"
+                                ? "bg-slate-100 text-slate-600 border-slate-200"
+                                : v.status === "CANCELLED"
+                                ? "bg-red-50 text-red-700 border-red-200"
+                                : "bg-white text-slate-600 border-slate-200"
+                            )}
+                          >
+                            {v.visitNumber}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <Link
+                      href="/amc"
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 hover:underline"
+                    >
+                      Open AMC Contracts
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  </div>
+                );
+              })
+            )}
+          </TabsContent>
+        )}
 
         {/* 4. TRANSACTIONS (super_admin) */}
         {isSuper && (

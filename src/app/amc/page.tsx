@@ -149,6 +149,7 @@ export default function AmcPage() {
       const json = await res.json().catch(() => null);
       if (res.ok && json?.success) {
         setCreateOpen(false);
+        setForm((f) => ({ ...f, assignedStaffIds: [] }));
         showToast("AMC contract created — visits generated automatically.");
         await loadContracts();
       } else {

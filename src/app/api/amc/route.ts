@@ -6,6 +6,29 @@ import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { nextDocNumber } from "@/lib/server/serialize";
 
+/** Audit-trail event for AMC actions (entityType "amc", visible on /audit). */
+async function auditAmc(
+  actorId: string,
+  actorName: string,
+  action: string,
+  entityId: string,
+  details: string
+) {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        entityType: "amc",
+        entityId,
+        action,
+        performedBy: `${actorId}:${actorName}`,
+        details,
+      },
+    });
+  } catch {
+    // Audit logging must never fail the business action.
+  }
+}
+
 /**
  * GET /api/amc — §2 AMC dashboard payload: every contract with its visits,
  * server-resolved display names (customer, property, service, crew).
@@ -180,6 +203,13 @@ export async function POST(request: Request) {
       visits: visitDates.length,
       by: user.id,
     });
+    void auditAmc(
+      user.id,
+      user.name,
+      "CONTRACT_CREATED",
+      contract.id,
+      `${contract.contractNumber} — ${d.visitCount} visits, ${d.frequency}, ₹${d.contractValue}`
+    );
     return NextResponse.json({ success: true, data: { id: contract.id } }, { status: 201 });
   } catch (err) {
     return errorResponse(err, "amc.post.route_error");

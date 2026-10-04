@@ -74,7 +74,7 @@ export function JobStatusBadge({
 export function PaymentStatusBadge({
   status,
 }: {
-  status: "UNPAID" | "PARTIAL" | "PAID" | "REFUNDED" | "CANCELLED";
+  status: "UNPAID" | "PARTIAL" | "PAID" | "REFUNDED" | "CANCELLED" | "NOT_APPLICABLE";
 }) {
   // Same outline-dot vocabulary: only PAID is green, only UNPAID is amber.
   const styles = {
@@ -83,6 +83,7 @@ export function PaymentStatusBadge({
     PAID: "border-emerald-200 text-emerald-700",
     REFUNDED: "border-zinc-200 text-zinc-500",
     CANCELLED: "border-zinc-200 text-zinc-500",
+    NOT_APPLICABLE: "border-slate-200 text-slate-500",
   };
   const dots = {
     UNPAID: "bg-amber-500",
@@ -90,6 +91,10 @@ export function PaymentStatusBadge({
     PAID: "bg-emerald-500",
     REFUNDED: "bg-zinc-300",
     CANCELLED: "bg-zinc-300",
+    NOT_APPLICABLE: "bg-slate-300",
+  };
+  const labels: Record<string, string> = {
+    NOT_APPLICABLE: "Billed on contract",
   };
 
   return (
@@ -100,7 +105,7 @@ export function PaymentStatusBadge({
       )}
     >
       <span className={cn("h-1.5 w-1.5 rounded-full", dots[status] || dots.UNPAID)} />
-      {status.charAt(0) + status.slice(1).toLowerCase()}
+      {labels[status] ?? status.charAt(0) + status.slice(1).toLowerCase()}
     </span>
   );
 }

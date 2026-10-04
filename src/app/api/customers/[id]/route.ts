@@ -26,6 +26,41 @@ import {
  * directory endpoint (no invoices/payments/quotes, no amounts) and, matching
  * the jobs API, only bookings inside the dispatch visibility window.
  */
+
+/** Role-safe AMC summary attached to the 360° customer file. */
+function serializeAmcContractSummary(c: {
+  id: string;
+  contractNumber: string;
+  status: string;
+  paymentStatus: string;
+  startDate: string;
+  endDate: string;
+  contractValue: number;
+  visitCount: number;
+  frequency: string;
+  serviceId: string | null;
+  visits: { id: string; visitNumber: number; scheduledDate: string; status: string; jobId: string | null }[];
+}) {
+  return {
+    id: c.id,
+    contractNumber: c.contractNumber,
+    status: c.status,
+    paymentStatus: c.paymentStatus,
+    startDate: c.startDate,
+    endDate: c.endDate,
+    contractValue: c.contractValue,
+    visitCount: c.visitCount,
+    frequency: c.frequency,
+    serviceId: c.serviceId,
+    visits: c.visits.map((v) => ({
+      id: v.id,
+      visitNumber: v.visitNumber,
+      scheduledDate: v.scheduledDate,
+      status: v.status,
+      jobId: v.jobId,
+    })),
+  };
+}
 export async function GET(
   _request: Request,
   { params }: { params: { id: string } }
@@ -37,7 +72,7 @@ export async function GET(
     const customer = await prisma.customer.findUnique({ where: { id } });
     if (!customer) return fail("Customer not found.", 404);
 
-    const [properties, jobRows, invoices, payments, quotes, complaints, partner] =
+    const [properties, jobRows, invoices, payments, quotes, complaints, partner, amcContracts] =
       await Promise.all([
         prisma.property.findMany({
           where: { customerId: id },
@@ -73,6 +108,11 @@ export async function GET(
         customer.referralPartnerId
           ? prisma.referralPartner.findUnique({ where: { id: customer.referralPartnerId } })
           : Promise.resolve(null),
+        prisma.amcContract.findMany({
+          where: { customerId: id },
+          orderBy: { createdAt: "desc" },
+          include: { visits: { orderBy: { visitNumber: "asc" } } },
+        }),
       ]);
 
     const isSuper = user.role === "super_admin";
@@ -134,6 +174,12 @@ export async function GET(
           customer: { ...customerData, lifetimeRevenue: undefined },
           properties: properties.map(serializeProperty),
           jobs: visibleJobs.map(finalizeJob),
+          // Same redaction posture as the job rows: ops never receives the
+          // contract's financial value.
+          amcContracts: amcContracts.map((c) => {
+            const s = serializeAmcContractSummary(c);
+            return { ...s, contractValue: undefined };
+          }),
           complaints: complaints.map(serializeComplaint),
           partner: partnerSummary,
           stats,
@@ -163,6 +209,7 @@ export async function GET(
         quotes: quotes.map(serializeQuote),
         complaints: complaints.map(serializeComplaint),
         partner: partnerSummary,
+        amcContracts: amcContracts.map(serializeAmcContractSummary),
         stats,
       },
     });
