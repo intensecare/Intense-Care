@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   RefreshCw,
   Loader2,
+  CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,34 @@ export default function SettingsPage() {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // §1 Google Calendar integration status (Settings → Integrations).
+  const [googleStatus, setGoogleStatus] = useState<{
+    connected: boolean;
+    envConfigured: boolean;
+    calendarEmail: string | null;
+    connectedAt: string | null;
+    lastSyncAt: string | null;
+  } | null>(null);
+  const [googleChecking, setGoogleChecking] = useState(false);
+
+  const checkGoogleStatus = async () => {
+    setGoogleChecking(true);
+    try {
+      const res = await fetch("/api/integrations/google");
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) setGoogleStatus(json.data);
+    } catch {
+      /* non-fatal */
+    } finally {
+      setGoogleChecking(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (currentUser?.role === "super_admin") void checkGoogleStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.role]);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -119,7 +148,7 @@ export default function SettingsPage() {
           {/* Signed-in identity */}
           <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <h3 className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                 <ShieldCheck className="h-4 w-4 text-slate-900" />
                 Session Identity
               </h3>
@@ -135,7 +164,7 @@ export default function SettingsPage() {
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>Role:</span>
-                <span className="font-semibold uppercase text-slate-800">
+                <span className="font-semibold text-slate-800">
                   {currentUser?.role.replace("_", " ")}
                 </span>
               </div>
@@ -146,10 +175,71 @@ export default function SettingsPage() {
             </p>
           </div>
 
+          {/* §1 Google Integrations — Connected / Not Connected */}
+          <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                <CalendarDays className="h-4 w-4 text-slate-900" />
+                Integrations
+              </h3>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px] gap-1"
+                disabled={googleChecking}
+                onClick={() => void checkGoogleStatus()}
+              >
+                <RefreshCw className={`h-3 w-3 ${googleChecking ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
+
+            {googleStatus === null ? (
+              <p className="text-[11px] text-slate-400">Checking integration status…</p>
+            ) : (
+              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Google Calendar</span>
+                  {googleStatus.connected ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                      Not Connected
+                    </span>
+                  )}
+                </div>
+                {googleStatus.connected ? (
+                  <div className="space-y-0.5 text-slate-600">
+                    <div>Calendar account: <strong className="font-mono">{googleStatus.calendarEmail || "primary"}</strong></div>
+                    <div>
+                      Every job syncs as one calendar event (customer, service, time, address, team,
+                      contact &amp; job id); updates refresh it and cancellations cancel it.
+                    </div>
+                    {googleStatus.lastSyncAt && <div>Last sync: {formatDateTime(googleStatus.lastSyncAt)}</div>}
+                  </div>
+                ) : (
+                  <div className="space-y-1 text-slate-500 leading-relaxed">
+                    <p>Connect by adding these environment variables (Vercel → Project → Settings → Environment Variables):</p>
+                    <code className="block font-mono text-[10px] bg-slate-100 rounded px-2 py-1 text-slate-700">
+                      GOOGLE_CLIENT_ID · GOOGLE_CLIENT_SECRET · GOOGLE_REFRESH_TOKEN · GOOGLE_CALENDAR_ID (optional)
+                    </code>
+                    <p>
+                      The refresh token needs the <span className="font-mono">calendar.events</span> scope.
+                      Once present, bookings appear on the connected calendar automatically.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Gateway health */}
           <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <h3 className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                 <Database className="h-4 w-4 text-slate-900" />
                 SMS Gateway Health
               </h3>
@@ -184,13 +274,13 @@ export default function SettingsPage() {
                       )}
                     </div>
                     {balance.error ? (
-                      <span className="text-rose-700 font-medium">Provider error: {balance.error}</span>
+                      <span className="text-red-700 font-medium">Provider error: {balance.error}</span>
                     ) : (
                       <div className="flex gap-4">
-                        <span className={Number(balance.otpSmsCredits ?? 0) > 0 ? "text-emerald-700" : "text-rose-700 font-bold"}>
+                        <span className={Number(balance.otpSmsCredits ?? 0) > 0 ? "text-emerald-700" : "text-red-700 font-semibold"}>
                           OTP/SMS credits: <strong>{balance.otpSmsCredits ?? "—"}</strong>
                         </span>
-                        <span className={Number(balance.transactionalSmsCredits ?? 0) > 0 ? "text-emerald-700" : "text-rose-700 font-bold"}>
+                        <span className={Number(balance.transactionalSmsCredits ?? 0) > 0 ? "text-emerald-700" : "text-red-700 font-semibold"}>
                           Transactional: <strong>{balance.transactionalSmsCredits ?? "—"}</strong>
                         </span>
                       </div>
@@ -211,7 +301,7 @@ export default function SettingsPage() {
                         log.status === "SENT"
                           ? "text-emerald-700"
                           : log.status === "FAILED"
-                          ? "text-rose-700"
+                          ? "text-red-700"
                           : "text-amber-700"
                       }`}
                     >
@@ -229,10 +319,10 @@ export default function SettingsPage() {
           {/* Typography & Font Size Accessibility (Govt Website Style) */}
           <div className="bg-white rounded-lg border border-zinc-200 p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-900 flex items-center gap-1.5 font-sans">
+              <h3 className="text-xs font-semibold text-zinc-900 flex items-center gap-1.5 font-sans">
                 Accessibility Font Size Scaler
               </h3>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-100 text-zinc-900 font-bold border border-zinc-300">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-100 text-zinc-900 font-semibold border border-zinc-300">
                 Govt Portal Style
               </span>
             </div>
@@ -243,12 +333,12 @@ export default function SettingsPage() {
                 onClick={() => setFontSize("sm")}
                 className={`p-3 rounded border text-center transition-all flex flex-col items-center gap-1 ${
                   fontSize === "sm"
-                    ? "bg-black text-white border-black font-bold"
+                    ? "bg-rose-500 text-white border-rose-500 font-semibold"
                     : "bg-zinc-50 text-zinc-700 border-zinc-200 hover:bg-zinc-100"
                 }`}
               >
-                <span className="text-base font-bold">-A</span>
-                <span className="text-[10px] uppercase">Compact</span>
+                <span className="text-base font-semibold">-A</span>
+                <span className="text-[10px]">Compact</span>
               </button>
 
               <button
@@ -256,12 +346,12 @@ export default function SettingsPage() {
                 onClick={() => setFontSize("md")}
                 className={`p-3 rounded border text-center transition-all flex flex-col items-center gap-1 ${
                   fontSize === "md"
-                    ? "bg-black text-white border-black font-bold"
+                    ? "bg-rose-500 text-white border-rose-500 font-semibold"
                     : "bg-zinc-50 text-zinc-700 border-zinc-200 hover:bg-zinc-100"
                 }`}
               >
-                <span className="text-base font-bold">A</span>
-                <span className="text-[10px] uppercase">Standard</span>
+                <span className="text-base font-semibold">A</span>
+                <span className="text-[10px]">Standard</span>
               </button>
 
               <button
@@ -269,12 +359,12 @@ export default function SettingsPage() {
                 onClick={() => setFontSize("lg")}
                 className={`p-3 rounded border text-center transition-all flex flex-col items-center gap-1 ${
                   fontSize === "lg"
-                    ? "bg-black text-white border-black font-bold"
+                    ? "bg-rose-500 text-white border-rose-500 font-semibold"
                     : "bg-zinc-50 text-zinc-700 border-zinc-200 hover:bg-zinc-100"
                 }`}
               >
-                <span className="text-base font-bold">+A</span>
-                <span className="text-[10px] uppercase">Large</span>
+                <span className="text-base font-semibold">+A</span>
+                <span className="text-[10px]">Large</span>
               </button>
 
               <button
@@ -282,12 +372,12 @@ export default function SettingsPage() {
                 onClick={() => setFontSize("xl")}
                 className={`p-3 rounded border text-center transition-all flex flex-col items-center gap-1 ${
                   fontSize === "xl"
-                    ? "bg-black text-white border-black font-bold"
+                    ? "bg-rose-500 text-white border-rose-500 font-semibold"
                     : "bg-zinc-50 text-zinc-700 border-zinc-200 hover:bg-zinc-100"
                 }`}
               >
-                <span className="text-base font-bold">++A</span>
-                <span className="text-[10px] uppercase">X-Large</span>
+                <span className="text-base font-semibold">++A</span>
+                <span className="text-[10px]">X-Large</span>
               </button>
             </div>
           </div>
@@ -296,7 +386,7 @@ export default function SettingsPage() {
         {/* Platform Settings Form */}
         <div className="lg:col-span-2">
           <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <h3 className="text-xs font-semibold text-slate-500">
               Operational Configuration
             </h3>
 
@@ -309,7 +399,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="pt-2 border-t border-slate-100 space-y-3">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <div className="text-[11px] font-semibold text-slate-500">
                   Company Profile (printed on tax invoices &amp; statements)
                 </div>
 
@@ -420,7 +510,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="pt-2 border-t border-slate-100 space-y-3">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <div className="text-[11px] font-semibold text-slate-500">
                   Taxation (GST)
                 </div>
 

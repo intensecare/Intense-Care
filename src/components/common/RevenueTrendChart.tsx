@@ -87,10 +87,10 @@ export function RevenueTrendChart({ invoices, payments, weeks = 8 }: RevenueTren
   const gridFractions = [1, 0.5, 0];
 
   return (
-    <div className="rounded-xl border border-zinc-200/80 bg-white p-4 shadow-xs mb-6">
+    <div className="rounded-lg border border-zinc-200/80 bg-white p-4 shadow-xs mb-6">
       <div className="flex items-start justify-between mb-2">
         <div>
-          <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 font-sans">
+          <h3 className="text-xs font-semibold text-zinc-500 font-sans">
             Business Trend — Billed vs Collected
           </h3>
           <p className="text-[11px] text-zinc-400 mt-0.5">
@@ -102,8 +102,8 @@ export function RevenueTrendChart({ invoices, payments, weeks = 8 }: RevenueTren
             <span className="h-2 w-2 rounded-full bg-slate-400" />
             Billed {compactMoney(totalBilled)}
           </span>
-          <span className="flex items-center gap-1.5 text-emerald-700">
-            <span className="h-2 w-2 rounded-full bg-emerald-600" />
+          <span className="flex items-center gap-1.5 text-rose-600">
+            <span className="h-2 w-2 rounded-full bg-rose-500" />
             Collected {compactMoney(totalCollected)}
           </span>
         </div>
@@ -119,8 +119,8 @@ export function RevenueTrendChart({ invoices, payments, weeks = 8 }: RevenueTren
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-44" role="img" aria-label="Billed versus collected revenue, weekly">
           <defs>
             <linearGradient id="rtcCollectedFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#059669" stopOpacity="0.22" />
-              <stop offset="100%" stopColor="#059669" stopOpacity="0.02" />
+            <stop offset="0%" stopColor="#ea506c" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#ea506c" stopOpacity="0.02" />
             </linearGradient>
           </defs>
 
@@ -129,7 +129,7 @@ export function RevenueTrendChart({ invoices, payments, weeks = 8 }: RevenueTren
             const gy = py(max * f);
             return (
               <g key={f}>
-                <line x1={padL} y1={gy} x2={W - padR} y2={gy} stroke="#e2e8f0" strokeWidth="1" strokeDasharray={f === 0 ? "0" : "3 4"} />
+                <line x1={padL} y1={gy} x2={W - padR} y2={gy} stroke="#efe9df" strokeWidth="1" strokeDasharray={f === 0 ? "0" : "3 4"} />
                 <text x={padL - 6} y={gy + 3} textAnchor="end" className="fill-slate-400" fontSize="9">
                   {compactMoney(max * f)}
                 </text>
@@ -139,14 +139,14 @@ export function RevenueTrendChart({ invoices, payments, weeks = 8 }: RevenueTren
 
           {/* Collected area + lines */}
           <polygon points={collectedArea} fill="url(#rtcCollectedFill)" />
-          <polyline points={billedLine} fill="none" stroke="#94a3b8" strokeWidth="1.75" strokeLinejoin="round" />
-          <polyline points={collectedLine} fill="none" stroke="#059669" strokeWidth="2.25" strokeLinejoin="round" />
+          <polyline points={billedLine} fill="none" stroke="#877a68" strokeWidth="1.75" strokeLinejoin="round" />
+          <polyline points={collectedLine} fill="none" stroke="#ea506c" strokeWidth="2.25" strokeLinejoin="round" />
 
           {/* Point markers */}
           {buckets.map((b, i) => (
             <g key={i}>
-              <circle cx={px(i)} cy={py(b.billed)} r="2.5" fill="#94a3b8" />
-              <circle cx={px(i)} cy={py(b.collected)} r="3" fill="#059669" stroke="#ffffff" strokeWidth="1" />
+              <circle cx={px(i)} cy={py(b.billed)} r="2.5" fill="#877a68" />
+              <circle cx={px(i)} cy={py(b.collected)} r="3" fill="#ea506c" stroke="#ffffff" strokeWidth="1" />
             </g>
           ))}
 

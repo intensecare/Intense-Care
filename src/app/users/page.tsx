@@ -204,7 +204,7 @@ export default function UsersAndRolesPage() {
                 setIsAddUserOpen(true);
               }}
               size="sm"
-              className="h-9 gap-1.5 bg-slate-900 text-white font-medium text-xs"
+              className="h-9 gap-1.5 bg-rose-500 text-white font-medium text-xs"
             >
               <UserPlus className="h-4 w-4" />
               Add System User / Staff
@@ -215,10 +215,10 @@ export default function UsersAndRolesPage() {
 
       <div className="space-y-6">
         {/* System User Accounts Table */}
-        <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden space-y-3 p-5">
+        <div className="bg-white rounded-lg border border-slate-200/90 shadow-xs overflow-hidden space-y-3 p-5">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div>
-              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+              <h3 className="text-xs font-semibold text-slate-900">
                 Active Staff & User Accounts ({users.length})
               </h3>
               <p className="text-xs text-slate-500">
@@ -230,7 +230,7 @@ export default function UsersAndRolesPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-slate-500 font-semibold uppercase text-[10px]">
+                <tr className="border-b border-slate-200 bg-slate-50 text-slate-500 font-semibold text-[10px]">
                   <th className="py-2.5 px-3">Staff / User</th>
                   <th className="py-2.5 px-3">Role</th>
                   <th className="py-2.5 px-3">Contact</th>
@@ -247,7 +247,7 @@ export default function UsersAndRolesPage() {
                     <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-2.5">
-                          <div className="h-8 w-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                          <div className="h-8 w-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-semibold text-xs shrink-0">
                             {u.name.substring(0, 2).toUpperCase()}
                           </div>
                           <div>
@@ -256,12 +256,12 @@ export default function UsersAndRolesPage() {
                                 type="button"
                                 onClick={() => setDetailWorkerId(u.id)}
                                 title="Open this worker's full details"
-                                className="font-bold text-slate-900 hover:text-indigo-700 hover:underline"
+                                className="font-semibold text-slate-900 hover:text-indigo-700 hover:underline"
                               >
                                 {u.name}
                               </button>
                             ) : (
-                              <div className="font-bold text-slate-900">{u.name}</div>
+                              <div className="font-semibold text-slate-900">{u.name}</div>
                             )}
                             <div className="text-[11px] text-slate-500">{u.email}</div>
                           </div>
@@ -289,7 +289,7 @@ export default function UsersAndRolesPage() {
 
                       <td className="py-3 px-3">
                         <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold ${
                             u.active
                               ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                               : "bg-slate-100 text-slate-500 border border-slate-200"
@@ -332,7 +332,7 @@ export default function UsersAndRolesPage() {
                                   size="sm"
                                   variant="ghost"
                                   onClick={() => setDeleteTargetUser({ id: u.id, name: u.name })}
-                                  className="h-7 w-7 p-0 text-slate-400 hover:text-rose-600"
+                                  className="h-7 w-7 p-0 text-slate-400 hover:text-red-600"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
@@ -356,11 +356,11 @@ export default function UsersAndRolesPage() {
             return (
               <div
                 key={def.role}
-                className="bg-white rounded-xl border border-slate-200/90 p-5 shadow-xs flex flex-col justify-between space-y-4"
+                className="bg-white rounded-lg border border-slate-200/90 p-5 shadow-xs flex flex-col justify-between space-y-4"
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${def.badgeColor}`}>
+                    <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${def.badgeColor}`}>
                       {def.title}
                     </span>
                     <Icon className="h-5 w-5 text-slate-400" />
@@ -369,7 +369,7 @@ export default function UsersAndRolesPage() {
                   <p className="text-xs text-slate-600 leading-relaxed">{def.description}</p>
 
                   <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    <span className="text-[10px] font-semibold text-slate-400">
                       Key Capabilities:
                     </span>
                     <ul className="space-y-1 text-xs text-slate-700">
@@ -391,9 +391,9 @@ export default function UsersAndRolesPage() {
       {/* Modal: Add User */}
       {isAddUserOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full border border-slate-200 p-6 space-y-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900">Add Staff / User Account</h3>
+              <h3 className="text-sm font-semibold text-slate-900">Add Staff / User Account</h3>
               <Button size="sm" variant="ghost" onClick={() => setIsAddUserOpen(false)} className="h-7 w-7 p-0">
                 <X className="h-4 w-4" />
               </Button>
@@ -401,7 +401,7 @@ export default function UsersAndRolesPage() {
 
             <form onSubmit={handleCreateUser} className="space-y-3 text-xs">
               {formError && (
-                <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">{formError}</p>
+                <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">{formError}</p>
               )}
               <div className="space-y-1">
                 <label className="font-semibold text-slate-700">Full Name</label>
@@ -467,7 +467,7 @@ export default function UsersAndRolesPage() {
                 <Button type="button" variant="outline" onClick={() => setIsAddUserOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={formBusy} className="bg-slate-900 text-white">
+                <Button type="submit" disabled={formBusy} className="">
                   {formBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
                   Add User Account
                 </Button>
@@ -480,9 +480,9 @@ export default function UsersAndRolesPage() {
       {/* Modal: Edit User */}
       {editingUserId && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full border border-slate-200 p-6 space-y-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900">Edit User Details</h3>
+              <h3 className="text-sm font-semibold text-slate-900">Edit User Details</h3>
               <Button size="sm" variant="ghost" onClick={() => setEditingUserId(null)} className="h-7 w-7 p-0">
                 <X className="h-4 w-4" />
               </Button>
@@ -490,7 +490,7 @@ export default function UsersAndRolesPage() {
 
             <form onSubmit={handleUpdateUser} className="space-y-3 text-xs">
               {formError && (
-                <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">{formError}</p>
+                <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">{formError}</p>
               )}
               <div className="space-y-1">
                 <label className="font-semibold text-slate-700">Full Name</label>
@@ -531,7 +531,7 @@ export default function UsersAndRolesPage() {
                 <Button type="button" variant="outline" onClick={() => setEditingUserId(null)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={formBusy} className="bg-slate-900 text-white">
+                <Button type="submit" disabled={formBusy} className="">
                   {formBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
                   Save Changes
                 </Button>

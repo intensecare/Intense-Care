@@ -49,6 +49,22 @@ export async function GET(
     const settingsRow = await prisma.systemSettings.findUnique({ where: { id: "singleton" } });
     const settingsData = (settingsRow?.data ?? {}) as { googleBusinessReviewUrl?: string; companyName?: string };
 
+    // §6: the customer handover (and the NRI owner viewing remotely) also sees
+    // who visited, arrival/completion times, and the invoice/payment status —
+    // read-only projections of the same job record, no new business logic.
+    const invoice = await prisma.invoice.findFirst({
+      where: { jobId: job.id },
+      orderBy: { issuedAt: "desc" },
+    });
+    // Server-resolved crew names (staff cannot read the user directory, and
+    // the Job table stores ids — names are joined here for the visit report).
+    const teamMembers = job.assignedStaffIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: job.assignedStaffIds } },
+          select: { name: true },
+        })
+      : [];
+
     return NextResponse.json({
       success: true,
       data: {
@@ -58,7 +74,18 @@ export async function GET(
           serviceName: job.service?.name ?? null,
           scheduledDate: job.scheduledDate,
           scheduledTimeSlot: job.scheduledTimeSlot,
+          arrivedAt: job.arrivedAt ? job.arrivedAt.toISOString() : null,
+          completedAt: job.completedAt ? job.completedAt.toISOString() : null,
         },
+        team: teamMembers.map((m) => m.name).filter(Boolean),
+        invoice: invoice
+          ? {
+              total: invoice.total,
+              amountPaid: invoice.amountPaid,
+              balanceDue: invoice.balanceDue,
+              status: invoice.status as string,
+            }
+          : null,
         customer: customer
           ? { name: customer.name, phoneMasked: maskPhone(customer.phone) }
           : null,

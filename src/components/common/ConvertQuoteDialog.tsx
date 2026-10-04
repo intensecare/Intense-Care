@@ -121,7 +121,7 @@ export function ConvertQuoteDialog({ isOpen, onClose, quote, property, onConfirm
           </div>
 
           {error && (
-            <p className="text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+            <p className="text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
               {error}
             </p>
           )}
@@ -130,7 +130,7 @@ export function ConvertQuoteDialog({ isOpen, onClose, quote, property, onConfirm
             <Button type="button" variant="outline" size="sm" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmitting}>
+            <Button type="submit" size="sm" className="" disabled={isSubmitting}>
               {isSubmitting ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />

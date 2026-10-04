@@ -29,14 +29,14 @@ export function ImageLightboxModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl max-w-4xl w-full overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-slate-900 rounded-lg border border-slate-800 shadow-2xl max-w-4xl w-full overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 text-white shrink-0">
           <div className="flex items-center gap-2.5">
             <Camera className="h-4 w-4 text-blue-400" />
             <div>
-              <h3 className="text-sm font-bold text-white leading-tight">{title}</h3>
-              <span className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
+              <h3 className="text-sm font-semibold text-white leading-tight">{title}</h3>
+              <span className="text-[10px] font-semibold text-slate-400 tracking-wider">
                 {category.replace("_", " ")}
               </span>
             </div>

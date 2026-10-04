@@ -62,22 +62,22 @@ export default function NotificationsPage() {
       {/* Summary strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
         <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Total Dispatches
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{smsGatewayLogs.length}</div>
+          <div className="text-2xl font-semibold text-slate-900 mt-1">{smsGatewayLogs.length}</div>
         </div>
         <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/50 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
+          <div className="text-xs font-semibold text-emerald-700">
             Delivered
           </div>
-          <div className="text-2xl font-bold text-emerald-800 mt-1">{sentCount}</div>
+          <div className="text-2xl font-semibold text-emerald-800 mt-1">{sentCount}</div>
         </div>
-        <div className="p-4 rounded-lg border border-rose-200 bg-rose-50/50 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-rose-700">
+        <div className="p-4 rounded-lg border border-red-200 bg-red-50/50 shadow-xs">
+          <div className="text-xs font-semibold text-red-700">
             Failed
           </div>
-          <div className="text-2xl font-bold text-rose-800 mt-1">{failedCount}</div>
+          <div className="text-2xl font-semibold text-red-800 mt-1">{failedCount}</div>
         </div>
       </div>
 
@@ -87,7 +87,7 @@ export default function NotificationsPage() {
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-slate-700" />
             <div>
-              <h3 className="text-sm font-bold text-slate-900">SMS Gateway — Arrival OTPs (2Factor)</h3>
+              <h3 className="text-sm font-semibold text-slate-900">SMS Gateway — Arrival OTPs (2Factor)</h3>
               <p className="text-[11px] text-slate-500">
                 Provider-generated OTPs delivered via 2Factor's pre-approved DLT template.
               </p>
@@ -107,7 +107,7 @@ export default function NotificationsPage() {
             {smsGatewayLogs.map((log: SmsGatewayLog) => (
               <div key={log.id} className="p-3 flex items-center justify-between gap-3 text-xs">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-white bg-amber-600 shrink-0">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold text-white bg-amber-600 shrink-0">
                     {log.purpose.replace(/_/g, " ")}
                   </span>
                   <span className="font-mono font-semibold text-slate-800 shrink-0">
@@ -115,7 +115,7 @@ export default function NotificationsPage() {
                   </span>
                   <span className="text-slate-500 font-mono">to {log.recipientMasked}</span>
                   {log.error && (
-                    <span className="text-rose-600 text-[10px] truncate">{log.error}</span>
+                    <span className="text-red-600 text-[10px] truncate">{log.error}</span>
                   )}
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
@@ -124,7 +124,7 @@ export default function NotificationsPage() {
                       log.status === "SENT"
                         ? "text-emerald-700"
                         : log.status === "FAILED"
-                        ? "text-rose-700"
+                        ? "text-red-700"
                         : "text-amber-700"
                     }`}
                   >

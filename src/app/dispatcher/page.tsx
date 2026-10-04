@@ -161,7 +161,7 @@ export default function DispatcherPage() {
           <CalendarDays className="h-4 w-4 text-blue-600" />
         </div>
         <div className="space-y-0.5">
-          <div className="text-xs font-bold text-slate-900">
+          <div className="text-xs font-semibold text-slate-900">
             Tomorrow&apos;s queue ({tomorrowStr})
           </div>
           <p className="text-[11px] text-slate-500">
@@ -173,10 +173,10 @@ export default function DispatcherPage() {
       {/* Dispatch KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
         <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Tomorrow&apos;s Queue ({tomorrowStr})
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">
+          <div className="text-2xl font-semibold text-slate-900 mt-1">
             {tomorrowsJobs.length} Jobs
           </div>
           <div className="text-[11px] text-slate-400">
@@ -185,30 +185,30 @@ export default function DispatcherPage() {
         </div>
 
         <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Jobs In Execution
           </div>
-          <div className="text-2xl font-bold text-blue-700 mt-1">
+          <div className="text-2xl font-semibold text-blue-700 mt-1">
             {visibleJobs.filter((j) => j.status === "IN_PROGRESS").length}
           </div>
           <div className="text-[11px] text-slate-400">Timer actively running</div>
         </div>
 
         <div className="p-4 rounded-lg border border-amber-200 bg-amber-50/40 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-amber-800">
+          <div className="text-xs font-semibold text-amber-800">
             Arrived • Pending OTP
           </div>
-          <div className="text-2xl font-bold text-amber-900 mt-1">
+          <div className="text-2xl font-semibold text-amber-900 mt-1">
             {visibleJobs.filter((j) => j.status === "ARRIVED").length}
           </div>
           <div className="text-[11px] text-amber-700 font-medium">Worker at door, verification gate</div>
         </div>
 
         <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             QC Audit Queue
           </div>
-          <div className="text-2xl font-bold text-purple-700 mt-1">
+          <div className="text-2xl font-semibold text-purple-700 mt-1">
             {visibleJobs.filter((j) => j.status === "WORK_COMPLETED" || j.status === "QUALITY_CHECK").length}
           </div>
           <div className="text-[11px] text-slate-400">Awaiting ops QC pass</div>
@@ -218,7 +218,7 @@ export default function DispatcherPage() {
       {/* Tomorrow's Job Assignment Queue */}
       <div className="mb-8 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
             <Users className="h-4 w-4 text-blue-600" />
             Tomorrow&apos;s Dispatch & Staff Assignment Queue
           </h3>
@@ -247,7 +247,7 @@ export default function DispatcherPage() {
                 >
                   <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm font-bold text-slate-900">{job.id}</span>
+                      <span className="font-mono text-sm font-semibold text-slate-900">{job.id}</span>
                       <JobStatusBadge status={job.status} size="sm" />
                     </div>
                     <span className="text-xs font-semibold text-slate-600">{formatDate(job.scheduledDate)} ({formatTimeSlot(job.scheduledTimeSlot)})</span>
@@ -255,13 +255,13 @@ export default function DispatcherPage() {
 
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div>
-                      <span className="text-[10px] uppercase font-bold text-slate-400">Customer & Contact</span>
-                      <div className="font-bold text-slate-900">{customer?.name}</div>
+                      <span className="text-[10px] font-semibold text-slate-400">Customer & Contact</span>
+                      <div className="font-semibold text-slate-900">{customer?.name}</div>
                       <div className="text-[11px] text-slate-500 font-mono">{customer?.phone}</div>
                     </div>
 
                     <div>
-                      <span className="text-[10px] uppercase font-bold text-slate-400">Service & Duration</span>
+                      <span className="text-[10px] font-semibold text-slate-400">Service & Duration</span>
                       <div className="font-semibold text-slate-900">{service?.name}</div>
                       <div className="text-[11px] text-slate-500">Est. {service?.estimatedDurationHours || 4} hours</div>
                     </div>
@@ -269,7 +269,7 @@ export default function DispatcherPage() {
 
                   <div className="text-xs bg-slate-50 p-2.5 rounded border border-slate-100 space-y-1">
                     <div className="font-medium text-slate-800 flex items-center gap-1">
-                      <MapPin className="h-3 w-3 text-rose-500 shrink-0" />
+                      <MapPin className="h-3 w-3 text-zinc-400 shrink-0" />
                       {property?.title} ({property?.propertyType})
                     </div>
                     <div className="text-[11px] text-slate-500 truncate">{property?.address}</div>
@@ -283,7 +283,7 @@ export default function DispatcherPage() {
                   {/* Staff Multi-Selection with live availability */}
                   <div className="space-y-2 pt-1 border-t border-slate-100">
                     <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                      <label className="text-[11px] font-semibold text-slate-700">
                         Assign Field Workers
                       </label>
                       <span className="text-[11px] font-semibold text-slate-500">
@@ -329,7 +329,7 @@ export default function DispatcherPage() {
                               ) : null}
                               <span>{staff.name}</span>
                               {isSelected && assigned[0] === staff.id && (
-                                <span className="text-[9px] uppercase font-bold text-amber-300">Lead</span>
+                                <span className="text-[9px] font-semibold text-amber-300">Lead</span>
                               )}
                             </button>
                           );
@@ -338,7 +338,7 @@ export default function DispatcherPage() {
                     )}
 
                     {err && (
-                      <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 flex items-center gap-1">
+                      <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 flex items-center gap-1">
                         <AlertTriangle className="h-3 w-3 shrink-0" />
                         {err}
                       </p>
@@ -361,11 +361,11 @@ export default function DispatcherPage() {
         {/* Left 2 Cols: Real-time Dispatch Cards */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900">
+            <h3 className="text-sm font-semibold text-slate-900">
               Live Field Execution Progress ({activeJobs.length})
             </h3>
             <span className="text-xs text-slate-400 flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
               Real-time telemetry
             </span>
           </div>
@@ -393,7 +393,7 @@ export default function DispatcherPage() {
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm font-bold text-slate-900">
+                        <span className="font-mono text-sm font-semibold text-slate-900">
                           {job.id}
                         </span>
                         <JobStatusBadge status={job.status} size="sm" />
@@ -407,10 +407,10 @@ export default function DispatcherPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                       {/* Customer */}
                       <div className="space-y-0.5">
-                        <span className="text-[10px] uppercase font-bold text-slate-400">
+                        <span className="text-[10px] font-semibold text-slate-400">
                           Customer & Phone
                         </span>
-                        <div className="font-bold text-slate-900">{customer?.name}</div>
+                        <div className="font-semibold text-slate-900">{customer?.name}</div>
                         <div className="text-[11px] text-slate-500 font-mono flex items-center gap-1">
                           <Phone className="h-3 w-3 text-slate-400" />
                           {customer?.phone}
@@ -419,11 +419,11 @@ export default function DispatcherPage() {
 
                       {/* Location */}
                       <div className="space-y-0.5">
-                        <span className="text-[10px] uppercase font-bold text-slate-400">
+                        <span className="text-[10px] font-semibold text-slate-400">
                           Site Location
                         </span>
                         <div className="font-semibold text-slate-900 flex items-center gap-1 truncate">
-                          <MapPin className="h-3 w-3 text-rose-500 shrink-0" />
+                          <MapPin className="h-3 w-3 text-zinc-400 shrink-0" />
                           {property?.title}
                         </div>
                         <div className="text-[11px] text-slate-500 truncate">
@@ -433,7 +433,7 @@ export default function DispatcherPage() {
 
                       {/* Assigned Staff */}
                       <div className="space-y-0.5">
-                        <span className="text-[10px] uppercase font-bold text-slate-400">
+                        <span className="text-[10px] font-semibold text-slate-400">
                           Assigned Field Workers ({job.assignedStaffIds?.length || 0})
                         </span>
                         <div className="font-semibold text-slate-900">
@@ -461,7 +461,7 @@ export default function DispatcherPage() {
                           </Button>
                         </Link>
                         <Link href="/field">
-                          <Button size="sm" className="h-8 text-xs bg-slate-900 text-white font-medium">
+                          <Button size="sm" className="h-8 text-xs bg-rose-500 text-white font-medium">
                             Field View
                           </Button>
                         </Link>
@@ -477,7 +477,7 @@ export default function DispatcherPage() {
         {/* Right Col: Field Staff Availability */}
         <div className="space-y-4">
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <h3 className="text-xs font-semibold text-slate-500">
               Field Staff Availability
             </h3>
 
@@ -504,12 +504,12 @@ export default function DispatcherPage() {
                       key={staff.id}
                       className="p-3 rounded-lg border border-slate-100 bg-slate-50/70 text-xs space-y-2"
                     >
-                      <div className="flex items-center justify-between font-bold text-slate-900">
+                      <div className="flex items-center justify-between font-semibold text-slate-900">
                         <span className="flex items-center gap-1.5">
-                          <span className={`h-2.5 w-2.5 rounded-full ${todaySlotBusy ? "bg-amber-500" : "bg-emerald-500 animate-pulse"}`} />
+                          <span className={`h-2.5 w-2.5 rounded-full ${todaySlotBusy ? "bg-amber-500" : "bg-emerald-500"}`} />
                           {staff.name}
                         </span>
-                        <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-semibold ${
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                           activeLoad > 0
                             ? "bg-amber-100 text-amber-800"
                             : "bg-emerald-100 text-emerald-800"

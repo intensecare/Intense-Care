@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useApp } from "@/lib/app-context";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { OTPModal } from "@/components/common/OTPModal";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, cn } from "@/lib/utils";
 import {
   Smartphone,
   MapPin,
@@ -262,23 +262,46 @@ export default function FieldStaffPage() {
     }
   };
 
+  // §10 Sticky primary action — the ONE next step, always within thumb reach.
+  const fieldPrimaryAction = (() => {
+    if (!currentJob || !canExecuteFieldWork) return null;
+    switch (currentJob.status) {
+      case "ASSIGNED":
+        return { label: "Mark Arrived at Property", run: handleMarkArrived, tone: "coral" as const };
+      case "ARRIVED":
+        return isLeadForJob
+          ? { label: "Enter Customer OTP to Unlock Entry", run: () => setIsOtpOpen(true), tone: "amber" as const }
+          : null;
+      case "CUSTOMER_VERIFIED":
+        return { label: "Start Job & Begin Cleaning", run: handleStartJob, tone: "coral" as const };
+      case "IN_PROGRESS":
+        return { label: "Complete Cleaning Work (Submit for QC)", run: handleCompleteWork, tone: "coral" as const };
+      default:
+        return null;
+    }
+  })();
+
+  const scrollToSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-start pb-16">
-      {/* Mobile Top Header */}
-      <header className="w-full max-w-md bg-slate-900 text-white p-4 sticky top-0 z-30 shadow-md">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-start pb-44">
+      {/* Mobile Top Header — light, matching the cream field */}
+      <header className="w-full max-w-md bg-white/95 backdrop-blur border-b border-slate-200 p-4 sticky top-0 z-30 shadow-xs">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {(currentUser.role === "super_admin" || currentUser.role === "ops_manager") && (
-              <Link href="/" className="p-1 rounded bg-slate-800 text-slate-300 hover:text-white">
+              <Link href="/" className="p-1 rounded bg-slate-100 text-slate-500 hover:text-slate-900 hover:bg-slate-200">
                 <ChevronLeft className="h-4 w-4" />
               </Link>
             )}
             <div>
-              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
                 {isSupervisor ? "Field Supervisor (Read-Only)" : "Field Technician Portal"}
               </div>
-              <div className="text-sm font-bold text-white flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
                 {currentUser.name}
               </div>
             </div>
@@ -286,26 +309,26 @@ export default function FieldStaffPage() {
 
           {(currentUser.role === "super_admin" || currentUser.role === "ops_manager") && (
             <Link href="/">
-              <Button size="sm" variant="outline" className="h-7 text-[11px] bg-slate-800 text-slate-200 border-slate-700">
+              <Button size="sm" variant="outline" className="h-7 text-[11px]">
                 Admin Web
               </Button>
             </Link>
           )}
         </div>
 
-        {/* Job Selector Tab Bar */}
+        {/* Job Selector Tab Bar — Today's assigned jobs */}
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
           {assignedJobs.map((j) => (
             <button
               key={j.id}
               onClick={() => setSelectedJobId(j.id)}
-              className={`px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-all ${
+              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all border ${
                 j.id === currentJob?.id
-                  ? "bg-white text-slate-900 shadow-sm font-bold"
-                  : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  ? "bg-rose-500 text-white border-rose-500 shadow-sm font-semibold"
+                  : "bg-white text-slate-600 border-slate-200 hover:border-rose-300"
               }`}
             >
-              {j.id} • {j.status}
+              {j.id} • {j.status.replace("_", " ")}
             </button>
           ))}
         </div>
@@ -326,7 +349,7 @@ export default function FieldStaffPage() {
 
       {/* Server-rejected transition banner (authoritative error, not a fake success) */}
       {currentTransitionError && (
-        <div className="w-full max-w-md p-3 bg-rose-600 text-white text-xs font-semibold shadow-md flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+        <div className="w-full max-w-md p-3 bg-red-600 text-white text-xs font-semibold shadow-md flex items-center justify-between animate-in fade-in slide-in-from-top-2">
           <span className="flex items-center gap-1.5">
             <AlertTriangle className="h-4 w-4" />
             {currentTransitionError}
@@ -337,11 +360,11 @@ export default function FieldStaffPage() {
       {/* Mobile Main Body */}
       {!currentJob ? (
         <main className="w-full max-w-md p-6 text-center space-y-4 mt-8">
-          <div className="h-14 w-14 rounded-2xl bg-white border border-slate-200 text-slate-400 flex items-center justify-center mx-auto shadow-xs">
+          <div className="h-14 w-14 rounded-lg bg-white border border-slate-200 text-slate-400 flex items-center justify-center mx-auto shadow-xs">
             <Smartphone className="h-7 w-7 text-blue-600" />
           </div>
           <div className="space-y-1">
-            <h3 className="text-sm font-bold text-slate-900">No Assigned Jobs</h3>
+            <h3 className="text-sm font-semibold text-slate-900">No Assigned Jobs</h3>
             <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
               You currently have no assigned field appointments. Once operations assigns a job to you directly, it will automatically appear here with address directions and your workflow controls.
             </p>
@@ -349,7 +372,7 @@ export default function FieldStaffPage() {
           {(currentUser.role === "super_admin" || currentUser.role === "ops_manager") && (
             <div className="pt-2">
               <Link href="/dispatcher">
-                <Button size="sm" className="bg-slate-900 text-white text-xs h-9">
+                <Button size="sm" className="bg-rose-500 text-white text-xs h-9">
                   View Dispatch Queue
                 </Button>
               </Link>
@@ -359,23 +382,23 @@ export default function FieldStaffPage() {
       ) : (
         <main className="w-full max-w-md p-4 space-y-4">
           {/* Active Job Card */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3">
+          <div id="field-job" className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3 scroll-mt-24">
             <div className="flex items-center justify-between">
-              <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+              <span className="font-mono text-xs font-semibold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
                 {currentJob.id}
               </span>
               <JobStatusBadge status={currentJob.status} size="sm" />
             </div>
 
             <div className="space-y-1">
-              <h2 className="text-base font-bold text-slate-900 leading-tight">
+              <h2 className="text-base font-semibold text-slate-900 leading-tight">
                 {customer?.name}
               </h2>
               <p className="text-xs text-slate-600 font-medium">
                 {service?.name}
               </p>
               <div className="flex items-start gap-1.5 text-xs text-slate-500 pt-1">
-                <MapPin className="h-3.5 w-3.5 text-rose-500 shrink-0 mt-0.5" />
+                <MapPin className="h-3.5 w-3.5 text-zinc-400 shrink-0 mt-0.5" />
                 <span>{property?.address}</span>
               </div>
             </div>
@@ -383,7 +406,7 @@ export default function FieldStaffPage() {
             {/* Assigned workers on this job (dynamic roster) */}
             {coWorkers.length > 0 && (
               <div className="pt-1 border-t border-slate-100">
-                <span className="text-[10px] uppercase font-bold text-slate-400">
+                <span className="text-[10px] font-semibold text-slate-400">
                   Assigned Field Workers
                 </span>
                 <div className="flex flex-wrap gap-1.5 pt-1">
@@ -427,15 +450,15 @@ export default function FieldStaffPage() {
           </div>
 
           {/* PRIMARY WORKFLOW ACTION BUTTON (Large Touch Target) */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm space-y-3">
+            <div className="text-xs font-semibold text-slate-400">
               Next Required Step
             </div>
 
             {/* Supervisor view: ops_manager observes without executing */}
             {isSupervisor && !["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_REQUIRED", "REWORK_COMPLETED", "REINSPECTION", "CUSTOMER_APPROVAL", "COMPLETED", "CLOSED", "CANCELLED"].includes(currentJob.status) && (
               <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-xs space-y-1">
-                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                <div className="font-semibold text-slate-800 flex items-center gap-1.5">
                   <Eye className="h-4 w-4" />
                   Supervisor View — read-only
                 </div>
@@ -448,7 +471,7 @@ export default function FieldStaffPage() {
               <Button
                 onClick={handleMarkArrived}
                 disabled={isProcessingAction}
-                className="w-full h-12 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-sm"
+                className="w-full h-12 text-sm font-semibold bg-rose-500 text-white hover:bg-rose-600 rounded-lg shadow-sm"
               >
                 {isProcessingAction ? (
                   <>
@@ -471,7 +494,7 @@ export default function FieldStaffPage() {
                   <>
                     <Button
                       onClick={() => setIsOtpOpen(true)}
-                      className="w-full h-12 text-sm font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg shadow-sm"
+                      className="w-full h-12 text-sm font-semibold bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg shadow-sm"
                     >
                       <KeyRound className="h-4 w-4 mr-2" />
                       Enter Customer OTP to Unlock Entry
@@ -493,7 +516,7 @@ export default function FieldStaffPage() {
               <Button
                 onClick={handleStartJob}
                 disabled={isProcessingAction}
-                className="w-full h-12 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm"
+                className="w-full h-12 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm"
               >
                 {isProcessingAction ? (
                   <>
@@ -524,7 +547,7 @@ export default function FieldStaffPage() {
                   <Button
                     onClick={handleCompleteWork}
                     disabled={isProcessingAction}
-                    className="w-full h-12 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-sm"
+                    className="w-full h-12 text-sm font-semibold bg-rose-500 text-white hover:bg-rose-600 rounded-lg shadow-sm"
                   >
                     {isProcessingAction ? (
                       <>
@@ -549,7 +572,7 @@ export default function FieldStaffPage() {
             {/* Step 5: WORK_COMPLETED / QUALITY_CHECK / REWORK */}
             {(currentJob.status === "WORK_COMPLETED" || currentJob.status === "QUALITY_CHECK") && (
               <div className="p-4 rounded-lg bg-purple-50 border border-purple-200 text-purple-900 text-xs text-center space-y-1">
-                <div className="font-bold text-sm">Awaiting Operations Manager QC Audit</div>
+                <div className="font-semibold text-sm">Awaiting Operations Manager QC Audit</div>
                 <p className="text-purple-700 text-[11px]">
                   Operations Manager is reviewing room standards.
                 </p>
@@ -559,12 +582,12 @@ export default function FieldStaffPage() {
             {/* Step 5: REWORK loop — QC's instructions are shown verbatim with
                 a one-tap “done” action; the server advances the pipeline. */}
             {(currentJob.status === "REWORK_REQUIRED" || currentJob.status === "REWORK_COMPLETED") && (
-              <div className="p-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-900 text-xs space-y-2">
-                <div className="font-bold flex items-center gap-1.5 text-rose-700">
+              <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-900 text-xs space-y-2">
+                <div className="font-semibold flex items-center gap-1.5 text-red-700">
                   <AlertTriangle className="h-4 w-4" />
                   Rework Required — QC Instructions
                 </div>
-                <p className="text-[11px] text-rose-800">
+                <p className="text-[11px] text-red-800">
                   The Quality Control desk flagged the items below. Fix each one on site, then mark it done — the desk is notified instantly for reinspection.
                 </p>
                 {jobRework.length > 0 && (
@@ -572,18 +595,18 @@ export default function FieldStaffPage() {
                     {jobRework.map((task) => {
                       const linkedIssue = jobIssues.find((i) => i.reworkTaskId === task.id);
                       return (
-                        <div key={task.id} className="p-2.5 rounded bg-white border border-rose-200 space-y-1.5">
+                        <div key={task.id} className="p-2.5 rounded bg-white border border-red-200 space-y-1.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {linkedIssue?.area && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-100 text-slate-700">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-100 text-slate-700">
                                 {linkedIssue.area}
                               </span>
                             )}
                             {linkedIssue?.severity && (
                               <span
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${
                                   linkedIssue.severity === "critical"
-                                    ? "bg-rose-600 text-white"
+                                    ? "bg-red-600 text-white"
                                     : linkedIssue.severity === "major"
                                     ? "bg-amber-100 text-amber-800"
                                     : "bg-slate-200 text-slate-700"
@@ -599,7 +622,7 @@ export default function FieldStaffPage() {
                               size="sm"
                               disabled={isProcessingAction}
                               onClick={() => handleReworkDone(task.id)}
-                              className="h-8 text-[11px] bg-rose-600 hover:bg-rose-700 text-white"
+                              className="h-8 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white"
                             >
                               {isProcessingAction ? (
                                 <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -619,7 +642,7 @@ export default function FieldStaffPage() {
                   </div>
                 )}
                 {jobRework.length === 0 && (
-                  <p className="text-[11px] text-rose-800 italic">
+                  <p className="text-[11px] text-red-800 italic">
                     Syncing rework instructions from the QC desk…
                   </p>
                 )}
@@ -628,7 +651,7 @@ export default function FieldStaffPage() {
 
             {currentJob.status === "CUSTOMER_APPROVAL" && (
               <div className="p-4 rounded-lg bg-teal-50 border border-teal-200 text-teal-900 text-xs text-center space-y-1">
-                <div className="font-bold text-sm">QC Passed! With Customer for Sign-Off</div>
+                <div className="font-semibold text-sm">QC Passed! With Customer for Sign-Off</div>
                 <p className="text-teal-700 text-[11px]">
                   Customer has received their digital sign-off link.
                 </p>
@@ -637,7 +660,7 @@ export default function FieldStaffPage() {
 
             {currentJob.status === "COMPLETED" && (
               <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs text-center space-y-1">
-                <div className="font-bold text-sm">Job Successfully Completed</div>
+                <div className="font-semibold text-sm">Job Successfully Completed</div>
                 <p className="text-emerald-700 text-[11px]">
                   Digital record archived and customer invoice paid.
                 </p>
@@ -646,9 +669,9 @@ export default function FieldStaffPage() {
           </div>
 
           {/* Area Checklist Card */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+          <div id="field-checklist" className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3 scroll-mt-24">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              <span className="text-xs font-semibold text-slate-500">
                 Service Checklist
               </span>
               <span className="text-xs font-semibold text-slate-800">
@@ -687,11 +710,11 @@ export default function FieldStaffPage() {
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold uppercase px-1.5 py-0.2 rounded bg-slate-200/80 text-slate-700">
+                      <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-slate-200/80 text-slate-700">
                         {item.area}
                       </span>
                       {item.critical && (
-                        <span className="text-[9px] font-semibold text-rose-600">
+                        <span className="text-[9px] font-semibold text-red-600">
                           *Mandatory
                         </span>
                       )}
@@ -706,16 +729,16 @@ export default function FieldStaffPage() {
           </div>
 
           {/* Photo Evidence Section */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+          <div id="field-photos" className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3 scroll-mt-24">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              <span className="text-xs font-semibold text-slate-500">
                 Photo Proof ({currentPhotos.length})
               </span>
               {canExecuteFieldWork && (
                 <Button
                   size="sm"
                   onClick={() => setShowPhotoModal(true)}
-                  className="h-7 text-xs bg-slate-900 text-white px-2.5 font-medium"
+                  className="h-7 text-xs bg-rose-500 text-white px-2.5 font-medium"
                 >
                   <Camera className="h-3.5 w-3.5 mr-1" />
                   Add Photo
@@ -733,7 +756,7 @@ export default function FieldStaffPage() {
                   <div className="aspect-video relative bg-slate-200">
                     <img src={p.photoUrl} alt={p.area} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" />
                     <span
-                      className={`absolute top-1 left-1 px-1 py-0.2 rounded text-[9px] font-bold uppercase text-white ${
+                      className={`absolute top-1 left-1 px-1 py-0.2 rounded text-[9px] font-semibold text-white ${
                         p.photoType === "before" ? "bg-amber-600" : "bg-emerald-600"
                       }`}
                     >
@@ -766,9 +789,9 @@ export default function FieldStaffPage() {
       {/* Add Photo Modal */}
       {showPhotoModal && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-sm w-full p-4 space-y-3">
+          <div className="bg-white rounded-lg max-w-sm w-full p-4 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="text-sm font-bold text-slate-900">Upload Evidence Photo</h3>
+              <h3 className="text-sm font-semibold text-slate-900">Upload Evidence Photo</h3>
               <button onClick={() => setShowPhotoModal(false)}>
                 <X className="h-4 w-4 text-slate-400" />
               </button>
@@ -782,11 +805,13 @@ export default function FieldStaffPage() {
                   onChange={(e) => setPhotoArea(e.target.value)}
                   className="w-full h-9 rounded-md border border-slate-200 px-2 bg-white"
                 >
-                  <option value="Kitchen Chimney & Baffle">Kitchen Chimney & Baffle</option>
-                  <option value="Master Bathroom Shower Glass">Master Bathroom Shower Glass</option>
-                  <option value="Kitchen Gas Hob & Granite">Kitchen Gas Hob & Granite</option>
-                  <option value="Living Room French Windows">Living Room French Windows</option>
-                  <option value="Balcony Floor Buffing">Balcony Floor Buffing</option>
+                  {/* §7 canonical areas — matches the gallery grouping */}
+                  <option value="Living Room">Living Room</option>
+                  <option value="Bedroom">Bedroom</option>
+                  <option value="Kitchen">Kitchen</option>
+                  <option value="Bathroom">Bathroom</option>
+                  <option value="Balcony">Balcony</option>
+                  <option value="Other">Other</option>
                 </select>
               </div>
 
@@ -850,7 +875,7 @@ export default function FieldStaffPage() {
                         type="button"
                         size="sm"
                         variant="destructive"
-                        className="h-8 text-xs bg-rose-600 text-white font-semibold"
+                        className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white font-medium"
                         onClick={() => setPhotoDataUrl("")}
                       >
                         Remove
@@ -862,31 +887,31 @@ export default function FieldStaffPage() {
                     <button
                       type="button"
                       onClick={() => cameraInputRef.current?.click()}
-                      className="p-3.5 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100/70 transition-all flex flex-col items-center justify-center text-center group"
+                      className="p-3.5 rounded-lg border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100/70 transition-all flex flex-col items-center justify-center text-center group"
                     >
                       <div className="h-9 w-9 rounded-full bg-blue-600 text-white flex items-center justify-center mb-1 shadow-xs group-hover:scale-105 transition-transform">
                         <Camera className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-bold text-blue-950">Camera</span>
+                      <span className="text-xs font-semibold text-blue-950">Camera</span>
                       <span className="text-[10px] text-blue-600">Snap on-site photo</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="p-3.5 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 transition-all flex flex-col items-center justify-center text-center group"
+                      className="p-3.5 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 transition-all flex flex-col items-center justify-center text-center group"
                     >
                       <div className="h-9 w-9 rounded-full bg-slate-800 text-white flex items-center justify-center mb-1 shadow-xs group-hover:scale-105 transition-transform">
                         <Upload className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-bold text-slate-900">Gallery / Files</span>
+                      <span className="text-xs font-semibold text-slate-900">Gallery / Files</span>
                       <span className="text-[10px] text-slate-500">Upload device photo</span>
                     </button>
                   </div>
                 )}
 
                 {photoError && (
-                  <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">{photoError}</p>
+                  <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">{photoError}</p>
                 )}
               </div>
 
@@ -910,7 +935,7 @@ export default function FieldStaffPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" size="sm" disabled={photoUploading} className="bg-slate-900 text-white">
+                <Button type="submit" size="sm" disabled={photoUploading} className="">
                   {photoUploading ? "Uploading…" : "Save Photo"}
                 </Button>
               </div>
@@ -928,6 +953,58 @@ export default function FieldStaffPage() {
           title={lightboxPhoto.title}
           notes={lightboxPhoto.notes}
         />
+      )}
+
+      {/* §10 Sticky primary action — one obvious button, always in thumb reach */}
+      {currentJob && fieldPrimaryAction && (
+        <div className="fixed bottom-16 inset-x-0 z-40 px-4">
+          <div className="mx-auto max-w-md">
+            <Button
+              onClick={fieldPrimaryAction.run}
+              disabled={isProcessingAction}
+              className={cn(
+                "w-full h-12 text-sm font-semibold rounded-xl shadow-lg",
+                fieldPrimaryAction.tone === "amber"
+                  ? "bg-amber-500 hover:bg-amber-600 text-slate-950"
+                  : "bg-rose-500 hover:bg-rose-600 text-white"
+              )}
+            >
+              {isProcessingAction ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  {fieldPrimaryAction.tone === "amber" && <KeyRound className="h-4 w-4 mr-2" />}
+                  {fieldPrimaryAction.label}
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* §10 Bottom navigation — the field flow sections */}
+      {currentJob && (
+        <nav className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200">
+          <div className="mx-auto max-w-md grid grid-cols-3">
+            {[
+              { id: "field-job", label: "Job", icon: Smartphone },
+              { id: "field-checklist", label: "Checklist", icon: Layers },
+              { id: "field-photos", label: "Photos", icon: Camera },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => scrollToSection(tab.id)}
+                className="flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold text-slate-500 hover:text-rose-600 active:text-rose-600 transition-colors"
+              >
+                <tab.icon className="h-5 w-5" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </nav>
       )}
     </div>
   );

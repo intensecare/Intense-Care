@@ -270,7 +270,7 @@ export function QuoteFormDialog({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 shrink-0"
+                    className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 shrink-0"
                     onClick={() => removeRow(i)}
                     disabled={items.length === 1}
                     title="Remove line"
@@ -294,14 +294,14 @@ export function QuoteFormDialog({
               </span>
               <span className="font-semibold text-slate-900 font-mono">{formatCurrency(tax)}</span>
             </div>
-            <div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-1">
+            <div className="flex justify-between font-semibold text-slate-900 border-t border-slate-200 pt-1">
               <span>Quotation Total</span>
               <span className="font-mono">{formatCurrency(subtotal + tax)}</span>
             </div>
           </div>
 
           {error && (
-            <p className="text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+            <p className="text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
               {error}
             </p>
           )}
@@ -310,7 +310,7 @@ export function QuoteFormDialog({
             <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmitting || !canSubmit}>
+            <Button type="submit" size="sm" className="" disabled={isSubmitting || !canSubmit}>
               {isSubmitting ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />

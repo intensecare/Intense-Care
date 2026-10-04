@@ -108,18 +108,18 @@ export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
     if (isAuthenticated && currentUser && defaultPath === pathname) {
       return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-          <div className="max-w-md w-full bg-white rounded-xl border border-slate-200 p-6 shadow-sm text-center space-y-4">
-            <div className="h-12 w-12 rounded-full bg-rose-50 text-rose-600 border border-rose-200 flex items-center justify-center mx-auto">
+          <div className="max-w-md w-full bg-white rounded-lg border border-slate-200 p-6 shadow-sm text-center space-y-4">
+            <div className="h-12 w-12 rounded-full bg-red-50 text-red-600 border border-red-200 flex items-center justify-center mx-auto">
               <ShieldAlert className="h-6 w-6" />
             </div>
 
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-slate-900">
+              <h2 className="text-lg font-semibold text-slate-900">
                 Access Restricted
               </h2>
               <p className="text-xs text-slate-500 leading-relaxed">
                 Your account is signed in as <strong className="text-slate-800">{currentUser.name}</strong> with role{" "}
-                <span className="font-semibold uppercase text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded">
+                <span className="font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded">
                   {currentUser.role.replace("_", " ")}
                 </span>
                 . You do not have permission to access this page under your current user role.
@@ -128,7 +128,7 @@ export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
 
             <div className="pt-2 flex flex-col gap-2">
               <Button
-                className="w-full bg-slate-900 text-white text-xs h-9"
+                className="w-full bg-rose-500 text-white text-xs h-9"
                 onClick={() => router.push(defaultPath)}
               >
                 Go to Workspace ({defaultPath})

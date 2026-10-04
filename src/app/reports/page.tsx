@@ -165,26 +165,26 @@ export default function ReportsPage() {
       {/* Row 1: High Level Executive Metrics — all computed from live data */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
         <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Average Quality Score
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{avgQcScore}%</div>
+          <div className="text-2xl font-semibold text-slate-900 mt-1">{avgQcScore}%</div>
           <div className="text-[11px] text-emerald-600 font-medium">{firstPassRate}% First-Pass Rate</div>
         </div>
 
         <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Rework Defect Rate
           </div>
-          <div className="text-2xl font-bold text-amber-700 mt-1">{reworkRate}%</div>
+          <div className="text-2xl font-semibold text-amber-700 mt-1">{reworkRate}%</div>
           <div className="text-[11px] text-slate-400">Industry benchmark: 12%</div>
         </div>
 
         <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Customer CSAT Rating
           </div>
-          <div className="text-2xl font-bold text-amber-600 mt-1 flex items-center gap-1">
+          <div className="text-2xl font-semibold text-amber-600 mt-1 flex items-center gap-1">
             <Star className="h-5 w-5 fill-amber-400 text-amber-400" />
             {avgCsat || "—"} {avgCsat ? "/ 5.0" : ""}
           </div>
@@ -192,10 +192,10 @@ export default function ReportsPage() {
         </div>
 
         <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Repeat Client Rate
           </div>
-          <div className="text-2xl font-bold text-blue-700 mt-1">{repeatRate}%</div>
+          <div className="text-2xl font-semibold text-blue-700 mt-1">{repeatRate}%</div>
           <div className="text-[11px] text-emerald-600 font-medium">{repeatCustomers} repeat client{repeatCustomers === 1 ? "" : "s"}</div>
         </div>
       </div>
@@ -205,7 +205,7 @@ export default function ReportsPage() {
         {/* Service Revenue Distribution */}
         <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <h3 className="text-sm font-bold text-slate-900">
+            <h3 className="text-sm font-semibold text-slate-900">
               Revenue by Service Package
             </h3>
             <span className="text-xs text-slate-400">Gross Contribution</span>
@@ -216,7 +216,7 @@ export default function ReportsPage() {
               <div key={s.name} className="space-y-1 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-800">{s.name}</span>
-                  <span className="font-bold text-slate-900">
+                  <span className="font-semibold text-slate-900">
                     {formatCurrency(s.revenue)} ({s.percentage}%)
                   </span>
                 </div>
@@ -234,7 +234,7 @@ export default function ReportsPage() {
         {/* Worker Performance Matrix */}
         <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <h3 className="text-sm font-bold text-slate-900">
+            <h3 className="text-sm font-semibold text-slate-900">
               Field Worker Delivery & SLA Benchmarks
             </h3>
             <span className="text-xs text-slate-400">Performance Index</span>
@@ -252,14 +252,14 @@ export default function ReportsPage() {
                   className="p-3 rounded-lg border border-slate-100 bg-slate-50/70 text-xs flex items-center justify-between gap-3"
                 >
                   <div>
-                    <div className="font-bold text-slate-900">{w.name}</div>
+                    <div className="font-semibold text-slate-900">{w.name}</div>
                     <div className="text-[11px] text-slate-500">
                       {w.completed} job{w.completed === 1 ? "" : "s"} closed • led {w.leadJobs} (OTP holder)
                     </div>
                   </div>
 
                   <div className="text-right">
-                    <div className="font-bold text-slate-900">
+                    <div className="font-semibold text-slate-900">
                       {formatCurrency(w.revenue)}
                     </div>
                     <div className="text-[11px] text-slate-500 font-semibold">
@@ -278,7 +278,7 @@ export default function ReportsPage() {
         {/* Referral Channels */}
         <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <h3 className="text-sm font-bold text-slate-900">
+            <h3 className="text-sm font-semibold text-slate-900">
               Partner Channel Attribution & ROI
             </h3>
             <span className="text-xs text-slate-400">Conversion Funnel</span>
@@ -288,8 +288,8 @@ export default function ReportsPage() {
             {partners.map((p) => (
               <div key={p.id} className="p-3 rounded-lg border border-slate-100 text-xs space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-900">{p.name}</span>
-                  <span className="font-bold text-emerald-700">{formatCurrency(p.totalRevenueGenerated)}</span>
+                  <span className="font-semibold text-slate-900">{p.name}</span>
+                  <span className="font-semibold text-emerald-700">{formatCurrency(p.totalRevenueGenerated)}</span>
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-slate-500">
                   <span>Code: <strong className="font-mono text-slate-700">{p.code}</strong></span>
@@ -303,7 +303,7 @@ export default function ReportsPage() {
         {/* Complaint Resolution SLA */}
         <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <h3 className="text-sm font-bold text-slate-900">
+            <h3 className="text-sm font-semibold text-slate-900">
               Quality Incident & Complaint SLAs
             </h3>
             <span className="text-xs text-slate-400">Resolution Speed</span>
@@ -313,8 +313,8 @@ export default function ReportsPage() {
             {complaints.map((c) => (
               <div key={c.id} className="p-3 rounded-lg border border-slate-100 bg-slate-50/60 space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="font-mono font-bold text-slate-900">{c.jobId}</span>
-                  <span className="px-2 py-0.2 rounded text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
+                  <span className="font-mono font-semibold text-slate-900">{c.jobId}</span>
+                  <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
                     {c.status}
                   </span>
                 </div>

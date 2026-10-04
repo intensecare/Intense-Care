@@ -52,3 +52,6 @@ Thumbs.db
 .agents/
 .freebuff/
 skills-lock.json
+
+# local QA / e2e scratch
+/.e2e-tmp/

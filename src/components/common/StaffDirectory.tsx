@@ -75,11 +75,11 @@ function StatTile({ icon: Icon, label, value, tint }: {
 }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-xs">
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
         <Icon className={`h-3.5 w-3.5 ${tint}`} />
         {label}
       </div>
-      <div className="text-xl font-bold text-slate-900 mt-1">{value}</div>
+      <div className="text-xl font-semibold text-slate-900 mt-1">{value}</div>
     </div>
   );
 }
@@ -100,17 +100,17 @@ export function StaffDetailDialog({
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
-            <span className="h-10 w-10 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-sm shrink-0">
+            <span className="h-10 w-10 rounded-full bg-slate-900 text-white flex items-center justify-center font-semibold text-sm shrink-0">
               {entry.name.substring(0, 2).toUpperCase()}
             </span>
             <span className="flex-1 min-w-0">
-              <span className="block text-base font-bold text-slate-900 truncate">{entry.name}</span>
+              <span className="block text-base font-semibold text-slate-900 truncate">{entry.name}</span>
               <span className="block text-[11px] font-normal text-slate-500">
                 Field Staff — {entry.active ? "Active account" : "Disabled account"}
               </span>
             </span>
             <span
-              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold shrink-0 ${
                 entry.active ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500"
               }`}
             >
@@ -153,19 +153,19 @@ export function StaffDetailDialog({
             <StatTile icon={CalendarDays} label="Upcoming" value={s.upcomingJobs} tint="text-amber-500" />
             <StatTile icon={Crown} label="As Lead" value={s.leadJobs} tint="text-indigo-500" />
             <StatTile icon={Camera} label="Photos" value={s.photosUploaded} tint="text-sky-500" />
-            <StatTile icon={RotateCcw} label="Open Rework" value={s.openReworkTasks} tint="text-rose-600" />
+            <StatTile icon={RotateCcw} label="Open Rework" value={s.openReworkTasks} tint="text-red-600" />
           </div>
 
           {/* Open QC rework with the exact instructions */}
           {entry.openRework.length > 0 && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50/60 p-3 space-y-2">
-              <div className="font-bold text-rose-800 flex items-center gap-1.5">
+            <div className="rounded-lg border border-red-200 bg-red-50/60 p-3 space-y-2">
+              <div className="font-semibold text-red-800 flex items-center gap-1.5">
                 <RotateCcw className="h-3.5 w-3.5" />
                 Open Rework Assigned by QC ({entry.openRework.length})
               </div>
               {entry.openRework.map((r) => (
-                <div key={r.id} className="p-2 rounded bg-white border border-rose-200 text-[11px] space-y-1">
-                  <Link href={`/jobs/${r.jobId}`} className="font-mono font-bold text-slate-900 hover:underline">
+                <div key={r.id} className="p-2 rounded bg-white border border-red-200 text-[11px] space-y-1">
+                  <Link href={`/jobs/${r.jobId}`} className="font-mono font-semibold text-slate-900 hover:underline">
                     {r.jobId}
                   </Link>
                   <p className="text-slate-700">{r.instructions}</p>
@@ -178,7 +178,7 @@ export function StaffDetailDialog({
           {/* Job history */}
           <div className="rounded-lg border border-slate-200 overflow-hidden">
             <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              <span className="text-[10px] font-semibold text-slate-500">
                 Job History ({entry.jobs.length}{entry.stats.totalJobs > entry.jobs.length ? ` of ${entry.stats.totalJobs}` : ""})
               </span>
             </div>
@@ -196,9 +196,9 @@ export function StaffDetailDialog({
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-slate-900 text-[11px] truncate">{j.id}</span>
+                        <span className="font-mono font-semibold text-slate-900 text-[11px] truncate">{j.id}</span>
                         {j.isLead && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
                             Lead
                           </span>
                         )}
@@ -271,14 +271,14 @@ export function StaffDirectory({
           <StatTile icon={Briefcase} label="Field Workers" value={summary.total} tint="text-slate-500" />
           <StatTile icon={UserCheck} label="Active Accounts" value={summary.active} tint="text-emerald-600" />
           <StatTile icon={ShieldCheck} label="Currently on a Job" value={summary.onJob} tint="text-blue-600" />
-          <StatTile icon={RotateCcw} label="Open Rework Tasks" value={summary.rework} tint="text-rose-600" />
+          <StatTile icon={RotateCcw} label="Open Rework Tasks" value={summary.rework} tint="text-red-600" />
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200/90 shadow-xs overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+            <h3 className="text-xs font-semibold text-slate-900">
               Field Staff Roster ({filtered.length})
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -297,7 +297,7 @@ export function StaffDirectory({
         </div>
 
         {error && (
-          <div className="m-4 p-3 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center justify-between gap-3">
+          <div className="m-4 p-3 rounded-md bg-red-50 border border-red-200 text-red-700 text-xs flex items-center justify-between gap-3">
             <span className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               {error}
@@ -327,7 +327,7 @@ export function StaffDirectory({
                 className="p-3.5 flex items-center gap-3 hover:bg-slate-50/70 transition-colors"
               >
                 <div
-                  className={`h-9 w-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                  className={`h-9 w-9 rounded-full flex items-center justify-center font-semibold text-xs shrink-0 ${
                     e.active ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-500"
                   }`}
                 >
@@ -338,7 +338,7 @@ export function StaffDirectory({
                   <button
                     type="button"
                     onClick={() => setSelectedId(e.id)}
-                    className="font-bold text-slate-900 text-sm hover:text-indigo-700 hover:underline focus:outline-none focus:underline"
+                    className="font-semibold text-slate-900 text-sm hover:text-indigo-700 hover:underline focus:outline-none focus:underline"
                   >
                     {e.name}
                   </button>
@@ -351,15 +351,15 @@ export function StaffDirectory({
 
                 <div className="hidden sm:flex items-center gap-4 text-[11px] text-slate-500 shrink-0">
                   <span className="text-center">
-                    <span className="block font-bold text-slate-800 text-xs">{e.stats.activeJobs}</span>
+                    <span className="block font-semibold text-slate-800 text-xs">{e.stats.activeJobs}</span>
                     active
                   </span>
                   <span className="text-center">
-                    <span className="block font-bold text-slate-800 text-xs">{e.stats.completedJobs}</span>
+                    <span className="block font-semibold text-slate-800 text-xs">{e.stats.completedJobs}</span>
                     done
                   </span>
                   <span className="text-center">
-                    <span className={`block font-bold text-xs ${e.stats.openReworkTasks > 0 ? "text-rose-600" : "text-slate-800"}`}>
+                    <span className={`block font-semibold text-xs ${e.stats.openReworkTasks > 0 ? "text-red-600" : "text-slate-800"}`}>
                       {e.stats.openReworkTasks}
                     </span>
                     rework
@@ -367,7 +367,7 @@ export function StaffDirectory({
                 </div>
 
                 <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold shrink-0 ${
                     e.active ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500"
                   }`}
                 >

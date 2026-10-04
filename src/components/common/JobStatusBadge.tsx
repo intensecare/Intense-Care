@@ -9,6 +9,12 @@ interface JobStatusBadgeProps {
   showDot?: boolean;
 }
 
+/**
+ * Outline status chip with a colored dot — one shape, four semantics:
+ * neutral (zinc), success (emerald), waiting (amber), alert (red).
+ * No filled pastel backgrounds; the dot carries the hue, the label carries
+ * the meaning. Keeps the whole app's status vocabulary calm and scannable.
+ */
 export function JobStatusBadge({
   status,
   size = "md",
@@ -16,34 +22,49 @@ export function JobStatusBadge({
 }: JobStatusBadgeProps) {
   const config = JOB_STATUS_CONFIG[status] || JOB_STATUS_CONFIG.DRAFT;
 
-  // Custom refined status styling
-  const isCompletedOrPassed = status === "COMPLETED" || status === "PASS";
-  const isAlertOrRework = status === "REWORK_REQUIRED" || status === "CANCELLED";
+  const tone =
+    status === "COMPLETED" || status === "PASS"
+      ? "success"
+      : status === "REWORK_REQUIRED" || status === "CANCELLED"
+      ? "alert"
+      : status === "SCHEDULED" ||
+        status === "QUALITY_CHECK" ||
+        status === "CUSTOMER_APPROVAL" ||
+        status === "FEEDBACK_REQUESTED" ||
+        status === "REINSPECTION" ||
+        status === "REWORK_COMPLETED"
+      ? "waiting"
+      : "neutral";
+
+  const tones = {
+    neutral: {
+      chip: "border-zinc-200 text-zinc-600",
+      dot: "bg-zinc-400",
+    },
+    success: {
+      chip: "border-emerald-200 text-emerald-700",
+      dot: "bg-emerald-500",
+    },
+    waiting: {
+      chip: "border-amber-200 text-amber-700",
+      dot: "bg-amber-500",
+    },
+    alert: {
+      chip: "border-red-200 text-red-600",
+      dot: "bg-red-500",
+    },
+  }[tone];
 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 font-medium border rounded-md transition-colors font-sans",
-        isCompletedOrPassed
-          ? "bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold"
-          : isAlertOrRework
-          ? "bg-rose-50 text-rose-800 border-rose-200 font-bold"
-          : "bg-zinc-100/80 text-zinc-800 border-zinc-200",
-        size === "sm" ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-0.5 text-xs"
+        "inline-flex items-center gap-1.5 rounded-md border bg-white font-medium whitespace-nowrap font-sans",
+        tones.chip,
+        size === "sm" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs"
       )}
     >
       {showDot && (
-        <span
-          className={cn(
-            "rounded-full shrink-0",
-            isCompletedOrPassed
-              ? "bg-emerald-500"
-              : isAlertOrRework
-              ? "bg-rose-500"
-              : "bg-zinc-500",
-            size === "sm" ? "h-1.5 w-1.5" : "h-1.5 w-1.5"
-          )}
-        />
+        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", tones.dot)} />
       )}
       {config.label}
     </span>
@@ -55,23 +76,31 @@ export function PaymentStatusBadge({
 }: {
   status: "UNPAID" | "PARTIAL" | "PAID" | "REFUNDED" | "CANCELLED";
 }) {
+  // Same outline-dot vocabulary: only PAID is green, only UNPAID is amber.
   const styles = {
-    UNPAID: "bg-amber-50 text-amber-900 border-amber-200 font-semibold",
-    PARTIAL: "bg-zinc-100 text-zinc-800 border-zinc-200",
-    PAID: "bg-emerald-50 text-emerald-900 border-emerald-200 font-semibold",
-    REFUNDED: "bg-zinc-100 text-zinc-600 border-zinc-200",
-    CANCELLED: "bg-zinc-100 text-zinc-500 border-zinc-200",
+    UNPAID: "border-amber-200 text-amber-700",
+    PARTIAL: "border-amber-200 text-amber-700",
+    PAID: "border-emerald-200 text-emerald-700",
+    REFUNDED: "border-zinc-200 text-zinc-500",
+    CANCELLED: "border-zinc-200 text-zinc-500",
+  };
+  const dots = {
+    UNPAID: "bg-amber-500",
+    PARTIAL: "bg-amber-500",
+    PAID: "bg-emerald-500",
+    REFUNDED: "bg-zinc-300",
+    CANCELLED: "bg-zinc-300",
   };
 
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded text-[10px] font-sans font-semibold border",
+        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border bg-white text-[10px] font-medium font-sans whitespace-nowrap",
         styles[status] || styles.UNPAID
       )}
     >
-      {status}
+      <span className={cn("h-1.5 w-1.5 rounded-full", dots[status] || dots.UNPAID)} />
+      {status.charAt(0) + status.slice(1).toLowerCase()}
     </span>
   );
 }
-

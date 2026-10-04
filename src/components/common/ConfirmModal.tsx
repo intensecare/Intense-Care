@@ -42,7 +42,7 @@ export function ConfirmModal({
             ) : (
               <AlertTriangle className="h-4 w-4 text-zinc-900" />
             )}
-            <span className="text-xs font-bold text-zinc-900 uppercase tracking-wider font-sans">
+            <span className="text-xs font-semibold text-zinc-900 font-sans">
               {title}
             </span>
           </div>
@@ -73,8 +73,8 @@ export function ConfirmModal({
               onClick={handleConfirm}
               className={
                 variant === "destructive"
-                  ? "h-8 text-xs bg-black hover:bg-zinc-800 text-white font-bold border border-black"
-                  : "h-8 text-xs bg-black hover:bg-zinc-800 text-white font-medium"
+                  ? "h-8 text-xs bg-rose-500 hover:bg-rose-600 text-white font-semibold border border-rose-500"
+                  : "h-8 text-xs bg-rose-500 hover:bg-rose-600 text-white font-medium"
               }
             >
               {confirmText}

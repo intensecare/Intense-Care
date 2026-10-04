@@ -64,12 +64,22 @@ export function PrintableInvoiceModal({
           box-shadow: none !important;
           overflow: visible !important;
         }
+        html, body {
+          width: auto !important;
+          min-width: 0 !important;
+          background: #fff !important;
+        }
         #${PRINT_ROOT_ID} .print-scroll {
           max-height: none !important;
           overflow: visible !important;
-          padding: 0 !important;
+          /* The page frame lives INSIDE the content: the print dialog's margin
+             override (e.g. a sticky "None") cannot strip it, so the document
+             can never render flush to — or beyond — the paper edge. */
+          padding: 14mm !important;
         }
-        @page { size: A4 portrait; margin: 12mm; }
+        /* Full-bleed page: the document supplies its own margins. Chrome also
+           suppresses its header/footer UI when the @page margin is 0. */
+        @page { size: A4 portrait; margin: 0; }
       }
     `;
     document.head.appendChild(style);
@@ -124,13 +134,13 @@ export function PrintableInvoiceModal({
     <div data-print-overlay="true" className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <div
         id={PRINT_ROOT_ID}
-        className="bg-white rounded-xl shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden my-8 max-h-[90vh] flex flex-col"
+        className="bg-white rounded-lg shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden my-8 max-h-[90vh] flex flex-col"
       >
         {/* Modal action bar (hidden on print) */}
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between print:hidden shrink-0">
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-blue-600" />
-            <span className="text-sm font-bold text-slate-900">
+            <span className="text-sm font-semibold text-slate-900">
               Tax Invoice — #{invoice.invoiceNumber}
             </span>
           </div>
@@ -149,7 +159,7 @@ export function PrintableInvoiceModal({
             <Button
               onClick={handlePrint}
               size="sm"
-              className="h-8 text-xs bg-slate-900 text-white gap-1.5"
+              className="h-8 text-xs bg-rose-500 text-white gap-1.5"
             >
               <Printer className="h-3.5 w-3.5" />
               Print / Save PDF
@@ -161,11 +171,11 @@ export function PrintableInvoiceModal({
         </div>
 
         {/* ============ PRINTABLE DOCUMENT ============ */}
-        <div className="print-scroll p-8 overflow-y-auto flex-1 space-y-5 text-slate-800 print:p-0 print:overflow-visible" style={{ printColorAdjust: "exact", WebkitPrintColorAdjust: "exact" }}>
+        <div className="print-scroll p-8 overflow-y-auto flex-1 space-y-5 text-slate-800 print:overflow-visible" style={{ printColorAdjust: "exact", WebkitPrintColorAdjust: "exact" }}>
           {/* Header: company identity | document meta */}
           <div className="flex items-start justify-between gap-6 border-b-2 border-slate-900 pb-5">
             <div className="min-w-0">
-              <h1 className="text-xl font-black text-slate-900 tracking-tight leading-tight">
+              <h1 className="text-xl font-semibold text-slate-900 tracking-tight leading-tight">
                 {companyName}
               </h1>
               {companyTagline && (
@@ -185,10 +195,10 @@ export function PrintableInvoiceModal({
             </div>
 
             <div className="text-right shrink-0">
-              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              <div className="text-[10px] font-semibold text-slate-400">
                 Tax Invoice
               </div>
-              <div className="text-lg font-bold text-slate-900 font-mono mt-1">
+              <div className="text-lg font-semibold text-slate-900 font-mono mt-1">
                 {invoice.invoiceNumber}
               </div>
               <div className="text-xs text-slate-600 mt-2 space-y-0.5">
@@ -205,12 +215,12 @@ export function PrintableInvoiceModal({
                 )}
               </div>
               <span
-                className={`inline-block mt-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                className={`inline-block mt-2 px-3 py-1 rounded-md text-[10px] font-semibold border ${
                   invoice.status === "PAID"
                     ? "bg-emerald-100 text-emerald-800 border-emerald-300"
                     : invoice.status === "PARTIAL"
                     ? "bg-amber-100 text-amber-800 border-amber-300"
-                    : "bg-rose-100 text-rose-800 border-rose-300"
+                    : "bg-red-100 text-red-800 border-rose-300"
                 }`}
               >
                 {invoice.status === "PAID" ? "Paid" : invoice.status === "PARTIAL" ? "Partially Paid" : "Unpaid"}
@@ -221,20 +231,20 @@ export function PrintableInvoiceModal({
           {/* Parties: billed-to | service property | booking window */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
             <div className="sm:col-span-1">
-              <span className="font-semibold text-slate-400 uppercase tracking-wider text-[10px] block mb-1">
+              <span className="font-semibold text-slate-400 text-[10px] block mb-1">
                 Billed To
               </span>
-              <div className="font-bold text-slate-900 text-sm">{customer?.name || "—"}</div>
+              <div className="font-semibold text-slate-900 text-sm">{customer?.name || "—"}</div>
               {customer?.address && <div className="text-slate-600 mt-0.5">{customer.address}</div>}
               {customer?.phone && <div className="text-slate-600">{customer.phone}</div>}
               {customer?.email && <div className="text-slate-600">{customer.email}</div>}
             </div>
 
             <div className="sm:col-span-1">
-              <span className="font-semibold text-slate-400 uppercase tracking-wider text-[10px] block mb-1">
+              <span className="font-semibold text-slate-400 text-[10px] block mb-1">
                 Service Location
               </span>
-              <div className="font-bold text-slate-900">{property?.title || "—"}</div>
+              <div className="font-semibold text-slate-900">{property?.title || "—"}</div>
               {property?.address && <div className="text-slate-600 mt-0.5">{property.address}</div>}
               {(property?.city || property?.postalCode) && (
                 <div className="text-slate-500">
@@ -244,12 +254,12 @@ export function PrintableInvoiceModal({
             </div>
 
             <div className="sm:col-span-1">
-              <span className="font-semibold text-slate-400 uppercase tracking-wider text-[10px] block mb-1">
+              <span className="font-semibold text-slate-400 text-[10px] block mb-1">
                 Service Window
               </span>
               {job ? (
                 <>
-                  <div className="font-bold text-slate-900">{formatDate(job.scheduledDate)}</div>
+                  <div className="font-semibold text-slate-900">{formatDate(job.scheduledDate)}</div>
                   <div className="text-slate-600">{job.scheduledTimeSlot}</div>
                   {job.completedAt && (
                     <div className="text-slate-500 mt-1">Completed: {formatDate(job.completedAt)}</div>
@@ -264,7 +274,7 @@ export function PrintableInvoiceModal({
           {/* Line items */}
           <table className="w-full text-xs text-left border-collapse">
             <thead>
-              <tr className="bg-slate-900 text-white uppercase text-[10px]">
+              <tr className="bg-slate-900 text-white text-[10px]">
                 <th className="py-2.5 px-3 rounded-l-md font-semibold">#</th>
                 <th className="py-2.5 font-semibold">Description of Services</th>
                 {sacCode && <th className="py-2.5 text-center font-semibold">SAC</th>}
@@ -276,7 +286,7 @@ export function PrintableInvoiceModal({
               <tr className="border-b border-slate-200 align-top">
                 <td className="py-3 px-3 text-slate-500">1</td>
                 <td className="py-3 pr-4">
-                  <div className="font-bold text-slate-900 text-sm">
+                  <div className="font-semibold text-slate-900 text-sm">
                     {service?.name || (job ? `Cleaning services per booking ${job.id}` : "Cleaning services")}
                   </div>
                   {service?.description && (
@@ -288,7 +298,7 @@ export function PrintableInvoiceModal({
                 </td>
                 {sacCode && <td className="py-3 text-center font-mono text-slate-600">{sacCode}</td>}
                 <td className="py-3 text-center font-medium text-slate-700">1</td>
-                <td className="py-3 text-right pr-3 font-bold text-slate-900 text-sm">
+                <td className="py-3 text-right pr-3 font-semibold text-slate-900 text-sm">
                   {formatCurrency(invoice.subtotal)}
                 </td>
               </tr>
@@ -298,7 +308,7 @@ export function PrintableInvoiceModal({
           {/* Totals + amount in words */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 items-start">
             <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 leading-relaxed">
-              <span className="font-semibold text-slate-400 uppercase tracking-wider text-[10px] block mb-1">
+              <span className="font-semibold text-slate-400 text-[10px] block mb-1">
                 Amount in Words
               </span>
               {words ? `INR ${words} Only` : "—"}
@@ -325,7 +335,7 @@ export function PrintableInvoiceModal({
                   <span className="font-semibold text-slate-900">{formatCurrency(invoice.tax)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-slate-900 font-bold text-sm border-t-2 border-slate-900 pt-2">
+              <div className="flex justify-between text-slate-900 font-semibold text-sm border-t-2 border-slate-900 pt-2">
                 <span>Total:</span>
                 <span>{formatCurrency(invoice.total)}</span>
               </div>
@@ -333,7 +343,7 @@ export function PrintableInvoiceModal({
                 <span>Amount Paid:</span>
                 <span>{formatCurrency(invoice.amountPaid)}</span>
               </div>
-              <div className="flex justify-between text-rose-700 font-bold pt-1.5 border-t border-dashed border-slate-300">
+              <div className="flex justify-between text-red-700 font-semibold pt-1.5 border-t border-dashed border-slate-300">
                 <span>Balance Due:</span>
                 <span>{formatCurrency(invoice.balanceDue)}</span>
               </div>
@@ -348,12 +358,12 @@ export function PrintableInvoiceModal({
           {/* Settlement history */}
           {payments.length > 0 && (
             <div className="border-t border-slate-200 pt-4">
-              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+              <h4 className="text-[10px] font-semibold text-slate-400 mb-2">
                 Payment History
               </h4>
               <table className="w-full text-[11px]">
                 <thead>
-                  <tr className="text-slate-400 uppercase text-[9px] border-b border-slate-200">
+                  <tr className="text-slate-400 text-[9px] border-b border-slate-200">
                     <th className="py-1.5 text-left font-semibold">Date</th>
                     <th className="py-1.5 text-left font-semibold">Method</th>
                     <th className="py-1.5 text-left font-semibold">Reference</th>
@@ -364,9 +374,9 @@ export function PrintableInvoiceModal({
                   {payments.map((p) => (
                     <tr key={p.id}>
                       <td className="py-1.5 text-slate-600">{formatDate(p.paidAt)}</td>
-                      <td className="py-1.5 text-slate-700 font-semibold uppercase">{p.paymentMethod.replace(/_/g, " ")}</td>
+                      <td className="py-1.5 text-slate-700 font-semibold">{p.paymentMethod.replace(/_/g, " ")}</td>
                       <td className="py-1.5 text-slate-500 font-mono">{p.transactionReference || "—"}</td>
-                      <td className="py-1.5 text-right font-bold text-emerald-700">
+                      <td className="py-1.5 text-right font-semibold text-emerald-700">
                         +{formatCurrency(p.amount)}
                       </td>
                     </tr>
@@ -379,7 +389,7 @@ export function PrintableInvoiceModal({
           {/* Terms + signatory */}
           <div className="border-t border-slate-200 pt-4 grid grid-cols-1 sm:grid-cols-2 gap-6 text-[10px] text-slate-500 leading-relaxed">
             <div>
-              <h4 className="font-bold text-slate-400 uppercase tracking-wider text-[9px] mb-1.5">
+              <h4 className="font-semibold text-slate-400 text-[9px] mb-1.5">
                 Terms &amp; Notes
               </h4>
               <ul className="list-disc list-inside space-y-0.5">

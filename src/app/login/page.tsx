@@ -24,57 +24,60 @@ export default function LoginPage() {
       setError(result.message || "Invalid email or password.");
     }
     setSubmitting(false);
-  };
+  };  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+      {/* Brand gradient wash — echoes the site's coral→maroon hero overlay */}
+      <div className="absolute inset-x-0 top-0 h-64 bg-gradient-to-br from-rose-500/15 via-rose-900/10 to-transparent pointer-events-none" />
+      <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-rose-500/10 to-transparent pointer-events-none" />
 
-  return (
-    <div className="min-h-screen bg-zinc-50/70 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50/60 p-2.5 shadow-xs border border-rose-200/80 mb-3 overflow-hidden">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center relative">
+        <div className="inline-flex h-16 w-16 items-center justify-center rounded-lg bg-white p-3 shadow-sm border border-rose-100 mb-4 overflow-hidden">
           <img src="/logo.png" alt="Company Logo" className="h-full w-full object-contain" />
         </div>
-        <h2 className="text-xl font-bold tracking-tight text-zinc-900 uppercase font-sans">
+        <div className="mx-auto mb-3 h-1 w-16 rounded-full bg-gradient-to-r from-rose-500 to-rose-600" />
+        <h2 className="text-2xl font-semibold tracking-tight text-rose-600 font-sans">
           Intense Care Operations ERP
         </h2>
-        <p className="mt-1 text-xs text-zinc-500 max-w-sm mx-auto leading-relaxed">
+        <p className="mt-1.5 text-xs text-slate-600 max-w-sm mx-auto leading-relaxed">
           Enterprise deep cleaning operations management. Sign in with your work account.
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-8 px-4 border border-zinc-200 sm:rounded-xl shadow-xs sm:px-10 space-y-6">
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative">
+        <div className="bg-white py-8 px-4 border border-slate-200 sm:rounded-lg shadow-sm sm:px-10 space-y-6">
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-zinc-700">Email Address</label>
+              <label className="text-xs font-semibold text-slate-700">Email Address</label>
               <div className="relative">
-                <Mail className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Mail className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <Input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   autoComplete="email"
                   required
-                  className="pl-9 text-xs focus-visible:ring-rose-500 focus-visible:border-rose-500"
+                  className="pl-9 text-xs"
                 />
               </div>
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-zinc-700">Password</label>
+              <label className="text-xs font-semibold text-slate-700">Password</label>
               <div className="relative">
-                <Lock className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Lock className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <Input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
                   required
-                  className="pl-9 text-xs focus-visible:ring-rose-500 focus-visible:border-rose-500"
+                  className="pl-9 text-xs"
                 />
               </div>
             </div>
 
             {error && (
-              <div className="flex items-start gap-2 p-2.5 rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs">
                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>{error}</span>
               </div>
@@ -83,7 +86,7 @@ export default function LoginPage() {
             <Button
               type="submit"
               disabled={submitting}
-              className="w-full bg-rose-600 hover:bg-rose-700 text-white text-xs h-9 shadow-xs font-bold"
+              className="w-full text-white text-xs h-10 shadow-sm font-semibold"
             >
               {submitting ? (
                 <>
@@ -100,7 +103,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <div className="text-center mt-6 text-xs text-zinc-500">
+        <div className="text-center mt-6 text-xs text-slate-500">
           <p>Accounts are provisioned by your administrator.</p>
           <p className="mt-1">
             Customers sign off jobs via secure token links without needing an account.

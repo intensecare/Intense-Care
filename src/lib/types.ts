@@ -651,5 +651,71 @@ export interface AuditLog {
   timestamp: string;
 }
 
+/* ------------------------------------------------------------------------
+ * §2 AMC — recurring home-maintenance contracts (NRI-with-elderly-parents
+ * use case). Contracts auto-generate visits; a completed visit carries the
+ * NRI report (work done, photos, QC, issues, recommendations, next visit).
+ * ---------------------------------------------------------------------- */
+
+export type AmcVisitStatus =
+  | "SCHEDULED"
+  | "REMINDED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "RESCHEDULED";
+
+export interface AmcVisit {
+  id: string;
+  contractId: string;
+  visitNumber: number;
+  scheduledDate: string;
+  scheduledSlot?: string | null;
+  status: AmcVisitStatus;
+  jobId?: string | null;
+  arrivedAt?: string | null;
+  completedAt?: string | null;
+  otpVerified?: boolean;
+  staffIds: string[];
+  staffNames?: string[];
+  qcScore?: number | null;
+  issuesFound?: string | null;
+  recommendations?: string | null;
+  nriApproved?: boolean | null;
+  nriNotes?: string | null;
+  reminderSentAt?: string | null;
+  createdAt: string;
+}
+
+export interface AmcContract {
+  id: string;
+  contractNumber: string;
+  customerId: string;
+  propertyId: string;
+  serviceId?: string | null;
+  customerName?: string | null;
+  propertyTitle?: string | null;
+  serviceName?: string | null;
+  nriContactName?: string | null;
+  nriContactPhone?: string | null;
+  nriContactEmail?: string | null;
+  localContactName?: string | null;
+  localContactPhone?: string | null;
+  startDate: string;
+  endDate: string;
+  contractValue: number;
+  includedServices: string[];
+  visitCount: number;
+  frequency: string; // WEEKLY | BIMONTHLY | MONTHLY | QUARTERLY | CUSTOM
+  assignedStaffIds: string[];
+  assignedStaffNames?: string[];
+  emergencyContact?: string | null;
+  paymentStatus: "PENDING" | "PARTIAL" | "PAID";
+  status: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | "CANCELLED";
+  notes?: string | null;
+  createdAt: string;
+  visits: AmcVisit[];
+}
+
 
 

@@ -181,7 +181,7 @@ export function OTPModal({ job, isOpen, onClose, onSuccess }: OTPModalProps) {
           {devCode && (
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900">
               <span className="font-semibold">DEV MODE —</span> no SMS sent. OTP:{" "}
-              <span className="font-mono text-base font-bold tracking-widest">{devCode}</span>
+              <span className="font-mono text-base font-semibold tracking-widest">{devCode}</span>
             </div>
           )}
           <div className="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs space-y-1">
@@ -210,7 +210,7 @@ export function OTPModal({ job, isOpen, onClose, onSuccess }: OTPModalProps) {
 
           {/* OTP Input */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+            <label className="text-xs font-semibold text-slate-600">
               Enter 6-Digit OTP
             </label>
             <Input
@@ -221,13 +221,13 @@ export function OTPModal({ job, isOpen, onClose, onSuccess }: OTPModalProps) {
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
               placeholder="• • • • • •"
-              className="text-center text-xl tracking-[0.5em] font-mono font-bold h-12"
+              className="text-center text-xl tracking-[0.5em] font-mono font-semibold h-12"
               autoFocus
             />
           </div>
 
           {error && (
-            <div className="flex items-start gap-2 p-2.5 rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+            <div className="flex items-start gap-2 p-2.5 rounded bg-red-50 border border-red-200 text-red-700 text-xs">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
@@ -269,7 +269,7 @@ export function OTPModal({ job, isOpen, onClose, onSuccess }: OTPModalProps) {
               type="submit"
               size="sm"
               disabled={isSubmitting || isSending || code.length !== 6}
-              className="bg-slate-900 hover:bg-slate-800"
+              className="bg-rose-500 hover:bg-rose-600 text-white shadow-sm"
             >
               <ShieldCheck className="h-4 w-4 mr-1.5" />
               {isSubmitting ? "Verifying..." : "Verify & Unlock Job"}

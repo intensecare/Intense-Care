@@ -16,7 +16,7 @@ import { getOpsDateVisibility } from "@/lib/ops-visibility";
 import { Link2, Copy, Check, Loader2, MessageCircle } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getAllowedTransitions, JOB_STATUS_CONFIG } from "@/lib/state-machine";
-import { formatCurrency, formatDate, formatDateTime, timeAgo, formatTimeSlot, buildWhatsAppShareUrl } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, timeAgo, formatTimeSlot, buildWhatsAppShareUrl, cn } from "@/lib/utils";
 import type { JobActivityEvent } from "@/lib/types";
 import {
   Calendar,
@@ -66,24 +66,24 @@ import { Input } from "@/components/ui/input";
 import { compressImageForUpload } from "@/lib/image-compress";
 
 /**
- * Pipeline stage → the tab that matters at that stage. The job file follows
- * the job: Draft/Scheduled opens Overview, Assigned opens the crew checklist,
- * execution opens evidence photos, QC states open Quality & Rework, and the
- * customer-facing stages open Sign-off & Feedback.
+ * Pipeline stage → the display section that matters at that stage (PDF §4).
+ * The job file follows the job: Draft/Scheduled opens Overview, execution
+ * states open Work Details (checklist + before/after photos), QC states open
+ * Quality, and the customer-facing stages open Customer Handover.
  */
 const STAGE_TAB_MAP: Record<string, string> = {
   DRAFT: "overview",
   SCHEDULED: "overview",
-  ASSIGNED: "checklist",
-  ARRIVED: "checklist",
-  CUSTOMER_VERIFIED: "checklist",
-  IN_PROGRESS: "photos",
+  ASSIGNED: "work",
+  ARRIVED: "work",
+  CUSTOMER_VERIFIED: "work",
+  IN_PROGRESS: "work",
   WORK_COMPLETED: "qc",
   QUALITY_CHECK: "qc",
   REWORK_REQUIRED: "qc",
   REWORK_COMPLETED: "qc",
   REINSPECTION: "qc",
-  PASS: "qc",
+  PASS: "approval",
   CUSTOMER_APPROVAL: "approval",
   COMPLETED: "financials",
   FEEDBACK_REQUESTED: "approval",
@@ -106,12 +106,26 @@ const ACTIVITY_ICON: Record<string, { icon: React.ReactNode; tint: string }> = {
   CHECKLIST_UPDATED: { icon: <ClipboardCheck className="h-3.5 w-3.5" />, tint: "bg-sky-50 text-sky-600" },
   PHOTO_UPLOADED: { icon: <CameraIcon className="h-3.5 w-3.5" />, tint: "bg-blue-50 text-blue-600" },
   QC_SUBMITTED: { icon: <ShieldCheck className="h-3.5 w-3.5" />, tint: "bg-purple-50 text-purple-600" },
-  REWORK_ASSIGNED: { icon: <RotateCcw className="h-3.5 w-3.5" />, tint: "bg-rose-50 text-rose-600" },
+  REWORK_ASSIGNED: { icon: <RotateCcw className="h-3.5 w-3.5" />, tint: "bg-red-50 text-red-600" },
   REWORK_COMPLETED: { icon: <CheckCircle2 className="h-3.5 w-3.5" />, tint: "bg-amber-50 text-amber-600" },
   CUSTOMER_SIGNED: { icon: <PenLine className="h-3.5 w-3.5" />, tint: "bg-teal-50 text-teal-600" },
-  ATTENTION_REQUESTED: { icon: <AlertTriangle className="h-3.5 w-3.5" />, tint: "bg-rose-50 text-rose-600" },
+  ATTENTION_REQUESTED: { icon: <AlertTriangle className="h-3.5 w-3.5" />, tint: "bg-red-50 text-red-600" },
   FEEDBACK_RECORDED: { icon: <Star className="h-3.5 w-3.5" />, tint: "bg-amber-50 text-amber-600" },
   GOOGLE_REVIEW_CLICKED: { icon: <Star className="h-3.5 w-3.5" />, tint: "bg-emerald-50 text-emerald-600" },
+};
+
+/* --------------------------------------------------------------------------
+ * §5 Next-Action engine — ONE obvious primary action per lifecycle state.
+ * Purely presentational: every action still routes through the strict state
+ * machine (handleExecuteTransition / role-filtered allowedTransitions), so
+ * backend semantics are untouched. Staff never hunt through tabs.
+ * ------------------------------------------------------------------------ */
+type NextAction = {
+  kind: "transition" | "otp" | "assign" | "tab" | "open-link";
+  target?: string;
+  label: string;
+  hint: string;
+  tone?: "coral" | "amber";
 };
 
 export default function JobDetailPage() {
@@ -390,7 +404,7 @@ export default function JobDetailPage() {
       <AdminLayout>
         <div className="p-12 text-center bg-white rounded-lg border border-slate-200">
           <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-slate-900">Job Not Found</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Job Not Found</h2>
           <p className="text-xs text-slate-500 mt-1">
             The requested job {jobId} does not exist or has been archived.
           </p>
@@ -409,7 +423,7 @@ export default function JobDetailPage() {
       <AdminLayout>
         <div className="p-12 text-center bg-white rounded-lg border border-slate-200">
           <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-slate-900">Not Open for Dispatch Yet</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Not Open for Dispatch Yet</h2>
           <p className="text-xs text-slate-500 mt-1">
             Job {jobId} is scheduled for <strong>{job.scheduledDate}</strong>. It will appear here as
             soon as it is assigned to you.
@@ -436,6 +450,18 @@ export default function JobDetailPage() {
         `Hello${customer?.name ? " " + customer.name : ""}, your deep cleaning service handover is ready. View the before/after photos and approve the completed work here: ${handoverLink}`
       )
     : null;
+
+  // §6 Handover lifecycle: Not Opened → Opened → Approval Pending → Approved / Issue Raised
+  const handoverStage = !handoverLink
+    ? 0
+    : signOff?.signStatus === "APPROVED"
+    ? 3
+    : signOff?.signStatus === "ATTENTION_REQUESTED"
+    ? 4
+    : signOff
+    ? 2
+    : 1;
+  const HANDOVER_STAGES = ["Not Opened", "Opened", "Approval Pending", "Approved", "Issue Raised"] as const;
   const assignedWorkers = (job.assignedStaffIds || []).map((id, idx) => {
     const viaStore = users.find((u) => u.id === id);
     // Staff viewers cannot read the user directory — fall back to the
@@ -479,6 +505,93 @@ export default function JobDetailPage() {
       action.status !== "ASSIGNED" &&
       (currentRole === "super_admin" || action.allowedRoles.includes(currentRole))
   );
+
+  // --- §5 Next-Action: derive the single primary action for this state ---
+  const otpStillNeeded = job.status === "ARRIVED" && job.otpVerification.status !== "verified";
+  const teamUnassigned = job.assignedStaffIds.length === 0;
+  const hasTransition = (target: string) => allowedTransitions.some((t) => t.status === target);
+
+  const nextAction: NextAction | null = (() => {
+    switch (job.status) {
+      case "DRAFT":
+        return hasTransition("SCHEDULED")
+          ? { kind: "transition", target: "SCHEDULED", label: "Confirm Schedule", hint: "Lock the date & time slot with the customer." }
+          : null;
+      case "SCHEDULED":
+        return teamUnassigned && canManage
+          ? { kind: "assign", label: "Assign Field Team", hint: "Pick the crew — the first worker becomes the lead." }
+          : hasTransition("ASSIGNED")
+          ? { kind: "transition", target: "ASSIGNED", label: "Dispatch Field Team", hint: "Push the crew list to the field app." }
+          : null;
+      case "ASSIGNED":
+        return hasTransition("ARRIVED")
+          ? { kind: "transition", target: "ARRIVED", label: "Mark Arrival On Site", hint: "The worker taps arrived in the field app." }
+          : null;
+      case "ARRIVED":
+        return otpStillNeeded
+          ? { kind: "otp", label: "Verify Customer OTP", hint: "The customer reads the OTP to the lead worker.", tone: "amber" }
+          : null;
+      case "CUSTOMER_VERIFIED":
+        return hasTransition("IN_PROGRESS")
+          ? { kind: "transition", target: "IN_PROGRESS", label: "Start Cleaning Job", hint: "Begin the service execution checklist." }
+          : null;
+      case "IN_PROGRESS":
+        return { kind: "tab", target: "work", label: "Continue Service Checklist", hint: "Tick tasks & upload before/after photos." };
+      case "WORK_COMPLETED":
+        return hasTransition("QUALITY_CHECK")
+          ? { kind: "transition", target: "QUALITY_CHECK", label: "Start Quality Check", hint: "Inspect every area against the QC rubric." }
+          : null;
+      case "QUALITY_CHECK":
+      case "REINSPECTION":
+        return hasTransition("PASS")
+          ? { kind: "transition", target: "PASS", label: "Pass Quality Check", hint: "Confirm the service meets the standard." }
+          : hasTransition("REWORK_REQUIRED")
+          ? { kind: "transition", target: "REWORK_REQUIRED", label: "Record Rework Required", hint: "Log defects and assign corrective tasks." }
+          : null;
+      case "REWORK_REQUIRED":
+        return hasTransition("REWORK_COMPLETED")
+          ? { kind: "transition", target: "REWORK_COMPLETED", label: "Mark Rework Completed", hint: "Close out every corrective task first." }
+          : { kind: "tab", target: "qc", label: "Review Rework Tasks", hint: "Track the corrective work in Quality." };
+      case "REWORK_COMPLETED":
+        return hasTransition("REINSPECTION")
+          ? { kind: "transition", target: "REINSPECTION", label: "Send For Reinspection", hint: "QC re-verifies the corrected areas." }
+          : null;
+      case "PASS":
+        return hasTransition("CUSTOMER_APPROVAL")
+          ? { kind: "transition", target: "CUSTOMER_APPROVAL", label: "Send Customer Handover", hint: "Mint & share the secure approval link." }
+          : null;
+      case "CUSTOMER_APPROVAL":
+        return { kind: "open-link", label: "Open Customer Handover", hint: "The customer reviews photos and approves the work." };
+      case "COMPLETED":
+      case "FEEDBACK_REQUESTED":
+        return hasTransition("CLOSED")
+          ? { kind: "transition", target: "CLOSED", label: "Close Job", hint: "Archive the completed service file." }
+          : null;
+      default:
+        return null;
+    }
+  })();
+
+  const runNextAction = () => {
+    if (!nextAction) return;
+    if (nextAction.kind === "transition" && nextAction.target) {
+      void handleExecuteTransition(nextAction.target);
+    } else if (nextAction.kind === "otp") {
+      setIsOtpModalOpen(true);
+    } else if (nextAction.kind === "assign") {
+      openAssignmentModal();
+    } else if (nextAction.kind === "tab" && nextAction.target) {
+      setActiveTab(nextAction.target);
+    } else if (nextAction.kind === "open-link") {
+      if (handoverLink) {
+        window.open(handoverLink, "_blank");
+      } else {
+        void handleGenerateHandoverLink().then(() => {
+          setActiveTab("approval");
+        });
+      }
+    }
+  };
 
   const handleExecuteTransition = async (targetStatus: any) => {
     setActionError(null);
@@ -565,92 +678,122 @@ export default function JobDetailPage() {
         }
       />
 
-      {/* State Machine Transition Action Bar */}
-      <div className="bg-slate-900 text-white rounded-lg p-4 mb-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-            Current Lifecycle State
-          </div>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-lg font-bold text-white">
-              {JOB_STATUS_CONFIG[job.status]?.label || job.status}
-            </span>
-            <span className="text-xs text-slate-300">
-              — {JOB_STATUS_CONFIG[job.status]?.shortDescription}
-            </span>
-          </div>
-        </div>
-
-        {/* Dynamic Allowed Actions for Current State */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {job.status === "ARRIVED" && job.otpVerification.status !== "verified" && isLeadViewer && (
-            <Button
-              size="sm"
-              onClick={() => setIsOtpModalOpen(true)}
-              className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold gap-1.5 h-9"
-            >
-              <KeyRound className="h-4 w-4" />
-              Enter Customer OTP (Verify Entry)
-            </Button>
-          )}
-
-          {/* Assign/manage field workers — mirrors the dispatcher's crew picker */}
-          {canManage && ["DRAFT", "SCHEDULED", "ASSIGNED"].includes(job.status) && (
-            <Button
-              size="sm"
-              onClick={openAssignmentModal}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium gap-1.5 h-9"
-            >
-              <Users className="h-4 w-4" />
-              {job.assignedStaffIds.length > 0 ? `Manage Workers (${job.assignedStaffIds.length})` : "Assign Staff"}
-            </Button>
-          )}
-
-          {allowedTransitions.map((action) => (
-            <Button
-              key={action.status}
-              size="sm"
-              variant={
-                action.buttonVariant === "destructive"
-                  ? "destructive"
-                  : action.buttonVariant === "outline"
-                  ? "outline"
-                  : "default"
-              }
-              onClick={() => handleExecuteTransition(action.status)}
-              disabled={isTransitioning}
-              className={
-                action.buttonVariant === "destructive"
-                  ? ""
-                  : action.buttonVariant === "outline"
-                  ? "bg-slate-800 text-white border-slate-700 hover:bg-slate-700"
-                  : "bg-blue-600 hover:bg-blue-500 text-white font-medium"
-              }
-            >
-              {isTransitioning ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  {action.label}
-                  <ArrowRight className="h-3.5 w-3.5 ml-1" />
-                </>
+      {/* §4/§5 Next-Action card — Current Status · What Happened · What's Next.
+          One obvious primary action per state; other legal transitions stay
+          available as quiet secondary controls. Backend machine untouched. */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 mb-6 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <div
+              className={cn(
+                "h-11 w-11 rounded-xl flex items-center justify-center border shrink-0",
+                job.status === "CANCELLED"
+                  ? "bg-red-50 text-red-600 border-red-100"
+                  : job.otpVerification.status === "verified" || job.status === "PASS" || job.status === "COMPLETED" || job.status === "CLOSED"
+                  ? "bg-emerald-50 text-emerald-600 border-emerald-100"
+                  : "bg-rose-50 text-rose-600 border-rose-100"
               )}
-            </Button>
-          ))}
+            >
+              {job.status === "CANCELLED" ? (
+                <AlertTriangle className="h-5 w-5" />
+              ) : job.otpVerification.status === "verified" || job.status === "PASS" || job.status === "COMPLETED" || job.status === "CLOSED" ? (
+                <CheckCircle2 className="h-5 w-5" />
+              ) : (
+                <Clock className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                Current Status
+              </div>
+              <div className="text-base font-semibold text-slate-900">
+                {JOB_STATUS_CONFIG[job.status]?.label || job.status}
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5 truncate max-w-xl">
+                <span className="font-medium text-slate-600">What happened: </span>
+                {activityEvents[0]?.message || JOB_STATUS_CONFIG[job.status]?.shortDescription || "—"}
+              </div>
+            </div>
+          </div>
 
-          {allowedTransitions.length === 0 && (
-            <span className="text-xs text-slate-400 italic">
-              Terminal state reached (No further transitions required)
-            </span>
-          )}
+          {/* What's Next — the ONE primary action for this state */}
+          <div className="flex items-center gap-2 flex-wrap lg:justify-end">
+            {nextAction && (nextAction.kind !== "otp" || isLeadViewer) && (
+              <div className="w-full lg:w-auto mb-1 lg:mb-0">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide lg:text-right">
+                  What's Next
+                </p>
+                <p className="text-[11px] text-slate-500 lg:text-right">{nextAction.hint}</p>
+              </div>
+            )}
+
+            {nextAction && (
+              <Button
+                size="lg"
+                onClick={runNextAction}
+                disabled={isTransitioning || (nextAction.kind === "otp" && !isLeadViewer)}
+                className={cn(
+                  "font-semibold gap-1.5 h-10 text-sm shadow-sm",
+                  nextAction.tone === "amber"
+                    ? "bg-amber-500 hover:bg-amber-600 text-slate-950 border border-amber-500"
+                    : "bg-rose-500 hover:bg-rose-600 text-white border border-rose-500"
+                )}
+              >
+                {isTransitioning ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    {nextAction.tone === "amber" && <KeyRound className="h-4 w-4" />}
+                    {nextAction.label}
+                    {nextAction.tone !== "amber" && <ArrowRight className="h-4 w-4" />}
+                  </>
+                )}
+              </Button>
+            )}
+
+            {/* Assign/manage field workers — mirrors the dispatcher's crew picker */}
+            {canManage && ["DRAFT", "SCHEDULED", "ASSIGNED"].includes(job.status) && (
+              <Button
+                size="sm"
+                onClick={openAssignmentModal}
+                variant="outline"
+                className="h-9 font-semibold gap-1.5"
+              >
+                <Users className="h-4 w-4" />
+                {job.assignedStaffIds.length > 0 ? `Manage Workers (${job.assignedStaffIds.length})` : "Assign Staff"}
+              </Button>
+            )}
+
+            {/* Every other legal transition stays reachable — quiet secondaries */}
+            {allowedTransitions
+              .filter((action) => action.status !== nextAction?.target)
+              .map((action) => (
+                <Button
+                  key={action.status}
+                  size="sm"
+                  variant={action.buttonVariant === "destructive" ? "destructive" : "outline"}
+                  onClick={() => handleExecuteTransition(action.status)}
+                  disabled={isTransitioning}
+                  className="h-8 text-[11px]"
+                >
+                  {action.label}
+                </Button>
+              ))}
+
+            {!nextAction && allowedTransitions.length === 0 && (
+              <span className="text-xs text-slate-400 italic">
+                Terminal state reached — no further actions required.
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       {actionError && (
-        <div className="mb-4 p-3 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+        <div className="mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{actionError}</span>
         </div>
@@ -662,7 +805,7 @@ export default function JobDetailPage() {
           <div className="mb-6 p-4 rounded-lg border border-teal-200 bg-teal-50/60 space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <h3 className="text-sm font-bold text-teal-950 flex items-center gap-1.5">
+                <h3 className="text-sm font-semibold text-teal-950 flex items-center gap-1.5">
                   <Link2 className="h-4 w-4 text-teal-600" />
                   Secure Customer Handover Link
                 </h3>
@@ -682,8 +825,35 @@ export default function JobDetailPage() {
               </Button>
             </div>
 
+            {/* §6 lifecycle tracker — where this handover currently sits */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {HANDOVER_STAGES.map((stage, i) => {
+                const isCurrent = handoverStage === i;
+                const isDone = handoverStage > i && handoverStage !== 4;
+                const isIssue = handoverStage === 4 && stage === "Issue Raised";
+                return (
+                  <span
+                    key={stage}
+                    className={cn(
+                      "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border",
+                      isIssue
+                        ? "bg-red-100 text-red-700 border-red-200"
+                        : isCurrent
+                        ? "bg-teal-600 text-white border-teal-600"
+                        : isDone
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : "bg-white text-slate-400 border-slate-200"
+                    )}
+                  >
+                    {isDone && <Check className="h-2.5 w-2.5" />}
+                    {stage}
+                  </span>
+                );
+              })}
+            </div>
+
             {linkError && (
-              <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">{linkError}</p>
+              <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">{linkError}</p>
             )}
 
             {handoverLink && (
@@ -702,6 +872,20 @@ export default function JobDetailPage() {
                   <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1 text-emerald-700 hover:bg-emerald-50">
                     <MessageCircle className="h-3 w-3" />
                     WhatsApp
+                  </Button>
+                </a>
+                <a
+                  href={
+                    handoverLink
+                      ? `sms:${customer?.phone || ""}?&body=${encodeURIComponent(
+                          `Intense Care: Your deep cleaning handover is ready. View photos & approve: ${handoverLink}`
+                        )}`
+                      : "#"
+                  }
+                >
+                  <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1">
+                    <Smartphone className="h-3 w-3" />
+                    SMS
                   </Button>
                 </a>
                 <Link href={handoverLink.replace(window.location.origin, "")} target="_blank">
@@ -737,21 +921,18 @@ export default function JobDetailPage() {
       </div>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="bg-slate-200/70 p-1">
-          <TabsTrigger value="overview">Overview & Details</TabsTrigger>
-          <TabsTrigger value="checklist">
-            Checklist ({jobChecklist.filter((c) => c.status === "completed").length}/{jobChecklist.length})
-          </TabsTrigger>
-          <TabsTrigger value="photos">
-            Evidence Photos ({jobPhotos.length})
+          <TabsTrigger value="overview">Job Overview</TabsTrigger>
+          <TabsTrigger value="work">
+            Work Details ({jobChecklist.filter((c) => c.status === "completed").length}/{jobChecklist.length} tasks · {jobPhotos.length} photos)
           </TabsTrigger>
           <TabsTrigger value="qc">
-            Quality & Rework {jobIssues.length > 0 && `(${jobIssues.length} issues)`}
+            Quality {jobIssues.length > 0 && `(${jobIssues.length} issues)`}
           </TabsTrigger>
-          <TabsTrigger value="approval">Sign-off & Feedback</TabsTrigger>
+          <TabsTrigger value="approval">Customer</TabsTrigger>
           {currentRole === "super_admin" && (
-            <TabsTrigger value="financials">Finance & Invoices</TabsTrigger>
+            <TabsTrigger value="financials">Billing</TabsTrigger>
           )}
-          <TabsTrigger value="audit">Audit Log</TabsTrigger>
+          <TabsTrigger value="audit">Activity</TabsTrigger>
         </TabsList>
 
         {/* 1. OVERVIEW TAB */}
@@ -759,12 +940,12 @@ export default function JobDetailPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Customer & Property Card */}
             <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <h3 className="text-xs font-semibold text-slate-500">
                 Customer & Property
               </h3>
 
               <div className="space-y-1">
-                <div className="text-sm font-bold text-slate-900">
+                <div className="text-sm font-semibold text-slate-900">
                   {customer?.name}
                 </div>
                 <div className="text-xs text-slate-500 flex items-center gap-1.5 font-mono">
@@ -798,12 +979,12 @@ export default function JobDetailPage() {
 
             {/* Service & Booking Details */}
             <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <h3 className="text-xs font-semibold text-slate-500">
                 Service Package
               </h3>
 
               <div className="space-y-1">
-                <div className="text-sm font-bold text-slate-900">
+                <div className="text-sm font-semibold text-slate-900">
                   {service?.name}
                 </div>
                 <div className="text-xs text-slate-400">
@@ -824,7 +1005,7 @@ export default function JobDetailPage() {
                   <>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Service Fee:</span>
-                      <span className="font-bold text-slate-900">{formatCurrency(job.amount ?? 0)}</span>
+                      <span className="font-semibold text-slate-900">{formatCurrency(job.amount ?? 0)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Payment Status:</span>
@@ -840,21 +1021,21 @@ export default function JobDetailPage() {
                   by the single “Assign Staff” action in the lifecycle bar) */}
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  <h3 className="text-xs font-semibold text-slate-500">
                     Field Workers & Security Verification
                   </h3>
                 </div>
 
               <div className="space-y-1">
                 {assignedWorkers.length === 0 ? (
-                  <div className="text-sm font-bold text-slate-900">No field workers assigned yet</div>
+                  <div className="text-sm font-semibold text-slate-900">No field workers assigned yet</div>
                 ) : (
                   <div className="space-y-1">
                     {assignedWorkers.map((w, idx) => (
                       <div key={w.id} className="text-sm text-slate-900 font-medium">
                         {w.name}
                         {idx === 0 && (
-                          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
                             Lead • OTP holder
                           </span>
                         )}
@@ -872,7 +1053,7 @@ export default function JobDetailPage() {
                     Customer Arrival OTP
                   </span>
                   <span
-                    className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-bold ${
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                       job.otpVerification.status === "verified"
                         ? "bg-emerald-100 text-emerald-800"
                         : "bg-amber-100 text-amber-800"
@@ -914,12 +1095,13 @@ export default function JobDetailPage() {
           </div>
         </TabsContent>
 
-        {/* 2. CHECKLIST TAB */}
-        <TabsContent value="checklist" className="space-y-4">
+        {/* 2. WORK DETAILS TAB — checklist, notes and before/after evidence
+            by area (PDF §4 Work Details + §7 gallery) */}
+        <TabsContent value="work" className="space-y-4">
           <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">
+                <h3 className="text-sm font-semibold text-slate-900">
                   Service Execution Checklist
                 </h3>
                 <p className="text-xs text-slate-500">
@@ -948,16 +1130,16 @@ export default function JobDetailPage() {
                           {item.area}
                         </span>
                         {item.critical && (
-                          <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">
+                          <span className="text-[10px] font-semibold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
                             Mandatory / Critical
                           </span>
                         )}
                         <span
-                          className={`px-1.5 py-0.2 rounded text-[10px] font-semibold uppercase ${
+                          className={`px-1.5 py-0.2 rounded text-[10px] font-semibold ${
                             item.status === "completed"
                               ? "bg-emerald-100 text-emerald-800"
                               : item.status === "issue"
-                              ? "bg-rose-100 text-rose-800"
+                              ? "bg-red-100 text-red-800"
                               : item.status === "skipped"
                               ? "bg-amber-100 text-amber-800"
                               : "bg-slate-100 text-slate-500"
@@ -1018,10 +1200,8 @@ export default function JobDetailPage() {
               )}
             </div>
           </div>
-        </TabsContent>
 
-        {/* 3. PHOTOS TAB */}
-        <TabsContent value="photos" className="space-y-4">
+          {/* Before/After evidence by area — grouped gallery with slider */}
           {canExecuteFieldWork ? (
             <BeforeAfterGallery
               photos={jobPhotos}
@@ -1038,24 +1218,89 @@ export default function JobDetailPage() {
 
         {/* 4. QUALITY CHECK TAB */}
         <TabsContent value="qc" className="space-y-6">
+          {/* §8 Quick visual per-area checklist — Kitchen → ✓Counter ✓Sink ✕Chimney */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Per-Area Checklist Result</h3>
+                <p className="text-xs text-slate-500">Walk each room tick by tick before scoring the audit.</p>
+              </div>
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+                {jobChecklist.filter((c) => c.status === "completed").length}/{jobChecklist.length} done
+              </span>
+            </div>
+            {jobChecklist.length === 0 ? (
+              <p className="py-6 text-center text-xs text-slate-400">No checklist generated for this service yet.</p>
+            ) : (
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {Object.entries(
+                  jobChecklist.reduce<Record<string, typeof jobChecklist>>((acc, item) => {
+                    (acc[item.area] ||= []).push(item);
+                    return acc;
+                  }, {})
+                ).map(([area, items]) => {
+                  const done = items.filter((i) => i.status === "completed").length;
+                  return (
+                    <div key={area} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-slate-900">{area}</span>
+                        <span
+                          className={cn(
+                            "text-[10px] font-semibold px-1.5 py-0.5 rounded",
+                            done === items.length ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"
+                          )}
+                        >
+                          {done}/{items.length}
+                        </span>
+                      </div>
+                      <ul className="space-y-1.5">
+                        {items.map((item) => (
+                          <li key={item.id} className="flex items-center gap-2 text-[11px]">
+                            <span
+                              className={cn(
+                                "h-4 w-4 shrink-0 rounded-full flex items-center justify-center text-[9px] font-bold",
+                                item.status === "completed"
+                                  ? "bg-emerald-500 text-white"
+                                  : item.status === "issue"
+                                  ? "bg-red-500 text-white"
+                                  : item.status === "skipped"
+                                  ? "bg-amber-400 text-white"
+                                  : "border border-slate-300 text-slate-400"
+                              )}
+                            >
+                              {item.status === "completed" ? "✓" : item.status === "issue" ? "✕" : item.status === "skipped" ? "–" : ""}
+                            </span>
+                            <span className={item.status === "completed" ? "text-slate-500" : "text-slate-800 font-medium"}>
+                              {item.task}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* QC Score Card */}
             <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <h3 className="text-xs font-semibold text-slate-500">
                 Quality Audit Result
               </h3>
 
               {qc ? (
                 <div className="space-y-3">
                   <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-extrabold text-slate-900">
+                    <span className="text-4xl font-semibold text-slate-900">
                       {qc.score}%
                     </span>
                     <span
-                      className={`text-xs font-bold uppercase px-2 py-0.5 rounded ${
+                      className={`text-xs font-semibold px-2 py-0.5 rounded ${
                         qc.status === "PASS"
                           ? "bg-emerald-100 text-emerald-800"
-                          : "bg-rose-100 text-rose-800"
+                          : "bg-red-100 text-red-800"
                       }`}
                     >
                       {qc.status}
@@ -1087,7 +1332,7 @@ export default function JobDetailPage() {
             <div className="md:col-span-2 rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">
+                  <h3 className="text-sm font-semibold text-slate-900">
                     Defects & Corrective Rework Tasks
                   </h3>
                   <p className="text-xs text-slate-500">
@@ -1137,9 +1382,9 @@ export default function JobDetailPage() {
                               {issue.area}
                             </span>
                             <span
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                                 issue.severity === "critical"
-                                  ? "bg-rose-600 text-white"
+                                  ? "bg-red-600 text-white"
                                   : issue.severity === "major"
                                   ? "bg-amber-100 text-amber-800"
                                   : "bg-slate-200 text-slate-700"
@@ -1150,10 +1395,10 @@ export default function JobDetailPage() {
                           </div>
 
                           <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                               issue.status === "resolved" || issue.status === "reinspected_pass"
                                 ? "bg-emerald-100 text-emerald-800"
-                                : "bg-rose-100 text-rose-800"
+                                : "bg-red-100 text-red-800"
                             }`}
                           >
                             {issue.status.replace("_", " ")}
@@ -1205,7 +1450,7 @@ export default function JobDetailPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Customer Sign-off Card */}
             <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <h3 className="text-xs font-semibold text-slate-500">
                 Digital Handover Sign-Off
               </h3>
 
@@ -1218,7 +1463,7 @@ export default function JobDetailPage() {
                         signOff.signStatus === "APPROVED"
                           ? "bg-emerald-100 text-emerald-800"
                           : signOff.signStatus === "ATTENTION_REQUESTED"
-                          ? "bg-rose-100 text-rose-800"
+                          ? "bg-red-100 text-red-800"
                           : "bg-amber-100 text-amber-800"
                       }`}
                     >
@@ -1252,7 +1497,7 @@ export default function JobDetailPage() {
 
             {/* Customer Feedback & Google Review */}
             <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <h3 className="text-xs font-semibold text-slate-500">
                 Customer Rating & Sentiment
               </h3>
 
@@ -1266,7 +1511,7 @@ export default function JobDetailPage() {
                         </span>
                       ))}
                     </div>
-                    <span className="font-bold text-slate-900">{signOff.feedbackRating}/5.0</span>
+                    <span className="font-semibold text-slate-900">{signOff.feedbackRating}/5.0</span>
                     <span className="capitalize font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[11px]">
                       {(signOff.feedbackRating ?? 0) >= 4 ? "positive" : (signOff.feedbackRating ?? 0) === 3 ? "neutral" : "negative"}
                     </span>
@@ -1290,7 +1535,7 @@ export default function JobDetailPage() {
 
                   <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100">
                     <span>Google Review Triggered:</span>
-                    <span className={signOff.googleReviewClicked ? "text-emerald-600 font-bold" : "text-slate-400"}>
+                    <span className={signOff.googleReviewClicked ? "text-emerald-600 font-semibold" : "text-slate-400"}>
                       {signOff.googleReviewClicked ? "Yes (Customer Clicked Link)" : "Not Clicked"}
                     </span>
                   </div>
@@ -1309,7 +1554,7 @@ export default function JobDetailPage() {
           <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">
+                <h3 className="text-sm font-semibold text-slate-900">
                   Billing & Invoicing File
                 </h3>
                 <p className="text-xs text-slate-500">
@@ -1320,35 +1565,59 @@ export default function JobDetailPage() {
             </div>
 
             {invoice ? (
-              <div className="space-y-3 text-xs">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-3 rounded-md bg-slate-50 border border-slate-200">
-                  <div>
-                    <span className="text-slate-400 text-[11px]">Invoice #</span>
-                    <div className="font-mono font-bold text-slate-800">{invoice.invoiceNumber}</div>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[11px]">Total Billed</span>
-                    <div className="font-bold text-slate-900">{formatCurrency(invoice.total)}</div>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[11px]">Amount Settled</span>
-                    <div className="font-bold text-emerald-700">{formatCurrency(invoice.amountPaid)}</div>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[11px]">Outstanding Balance</span>
-                    <div className="font-bold text-rose-700">{formatCurrency(invoice.balanceDue)}</div>
-                  </div>
+              <div className="space-y-4 text-xs">
+                {/* §9 Human-readable money line — what the desk actually says out loud */}
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                  <p className="text-sm text-slate-800 font-medium">
+                    Total Amount <span className="font-semibold text-slate-900">{formatCurrency(invoice.total)}</span>
+                    <span className="text-slate-300 mx-2">·</span>
+                    Paid <span className="font-semibold text-emerald-700">{formatCurrency(invoice.amountPaid)}</span>
+                    <span className="text-slate-300 mx-2">·</span>
+                    Balance <span className="font-semibold text-rose-600">{formatCurrency(invoice.balanceDue)}</span>
+                    <span className="text-slate-300 mx-2">·</span>
+                    Status: <span className="font-semibold">{
+                      invoice.status === "PAID"
+                        ? "Paid"
+                        : invoice.status === "PARTIAL"
+                        ? "Partially Paid"
+                        : invoice.status === "REFUNDED"
+                        ? "Refunded"
+                        : invoice.status === "CANCELLED"
+                        ? "Cancelled"
+                        : "Payment Pending"
+                    }</span>
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-1.5">
+                    Invoice <span className="font-mono">{invoice.invoiceNumber}</span> for job {job.id}
+                  </p>
                 </div>
 
-                <div className="pt-2 flex items-center justify-end gap-2">
+                {payments.filter((p) => p.invoiceId === invoice.id).length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Payment History</p>
+                    {payments
+                      .filter((p) => p.invoiceId === invoice.id)
+                      .map((p) => (
+                        <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-lg border border-slate-100 bg-white">
+                          <span className="text-slate-700">
+                            {formatCurrency(p.amount)} <span className="text-slate-400">· {p.paymentMethod?.toUpperCase()}</span>
+                            {p.transactionReference && <span className="text-slate-400 font-mono"> · {p.transactionReference}</span>}
+                          </span>
+                          <span className="text-[10px] text-slate-400">{formatDateTime(p.paidAt)}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+
+                <div className="pt-1 flex items-center justify-end gap-2">
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => setIsInvoicePrintOpen(true)}
                     className="text-xs h-8 gap-1.5 border-slate-300"
                   >
-                    <FileText className="h-3.5 w-3.5 text-blue-600" />
-                    View / Print Tax Invoice
+                    <FileText className="h-3.5 w-3.5 text-rose-600" />
+                    View Invoice
                   </Button>
 
                   {invoice.balanceDue > 0 && (
@@ -1367,9 +1636,9 @@ export default function JobDetailPage() {
                           },
                         });
                       }}
-                      className="bg-slate-900 text-white text-xs h-8"
+                      className="text-xs h-8"
                     >
-                      Record Full Settlement ({formatCurrency(invoice.balanceDue)})
+                      Record Payment
                     </Button>
                   )}
                 </div>
@@ -1386,10 +1655,10 @@ export default function JobDetailPage() {
         <TabsContent value="audit" className="space-y-4">
           <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <h3 className="text-xs font-semibold text-slate-500">
                 Live Action Log for {job.id}
               </h3>
-              <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
                 Auto-syncs every 10s
               </span>
             </div>
@@ -1416,7 +1685,7 @@ export default function JobDetailPage() {
                           {event.actorRole === "customer" ? " (customer)" : ` · ${event.actorRole.replace("_", " ")}`} · {formatDateTime(event.createdAt)} ({timeAgo(event.createdAt)})
                         </p>
                       </div>
-                      <span className="text-[9px] font-bold uppercase tracking-wide text-slate-300 shrink-0 pt-1">
+                      <span className="text-[9px] font-semibold text-slate-300 shrink-0 pt-1">
                         {event.type.replace(/_/g, " ")}
                       </span>
                     </div>
@@ -1485,7 +1754,7 @@ export default function JobDetailPage() {
                         />
                         {w.name}
                         {isLead && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-indigo-100 text-indigo-700 border border-indigo-200">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-indigo-100 text-indigo-700 border border-indigo-200">
                             Lead • OTP holder
                           </span>
                         )}
@@ -1493,7 +1762,7 @@ export default function JobDetailPage() {
                       <span className="flex items-center gap-2 shrink-0">
                         {w.phone && <span className="text-[10px] text-slate-400 font-mono">{w.phone}</span>}
                         <span
-                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${
                             isBusy
                               ? "bg-amber-100 text-amber-800"
                               : "bg-emerald-100 text-emerald-800"
@@ -1521,7 +1790,7 @@ export default function JobDetailPage() {
             </div>
 
             {assignmentErrorMsg && (
-              <div className="p-2.5 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-[11px] flex items-start gap-1.5">
+              <div className="p-2.5 rounded-md bg-red-50 border border-red-200 text-red-700 text-[11px] flex items-start gap-1.5">
                 <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 <span>{assignmentErrorMsg}</span>
               </div>
@@ -1570,12 +1839,13 @@ export default function JobDetailPage() {
                 onChange={(e) => setPhotoArea(e.target.value)}
                 className="w-full h-9 rounded-md border border-slate-200 text-xs px-3 bg-white"
               >
-                <option value="Kitchen Chimney & Baffle">Kitchen Chimney & Baffle</option>
-                <option value="Master Bathroom Shower Glass">Master Bathroom Shower Glass</option>
-                <option value="Kitchen Gas Hob & Granite">Kitchen Gas Hob & Granite</option>
-                <option value="Living Room French Windows">Living Room French Windows</option>
-                <option value="Balcony Floor Buffing">Balcony Floor Buffing</option>
-                <option value="Wardrobe Interior Tracks">Wardrobe Interior Tracks</option>
+                {/* §7 canonical areas — the gallery groups photos by these */}
+                <option value="Living Room">Living Room</option>
+                <option value="Bedroom">Bedroom</option>
+                <option value="Kitchen">Kitchen</option>
+                <option value="Bathroom">Bathroom</option>
+                <option value="Balcony">Balcony</option>
+                <option value="Other">Other</option>
               </select>
             </div>
 
@@ -1639,7 +1909,7 @@ export default function JobDetailPage() {
                       type="button"
                       size="sm"
                       variant="destructive"
-                      className="h-7 text-xs bg-rose-600 text-white font-semibold"
+                      className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white font-medium"
                       onClick={() => setPhotoDataUrl("")}
                     >
                       Remove
@@ -1651,31 +1921,31 @@ export default function JobDetailPage() {
                   <button
                     type="button"
                     onClick={() => cameraInputRef.current?.click()}
-                    className="p-3 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100/70 transition-all flex flex-col items-center justify-center text-center group"
+                    className="p-3 rounded-lg border-2 border-dashed border-blue-300 bg-blue-50/60 hover:bg-blue-100/70 transition-all flex flex-col items-center justify-center text-center group"
                   >
                     <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center mb-1 shadow-xs group-hover:scale-105 transition-transform">
                       <Camera className="h-4 w-4" />
                     </div>
-                    <span className="text-xs font-bold text-blue-950">Camera</span>
+                    <span className="text-xs font-semibold text-blue-950">Camera</span>
                     <span className="text-[10px] text-blue-600">Snap photo</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="p-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 transition-all flex flex-col items-center justify-center text-center group"
+                    className="p-3 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 transition-all flex flex-col items-center justify-center text-center group"
                   >
                     <div className="h-8 w-8 rounded-full bg-slate-800 text-white flex items-center justify-center mb-1 shadow-xs group-hover:scale-105 transition-transform">
                       <Upload className="h-4 w-4" />
                     </div>
-                    <span className="text-xs font-bold text-slate-900">Gallery / Files</span>
+                    <span className="text-xs font-semibold text-slate-900">Gallery / Files</span>
                     <span className="text-[10px] text-slate-500">Pick image file</span>
                   </button>
                 </div>
               )}
 
               {photoError && (
-                <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">{photoError}</p>
+                <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">{photoError}</p>
               )}
             </div>
 
@@ -1698,7 +1968,7 @@ export default function JobDetailPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" disabled={photoUploading} className="bg-slate-900 text-white">
+              <Button type="submit" size="sm" disabled={photoUploading} className="">
                 {photoUploading ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />

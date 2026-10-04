@@ -43,12 +43,12 @@ function QuoteStatusBadge({ status }: { status: Quote["status"] }) {
     draft: { label: "Draft", cls: "bg-zinc-100 text-zinc-600" },
     sent: { label: "Open", cls: "bg-blue-50 text-blue-700 border border-blue-200" },
     accepted: { label: "Accepted", cls: "bg-emerald-50 text-emerald-700 border border-emerald-200" },
-    declined: { label: "Declined", cls: "bg-rose-50 text-rose-700 border border-rose-200" },
+    declined: { label: "Declined", cls: "bg-red-50 text-red-700 border border-red-200" },
     converted_to_job: { label: "Converted", cls: "bg-zinc-900 text-white" },
   };
   const s = map[status] ?? map.sent;
   return (
-    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${s.cls}`}>
+    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${s.cls}`}>
       {s.label}
     </span>
   );
@@ -122,9 +122,9 @@ export default function QuotationsPage() {
               setActionError("");
               setQuoteFormOpen(true);
             }}
-            className="h-9 gap-1.5 text-xs bg-zinc-900 text-white hover:bg-zinc-800 font-medium shadow-xs"
+            className="h-9 gap-1.5 text-xs bg-rose-500 text-white hover:bg-rose-600 font-medium shadow-xs"
           >
-            <Plus className="h-3.5 w-3.5 text-rose-400" />
+            <Plus className="h-3.5 w-3.5" />
             Raise Quotation
           </Button>
         }
@@ -133,29 +133,29 @@ export default function QuotationsPage() {
       {/* Pipeline stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-blue-800 flex items-center gap-1.5">
+          <div className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">
             <Receipt className="h-3.5 w-3.5" />
             Open Quotations
           </div>
-          <div className="text-2xl font-bold text-blue-900 mt-2">{openQuotes.length}</div>
+          <div className="text-2xl font-semibold text-blue-900 mt-2">{openQuotes.length}</div>
           <div className="text-xs text-blue-600 mt-1">Awaiting customer decision</div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+          <div className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
             <IndianRupee className="h-3.5 w-3.5" />
             Pipeline Value
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">{formatCurrency(pipelineValue)}</div>
+          <div className="text-2xl font-semibold text-slate-900 mt-2">{formatCurrency(pipelineValue)}</div>
           <div className="text-xs text-slate-400 mt-1">Open quotes, incl. tax</div>
         </div>
 
         <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+          <div className="text-xs font-semibold text-emerald-800 flex items-center gap-1.5">
             <CheckCircle2 className="h-3.5 w-3.5" />
             Converted
           </div>
-          <div className="text-2xl font-bold text-emerald-700 mt-2">{convertedQuotes.length}</div>
+          <div className="text-2xl font-semibold text-emerald-700 mt-2">{convertedQuotes.length}</div>
           <div className="text-xs text-emerald-600 mt-1">
             {formatCurrency(wonValue)} won · {conversionRate}% hit rate
           </div>
@@ -163,21 +163,21 @@ export default function QuotationsPage() {
 
         <div
           className={`rounded-lg border p-4 shadow-xs ${
-            expiredOpen.length > 0 ? "border-rose-200 bg-rose-50/40" : "border-amber-200 bg-amber-50/40"
+            expiredOpen.length > 0 ? "border-red-200 bg-red-50/40" : "border-amber-200 bg-amber-50/40"
           }`}
         >
           <div
-            className={`text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
-              expiredOpen.length > 0 ? "text-rose-800" : "text-amber-800"
+            className={`text-xs font-semibold flex items-center gap-1.5 ${
+              expiredOpen.length > 0 ? "text-red-800" : "text-amber-800"
             }`}
           >
             <CalendarClock className="h-3.5 w-3.5" />
             Validity Watch
           </div>
-          <div className={`text-2xl font-bold mt-2 ${expiredOpen.length > 0 ? "text-rose-700" : "text-amber-700"}`}>
+          <div className={`text-2xl font-semibold mt-2 ${expiredOpen.length > 0 ? "text-red-700" : "text-amber-700"}`}>
             {expiringSoon.length}
           </div>
-          <div className={`text-xs mt-1 ${expiredOpen.length > 0 ? "text-rose-600" : "text-amber-600"}`}>
+          <div className={`text-xs mt-1 ${expiredOpen.length > 0 ? "text-red-600" : "text-amber-600"}`}>
             {expiredOpen.length > 0
               ? `${expiredOpen.length} past validity — follow up`
               : "Expiring within 7 days"}
@@ -239,7 +239,7 @@ export default function QuotationsPage() {
           description="Try a different status filter or clear the search to see the full pipeline."
         />
       ) : (
-        <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
           <div className="divide-y divide-slate-100">
             {filtered.map((q) => {
               const customer = customers.find((c) => c.id === q.customerId);
@@ -262,10 +262,10 @@ export default function QuotationsPage() {
                 >
                   <div className="space-y-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-bold text-slate-900">{q.quoteNumber}</span>
+                      <span className="font-mono text-xs font-semibold text-slate-900">{q.quoteNumber}</span>
                       <QuoteStatusBadge status={q.status} />
                       {overdue && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-100/80 px-2 py-0.5 rounded">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 bg-red-100/80 px-2 py-0.5 rounded">
                           <AlertTriangle className="h-3 w-3" />
                           Expired
                         </span>
@@ -297,7 +297,7 @@ export default function QuotationsPage() {
                       )}
                     </div>
 
-                    <div className={`text-[11px] flex items-center gap-1 ${overdue ? "text-rose-600 font-medium" : "text-slate-500"}`}>
+                    <div className={`text-[11px] flex items-center gap-1 ${overdue ? "text-red-600 font-medium" : "text-slate-500"}`}>
                       <CalendarClock className="h-3 w-3" />
                       {overdue ? "Validity ended" : "Valid until"} {formatDate(q.validUntil)}
                     </div>
@@ -305,7 +305,7 @@ export default function QuotationsPage() {
 
                   <div className="flex items-center justify-between lg:justify-end gap-3 lg:gap-4 shrink-0">
                     <div className="text-right">
-                      <div className="text-base font-bold text-slate-900">{formatCurrency(q.total)}</div>
+                      <div className="text-base font-semibold text-slate-900">{formatCurrency(q.total)}</div>
                       <div className="text-[11px] text-slate-400">
                         {formatCurrency(q.subtotal)} + {formatCurrency(q.tax)} tax
                       </div>
@@ -330,7 +330,7 @@ export default function QuotationsPage() {
                             setActionError("");
                             setConvertTarget(q);
                           }}
-                          className="text-xs h-8 bg-zinc-900 text-white hover:bg-zinc-800"
+                          className="text-xs h-8 bg-rose-500 text-white hover:bg-rose-600"
                           title="Schedule a booking and issue the tax invoice"
                         >
                           Convert to Booking
@@ -345,7 +345,7 @@ export default function QuotationsPage() {
                             setActionError("");
                             setDeleteTarget({ id: q.id, label: q.quoteNumber });
                           }}
-                          className="text-xs h-8 w-8 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                          className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                           title="Delete open quotation"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -361,7 +361,7 @@ export default function QuotationsPage() {
       )}
 
       {actionError && (
-        <p className="mt-3 text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+        <p className="mt-3 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
           {actionError}
         </p>
       )}

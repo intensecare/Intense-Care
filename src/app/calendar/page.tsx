@@ -77,7 +77,7 @@ export default function CalendarPage() {
         actions={
           !isOps ? (
             <Link href="/jobs?create=true">
-              <Button size="sm" className="h-9 gap-1.5 bg-slate-900 text-white font-medium">
+              <Button size="sm" className="h-9 gap-1.5 bg-rose-500 text-white font-medium">
                 <Plus className="h-4 w-4" />
                 Schedule Appointment
               </Button>
@@ -98,7 +98,7 @@ export default function CalendarPage() {
               onClick={() => setSelectedDay(d.date)}
               className={`flex-1 min-w-[120px] p-2.5 rounded-md text-center transition-all ${
                 isSelected
-                  ? "bg-slate-900 text-white shadow-xs font-bold"
+                  ? "bg-slate-900 text-white shadow-xs font-semibold"
                   : "bg-slate-50 hover:bg-slate-100 text-slate-700"
               }`}
             >
@@ -138,7 +138,7 @@ export default function CalendarPage() {
               >
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-slate-900">
+                    <span className="font-mono text-xs font-semibold text-slate-900">
                       {job.id}
                     </span>
                     <JobStatusBadge status={job.status} size="sm" />
@@ -148,12 +148,12 @@ export default function CalendarPage() {
                     </span>
                   </div>
 
-                  <div className="font-bold text-slate-900 text-sm">
+                  <div className="font-semibold text-slate-900 text-sm">
                     {customer?.name} • <span className="text-slate-600 font-normal">{service?.name}</span>
                   </div>
 
                   <div className="text-xs text-slate-500 flex items-center gap-1.5">
-                    <MapPin className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                    <MapPin className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
                     <span>{property?.title} — {property?.address}</span>
                   </div>
 
@@ -174,7 +174,7 @@ export default function CalendarPage() {
                     </Button>
                   </Link>
                   <Link href="/field">
-                    <Button size="sm" className="h-8 text-xs bg-slate-900 text-white">
+                    <Button size="sm" className="h-8 text-xs bg-rose-500 text-white">
                       Field Portal
                     </Button>
                   </Link>

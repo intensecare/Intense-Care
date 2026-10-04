@@ -143,7 +143,7 @@ export default function ServicesPage() {
                 setIsCreateOpen(true);
               }}
               size="sm"
-              className="h-9 gap-1.5 bg-slate-900 text-white font-medium"
+              className="h-9 gap-1.5 bg-rose-500 text-white font-medium"
             >
               <Plus className="h-4 w-4" />
               Create Service Package
@@ -155,7 +155,7 @@ export default function ServicesPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Services List */}
         <div className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <h3 className="text-xs font-semibold text-slate-500">
             Active Service Packages ({services.length})
           </h3>
 
@@ -174,9 +174,9 @@ export default function ServicesPage() {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm">{srv.name}</span>
+                    <span className="font-semibold text-sm">{srv.name}</span>
                     <span
-                      className={`text-xs font-bold ${
+                      className={`text-xs font-semibold ${
                         isSelected ? "text-amber-300" : "text-slate-900"
                       }`}
                     >
@@ -210,7 +210,7 @@ export default function ServicesPage() {
           {!selectedService ? (
             <div className="bg-white rounded-lg border border-dashed border-slate-300 p-10 text-center space-y-2">
               <Sparkles className="h-8 w-8 text-slate-300 mx-auto" />
-              <h3 className="text-sm font-bold text-slate-700">No service packages yet</h3>
+              <h3 className="text-sm font-semibold text-slate-700">No service packages yet</h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
                 Your catalog starts empty. Create your first service package with its own pricing and
                 checklist rubric — everything here is authored by your company, nothing is preset.
@@ -236,10 +236,10 @@ export default function ServicesPage() {
           <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
                   {selectedService.category}
                 </span>
-                <h2 className="text-base font-bold text-slate-900 mt-1">
+                <h2 className="text-base font-semibold text-slate-900 mt-1">
                   {selectedService.name} Rubric Standard
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -249,7 +249,7 @@ export default function ServicesPage() {
 
               <div className="text-right space-y-2">
                 <div>
-                  <div className="text-sm font-bold text-slate-900">
+                  <div className="text-sm font-semibold text-slate-900">
                     {formatCurrency(selectedService.basePrice)}
                   </div>
                   <div className="text-[11px] text-slate-400">Base Starting Rate</div>
@@ -272,7 +272,7 @@ export default function ServicesPage() {
                         size="sm"
                         variant="ghost"
                         onClick={() => setDeleteConfirmOpen(true)}
-                        className="h-7 text-xs text-rose-600 hover:bg-rose-50"
+                        className="h-7 text-xs text-red-600 hover:bg-red-50"
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>
@@ -285,7 +285,7 @@ export default function ServicesPage() {
             {/* Checklist Rubric Items */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                <h4 className="text-xs font-semibold text-slate-700">
                   Standard Checklist Rubric ({selectedService.checklistTemplate.length} Tasks)
                 </h4>
 
@@ -314,7 +314,7 @@ export default function ServicesPage() {
                     className="p-3 flex items-start justify-between gap-3 text-xs bg-slate-50/50 hover:bg-white transition-colors"
                   >
                     <div className="flex items-start gap-2.5">
-                      <span className="h-5 w-5 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">
+                      <span className="h-5 w-5 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-semibold text-[10px] shrink-0 mt-0.5">
                         {idx + 1}
                       </span>
                       <div className="space-y-0.5">
@@ -323,7 +323,7 @@ export default function ServicesPage() {
                             {item.area}
                           </span>
                           {item.critical && (
-                            <span className="text-[9px] font-bold text-rose-700 bg-rose-50 px-1 rounded border border-rose-200">
+                            <span className="text-[9px] font-semibold text-red-700 bg-red-50 px-1 rounded border border-red-200">
                               Mandatory Rubric
                             </span>
                           )}
@@ -337,7 +337,7 @@ export default function ServicesPage() {
                       {currentRole === "super_admin" && (
                         <button
                           onClick={() => removeChecklistItemFromService(selectedService.id, item.id)}
-                          className="text-slate-400 hover:text-rose-600 transition-colors p-1"
+                          className="text-slate-400 hover:text-red-600 transition-colors p-1"
                           title="Remove rubric item"
                         >
                           <X className="h-3.5 w-3.5" />
@@ -356,9 +356,9 @@ export default function ServicesPage() {
       {/* Modal: Create Service Package */}
       {isCreateOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full border border-slate-200 p-6 space-y-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900">Create New Service Package</h3>
+              <h3 className="text-sm font-semibold text-slate-900">Create New Service Package</h3>
               <Button size="sm" variant="ghost" onClick={() => setIsCreateOpen(false)} className="h-7 w-7 p-0">
                 <X className="h-4 w-4" />
               </Button>
@@ -427,7 +427,7 @@ export default function ServicesPage() {
                 <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-slate-900 text-white" disabled={isCreating}>
+                <Button type="submit" className="" disabled={isCreating}>
                   {isCreating ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -446,9 +446,9 @@ export default function ServicesPage() {
       {/* Modal: Edit Service Package */}
       {isEditOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full border border-slate-200 p-6 space-y-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900">Edit Service Package</h3>
+              <h3 className="text-sm font-semibold text-slate-900">Edit Service Package</h3>
               <Button size="sm" variant="ghost" onClick={() => setIsEditOpen(false)} className="h-7 w-7 p-0">
                 <X className="h-4 w-4" />
               </Button>
@@ -511,7 +511,7 @@ export default function ServicesPage() {
                 <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-slate-900 text-white" disabled={isUpdating}>
+                <Button type="submit" className="" disabled={isUpdating}>
                   {isUpdating ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -530,9 +530,9 @@ export default function ServicesPage() {
       {/* Modal: Add Rubric Item */}
       {isAddItemOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full border border-slate-200 p-6 space-y-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900">Add Checklist Rubric Item</h3>
+              <h3 className="text-sm font-semibold text-slate-900">Add Checklist Rubric Item</h3>
               <Button size="sm" variant="ghost" onClick={() => setIsAddItemOpen(false)} className="h-7 w-7 p-0">
                 <X className="h-4 w-4" />
               </Button>
@@ -578,7 +578,7 @@ export default function ServicesPage() {
                 <Button type="button" variant="outline" onClick={() => setIsAddItemOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-slate-900 text-white" disabled={isAddingItem}>
+                <Button type="submit" className="" disabled={isAddingItem}>
                   {isAddingItem ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />

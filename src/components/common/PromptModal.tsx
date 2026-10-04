@@ -46,7 +46,7 @@ export function PromptModal({
         <div className="p-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50">
           <div className="flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-zinc-900" />
-            <span className="text-xs font-bold text-zinc-900 uppercase tracking-wider font-sans">{title}</span>
+            <span className="text-xs font-semibold text-zinc-900 font-sans">{title}</span>
           </div>
           <button
             onClick={onClose}
@@ -75,7 +75,7 @@ export function PromptModal({
             <Button type="button" variant="outline" size="sm" onClick={onClose} className="h-8 text-xs">
               Cancel
             </Button>
-            <Button type="submit" size="sm" className="h-8 text-xs bg-black text-white font-medium border border-black hover:bg-zinc-800">
+            <Button type="submit" size="sm" className="h-8 text-xs bg-rose-500 text-white font-medium border border-rose-500 hover:bg-rose-600">
               {confirmText}
             </Button>
           </div>

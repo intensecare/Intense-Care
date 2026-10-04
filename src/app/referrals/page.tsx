@@ -250,7 +250,7 @@ export default function ReferralsAndCommissionsPage() {
           <div className="flex gap-2">
             <Button
               onClick={openCreatePartner}
-              className="bg-slate-900 text-white hover:bg-slate-800 h-9 text-xs"
+              className="bg-rose-500 text-white hover:bg-rose-600 h-9 text-xs"
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
               Register Partner
@@ -271,40 +271,40 @@ export default function ReferralsAndCommissionsPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Active Partners
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">
+          <div className="text-2xl font-semibold text-slate-900 mt-2">
             {partners.length}
           </div>
           <div className="text-xs text-slate-400 mt-1">Designers, realtors & agents</div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Referred Revenue
           </div>
-          <div className="text-2xl font-bold text-emerald-700 mt-2">
+          <div className="text-2xl font-semibold text-emerald-700 mt-2">
             {formatCurrency(totalReferralRevenue)}
           </div>
           <div className="text-xs text-slate-400 mt-1">Lifetime booking attribution</div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Pending Commission
           </div>
-          <div className="text-2xl font-bold text-amber-700 mt-2">
+          <div className="text-2xl font-semibold text-amber-700 mt-2">
             {formatCurrency(totalCommissionPending)}
           </div>
           <div className="text-xs text-slate-400 mt-1">Awaiting disbursement</div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Commissions Paid Out
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">
+          <div className="text-2xl font-semibold text-slate-900 mt-2">
             {formatCurrency(totalCommissionPaid)}
           </div>
           <div className="text-xs text-slate-400 mt-1">Direct bank / UPI transfers</div>
@@ -313,7 +313,7 @@ export default function ReferralsAndCommissionsPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         {actionError && (
-          <p className="text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+          <p className="text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
             {actionError}
           </p>
         )}
@@ -353,7 +353,7 @@ export default function ReferralsAndCommissionsPage() {
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                     <tr>
                       <th className="py-3 px-4">Partner</th>
                       <th className="py-3 px-4">Category</th>
@@ -376,7 +376,7 @@ export default function ReferralsAndCommissionsPage() {
                           <div className="font-semibold text-slate-900 flex items-center gap-1.5">
                             {p.name}
                             {p.status === "inactive" && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-200 text-slate-600">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-200 text-slate-600">
                                 Inactive
                               </span>
                             )}
@@ -387,14 +387,14 @@ export default function ReferralsAndCommissionsPage() {
                           {p.partnerType.replace("_", " ")}
                         </td>
                         <td className="py-3 px-4 font-mono">
-                          <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                          <span className="font-semibold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                             {p.code}
                           </span>
                         </td>
                         <td className="py-3 px-4">
                           <span className="font-semibold text-slate-900">{p.totalConversions}</span> / {p.totalReferrals} leads
                         </td>
-                        <td className="py-3 px-4 font-bold text-slate-900">
+                        <td className="py-3 px-4 font-semibold text-slate-900">
                           {formatCurrency(p.totalRevenueGenerated)}
                         </td>
                         <td className="py-3 px-4">
@@ -433,7 +433,7 @@ export default function ReferralsAndCommissionsPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                            className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                             onClick={(e) => {
                               e.stopPropagation();
                               setActionError("");
@@ -479,7 +479,7 @@ export default function ReferralsAndCommissionsPage() {
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                   <tr>
                     <th className="py-3 px-4">Entry ID</th>
                     <th className="py-3 px-4">Job ID</th>
@@ -497,7 +497,7 @@ export default function ReferralsAndCommissionsPage() {
 
                     return (
                       <tr key={entry.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                        <td className="py-3 px-4 font-mono font-semibold text-slate-900">
                           {entry.id}
                         </td>
                         <td className="py-3 px-4 font-mono">
@@ -511,7 +511,7 @@ export default function ReferralsAndCommissionsPage() {
                         <td className="py-3 px-4 font-semibold">
                           {formatCurrency(entry.bookingAmount)}
                         </td>
-                        <td className="py-3 px-4 font-bold text-emerald-700">
+                        <td className="py-3 px-4 font-semibold text-emerald-700">
                           {formatCurrency(entry.commissionAmount)}
                         </td>
                         <td className="py-3 px-4 text-[11px] text-slate-500 max-w-[200px] truncate">
@@ -519,13 +519,13 @@ export default function ReferralsAndCommissionsPage() {
                         </td>
                         <td className="py-3 px-4">
                           <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                               entry.status === "PAID"
                                 ? "bg-emerald-100 text-emerald-800"
                                 : entry.status === "APPROVED"
                                 ? "bg-blue-100 text-blue-800"
                                 : entry.status === "REVERSED"
-                                ? "bg-rose-100 text-rose-800"
+                                ? "bg-red-100 text-red-800"
                                 : "bg-amber-100 text-amber-800"
                             }`}
                           >
@@ -558,7 +558,7 @@ export default function ReferralsAndCommissionsPage() {
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">
+                <h3 className="text-sm font-semibold text-slate-900">
                   Configurable Commission Engine Rules
                 </h3>
                 <p className="text-xs text-slate-500">
@@ -569,7 +569,7 @@ export default function ReferralsAndCommissionsPage() {
               <Button
                 size="sm"
                 onClick={() => setIsRuleModalOpen(true)}
-                className="bg-slate-900 text-white text-xs h-8"
+                className="bg-rose-500 text-white text-xs h-8"
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Add Commission Rule
@@ -583,17 +583,17 @@ export default function ReferralsAndCommissionsPage() {
                   className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 space-y-2 text-xs"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 text-sm">
+                    <span className="font-semibold text-slate-900 text-sm">
                       {rule.name}
                     </span>
                     <div className="flex items-center gap-1.5">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-200 text-slate-700">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-700">
                         {rule.calculationType}
                       </span>
                       <Button
                         variant="outline"
                         size="sm"
-                        className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                        className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                         onClick={() => {
                           setActionError("");
                           setDeleteTarget({ kind: "rule", id: rule.id, name: rule.name });
@@ -622,7 +622,7 @@ export default function ReferralsAndCommissionsPage() {
                         {rule.tierRules?.map((t, idx) => (
                           <div key={idx} className="text-[11px] text-slate-600 flex justify-between">
                             <span>₹{t.minAmount} - ₹{t.maxAmount}:</span>
-                            <span className="font-bold">{t.rate}%</span>
+                            <span className="font-semibold">{t.rate}%</span>
                           </div>
                         ))}
                       </div>
@@ -633,7 +633,7 @@ export default function ReferralsAndCommissionsPage() {
                         {Object.entries(rule.serviceOverrides || {}).map(([srv, rate]) => (
                           <div key={srv} className="text-[11px] text-slate-600 flex justify-between">
                             <span>{srv}:</span>
-                            <span className="font-bold">{rate}%</span>
+                            <span className="font-semibold">{rate}%</span>
                           </div>
                         ))}
                       </div>
@@ -661,7 +661,7 @@ export default function ReferralsAndCommissionsPage() {
               {payouts.map((pay) => (
                 <div key={pay.id} className="p-4 flex items-center justify-between text-xs hover:bg-slate-50/60">
                   <div className="space-y-1">
-                    <div className="font-bold text-slate-900 text-sm">{pay.partnerName}</div>
+                    <div className="font-semibold text-slate-900 text-sm">{pay.partnerName}</div>
                     <div className="text-[11px] text-slate-500 font-mono">
                       Ref: {pay.referenceNumber} • Method: {pay.payoutMethod.toUpperCase()}
                     </div>
@@ -669,7 +669,7 @@ export default function ReferralsAndCommissionsPage() {
                   </div>
 
                   <div className="text-right">
-                    <div className="text-base font-bold text-emerald-700">
+                    <div className="text-base font-semibold text-emerald-700">
                       {formatCurrency(pay.amount)}
                     </div>
                     <div className="text-[10px] text-slate-400">
@@ -755,7 +755,7 @@ export default function ReferralsAndCommissionsPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmittingRule}>
+              <Button type="submit" size="sm" className="" disabled={isSubmittingRule}>
                 {isSubmittingRule ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -789,7 +789,7 @@ export default function ReferralsAndCommissionsPage() {
                 onFocus={(e) => e.target.select()}
                 onChange={(e) => setPayoutAmount(e.target.value === "" ? 0 : Number(e.target.value))}
                 required
-                className="text-xs font-bold"
+                className="text-xs font-semibold"
               />
             </div>
 
@@ -898,7 +898,7 @@ export default function ReferralsAndCommissionsPage() {
                   value={partnerCode}
                   onChange={(e) => setPartnerCode(e.target.value.toUpperCase())}
                   placeholder="E.g., LUXE10"
-                  className="text-xs font-mono uppercase"
+                  className="text-xs font-mono"
                   disabled={isEditingPartner}
                 />
                 {isEditingPartner && (
@@ -964,7 +964,7 @@ export default function ReferralsAndCommissionsPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmittingPartner}>
+              <Button type="submit" size="sm" className="" disabled={isSubmittingPartner}>
                 {isSubmittingPartner ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -998,7 +998,7 @@ export default function ReferralsAndCommissionsPage() {
                       {detailPartner.code}
                     </span>
                     <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                         detailPartner.status === "active"
                           ? "bg-emerald-50 text-emerald-700"
                           : "bg-slate-200 text-slate-600"
@@ -1034,27 +1034,27 @@ export default function ReferralsAndCommissionsPage() {
 
                   <div className="grid grid-cols-3 gap-2 text-[11px]">
                     <div className="p-2 rounded bg-slate-50 border border-slate-100">
-                      <div className="font-bold text-slate-900 text-sm">{detailPartner.totalReferrals}</div>
+                      <div className="font-semibold text-slate-900 text-sm">{detailPartner.totalReferrals}</div>
                       <div className="text-slate-400">Attributed leads</div>
                     </div>
                     <div className="p-2 rounded bg-slate-50 border border-slate-100">
-                      <div className="font-bold text-slate-900 text-sm">{detailPartner.totalConversions}</div>
+                      <div className="font-semibold text-slate-900 text-sm">{detailPartner.totalConversions}</div>
                       <div className="text-slate-400">Conversions</div>
                     </div>
                     <div className="p-2 rounded bg-slate-50 border border-slate-100">
-                      <div className="font-bold text-slate-900 text-sm">{formatCurrency(detailPartner.totalRevenueGenerated)}</div>
+                      <div className="font-semibold text-slate-900 text-sm">{formatCurrency(detailPartner.totalRevenueGenerated)}</div>
                       <div className="text-slate-400">Revenue generated</div>
                     </div>
                     <div className="p-2 rounded bg-emerald-50 border border-emerald-100">
-                      <div className="font-bold text-emerald-700 text-sm">{formatCurrency(detailPartner.totalCommissionEarned)}</div>
+                      <div className="font-semibold text-emerald-700 text-sm">{formatCurrency(detailPartner.totalCommissionEarned)}</div>
                       <div className="text-emerald-600/70">Commission earned</div>
                     </div>
                     <div className="p-2 rounded bg-amber-50 border border-amber-100">
-                      <div className="font-bold text-amber-700 text-sm">{formatCurrency(detailPartner.totalCommissionPending)}</div>
+                      <div className="font-semibold text-amber-700 text-sm">{formatCurrency(detailPartner.totalCommissionPending)}</div>
                       <div className="text-amber-600/70">Pending</div>
                     </div>
                     <div className="p-2 rounded bg-slate-50 border border-slate-100">
-                      <div className="font-bold text-slate-900 text-sm">{formatCurrency(detailPartner.totalCommissionPaid)}</div>
+                      <div className="font-semibold text-slate-900 text-sm">{formatCurrency(detailPartner.totalCommissionPaid)}</div>
                       <div className="text-slate-400">Paid out</div>
                     </div>
                   </div>
@@ -1111,7 +1111,7 @@ export default function ReferralsAndCommissionsPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <h4 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <h4 className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
                       <History className="h-3 w-3" />
                       Commission Ledger ({partnerEntries.length})
                     </h4>
@@ -1132,11 +1132,11 @@ export default function ReferralsAndCommissionsPage() {
                             </div>
                             <div className="flex items-center gap-3">
                               <div className="text-right">
-                                <div className="font-bold text-emerald-700">{formatCurrency(e.commissionAmount)}</div>
+                                <div className="font-semibold text-emerald-700">{formatCurrency(e.commissionAmount)}</div>
                                 <div className="text-[10px] text-slate-400">on {formatCurrency(e.bookingAmount)}</div>
                               </div>
                               <span
-                                className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                className={`px-2 py-0.5 rounded text-[9px] font-semibold ${
                                   e.status === "PAID"
                                     ? "bg-emerald-100 text-emerald-800"
                                     : e.status === "APPROVED"
@@ -1155,7 +1155,7 @@ export default function ReferralsAndCommissionsPage() {
 
                   {partnerPayouts.length > 0 && (
                     <div className="space-y-1.5">
-                      <h4 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <h4 className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
                         <Banknote className="h-3 w-3" />
                         Payouts ({partnerPayouts.length})
                       </h4>
@@ -1163,11 +1163,11 @@ export default function ReferralsAndCommissionsPage() {
                         {partnerPayouts.map((x) => (
                           <div key={x.id} className="p-2.5 flex items-center justify-between gap-2">
                             <div>
-                              <div className="font-bold text-slate-900">{formatCurrency(x.amount)}</div>
+                              <div className="font-semibold text-slate-900">{formatCurrency(x.amount)}</div>
                               <div className="text-[10px] text-slate-400 font-mono">{x.referenceNumber}</div>
                             </div>
                             <div className="text-right text-[10px] text-slate-500">
-                              <div className="uppercase">{x.payoutMethod.replace("_", " ")}</div>
+                              <div className="capitalize">{x.payoutMethod.replace("_", " ")}</div>
                               <div>{formatDate(x.paidAt)}</div>
                             </div>
                           </div>

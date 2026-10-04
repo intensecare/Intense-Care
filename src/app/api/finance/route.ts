@@ -106,6 +106,17 @@ export async function POST(request: Request) {
       const invoice = await prisma.invoice.findUnique({ where: { id: d.invoiceId } });
       if (!invoice) return fail("Invoice not found.", 404);
 
+      // §13 edge case: a payment may not exceed the invoice's outstanding
+      // balance. Over-collection would push amountPaid above total and flip
+      // the invoice to PAID with untracked credit on the ledger. Half-a-paisa
+      // tolerance absorbs binary float noise on 2-decimal money fields.
+      if (d.amount - invoice.balanceDue > 0.005) {
+        return fail(
+          `Payment amount (₹${d.amount.toFixed(2)}) exceeds the outstanding balance (₹${invoice.balanceDue.toFixed(2)}).`,
+          400,
+        );
+      }
+
       // Atomic settlement: the payment receipt, the invoice/job status, and
       // the customer's lifetime-revenue counter commit together. The counter
       // is RECOMPUTED from the payment ledger inside the transaction, so

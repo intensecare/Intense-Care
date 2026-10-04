@@ -120,13 +120,13 @@ export default function DashboardPage() {
             <>
               <Link href="/quotations?raise=true">
                 <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs border-zinc-200 text-zinc-700 hover:bg-zinc-100">
-                  <Receipt className="h-3.5 w-3.5 text-rose-500" />
+                  <Receipt className="h-3.5 w-3.5 text-zinc-400" />
                   New Quotation
                 </Button>
               </Link>
               <Link href="/jobs?create=true">
-                <Button size="sm" className="h-9 gap-1.5 text-xs bg-zinc-900 text-white hover:bg-zinc-800 font-medium shadow-xs">
-                  <Briefcase className="h-3.5 w-3.5 text-rose-400" />
+                <Button size="sm" className="h-9 gap-1.5 text-xs bg-rose-500 text-white hover:bg-rose-600 font-medium shadow-xs">
+                  <Briefcase className="h-3.5 w-3.5" />
                   Schedule New Job
                 </Button>
               </Link>
@@ -136,7 +136,7 @@ export default function DashboardPage() {
       />
 
       {/* Row 1: Operations KPIs (no financial data — ops role) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
         <StatCard
           title="Today's Active Field Workers"
           value={`${activeWorkerCount} On Job`}
@@ -178,7 +178,7 @@ export default function DashboardPage() {
           <SuperAdminRevenueTrend />
         </>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
           <StatCard
             title="Assigned & Ready"
             value={visibleJobs.filter((j) => j.status === "ASSIGNED" || j.status === "SCHEDULED").length}
@@ -262,13 +262,13 @@ export default function DashboardPage() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <Link
                             href={`/jobs/${job.id}`}
-                            className="font-mono text-xs font-bold text-slate-900 hover:underline"
+                            className="font-mono text-xs font-semibold text-slate-900 hover:underline"
                           >
                             {job.id}
                           </Link>
                           <JobStatusBadge status={job.status} size="sm" />
                           {job.status === "ARRIVED" && (
-                            <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded animate-pulse">
+                            <span className="text-[10px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded">
                               Customer OTP Pending
                             </span>
                           )}
@@ -310,69 +310,51 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Quick Workflow Navigation Banner */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Link
-              href="/field"
-              className="p-4 rounded-xl border border-zinc-200/80 bg-white hover:border-zinc-300 hover:shadow-xs transition-all flex items-start gap-3 group"
-            >
-              <div className="p-2 rounded-lg bg-zinc-900 text-white shrink-0 group-hover:bg-rose-600 transition-colors">
-                <Smartphone className="h-4 w-4" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-zinc-900 flex items-center gap-1 group-hover:text-rose-600 transition-colors">
-                  Field Staff Portal
-                  <ArrowUpRight className="h-3 w-3 text-zinc-400 group-hover:text-rose-500" />
+          {/* Quick Workflow Navigation — quiet link rows, no icon tiles */}
+          <div className="rounded-lg border border-zinc-200 bg-white divide-y divide-zinc-100">
+            {[
+              {
+                href: "/field",
+                icon: Smartphone,
+                title: "Field Staff Portal",
+                desc: "Mobile view for Arrive, OTP verify, and checklists",
+              },
+              {
+                href: "/quality",
+                icon: ShieldCheck,
+                title: "Quality Inspector",
+                desc: "Rubric grading, defect flags & rework dispatch",
+              },
+              {
+                href: "/dispatcher",
+                icon: Sparkles,
+                title: "Dispatch Tower",
+                desc: "Tomorrow&apos;s queue and field-worker assignments",
+              },
+            ].map(({ href, icon: Icon, title, desc }) => (
+              <Link
+                key={href}
+                href={href}
+                className="px-4 py-3 flex items-center gap-3 hover:bg-zinc-50 transition-colors group"
+              >
+                <Icon className="h-4 w-4 text-zinc-400 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium text-zinc-800 group-hover:text-zinc-950">
+                    {title}
+                  </div>
+                  <p className="text-[11px] text-zinc-400 truncate">{desc}</p>
                 </div>
-                <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug">
-                  Mobile view for Arrive, OTP verify, and checklists
-                </p>
-              </div>
-            </Link>
-
-            <Link
-              href="/quality"
-              className="p-4 rounded-xl border border-zinc-200/80 bg-white hover:border-zinc-300 hover:shadow-xs transition-all flex items-start gap-3 group"
-            >
-              <div className="p-2 rounded-lg bg-zinc-900 text-white shrink-0 group-hover:bg-rose-600 transition-colors">
-                <ShieldCheck className="h-4 w-4" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-zinc-900 flex items-center gap-1 group-hover:text-rose-600 transition-colors">
-                  Quality Inspector
-                  <ArrowUpRight className="h-3 w-3 text-zinc-400 group-hover:text-rose-500" />
-                </div>
-                <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug">
-                  Rubric grading, defect flags & rework dispatch
-                </p>
-              </div>
-            </Link>
-
-            <Link
-              href="/dispatcher"
-              className="p-4 rounded-xl border border-zinc-200/80 bg-white hover:border-zinc-300 hover:shadow-xs transition-all flex items-start gap-3 group"
-            >
-              <div className="p-2 rounded-lg bg-zinc-900 text-white shrink-0 group-hover:bg-rose-600 transition-colors">
-                <Sparkles className="h-4 w-4" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-zinc-900 flex items-center gap-1 group-hover:text-rose-600 transition-colors">
-                  Dispatch Tower
-                  <ArrowUpRight className="h-3 w-3 text-zinc-400 group-hover:text-rose-500" />
-                </div>
-                <p className="text-[11px] text-zinc-500 mt-0.5 leading-snug">
-                  Tomorrow&apos;s queue and field-worker assignments
-                </p>
-              </div>
-            </Link>
+                <ArrowUpRight className="h-3.5 w-3.5 text-zinc-300 group-hover:text-zinc-500 shrink-0" />
+              </Link>
+            ))}
           </div>
         </div>
 
         {/* Right Col: Field Worker Workload & SMS Feed */}
         <div className="space-y-6">
           {/* Field Worker Workload */}
-          <div className="rounded-xl border border-zinc-200/80 bg-white p-4 shadow-xs">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-3 font-sans">
+          <div className="rounded-lg border border-zinc-200/80 bg-white p-4 shadow-xs">
+            <h3 className="text-xs font-semibold text-zinc-500 mb-3 font-sans">
               Field Worker Workload
             </h3>
             <div className="space-y-3">
@@ -384,23 +366,23 @@ export default function DashboardPage() {
                     className="p-2.5 rounded-md border border-slate-100 bg-slate-50/60 text-xs flex items-center justify-between"
                   >
                     <div className="space-y-0.5">
-                      <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                      <div className="font-medium text-zinc-800 flex items-center gap-1.5">
                         <span
-                          className={`h-2 w-2 rounded-full ${
-                            load > 0 ? "bg-emerald-500 animate-pulse" : "bg-blue-400"
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            load > 0 ? "bg-emerald-500" : "bg-zinc-300"
                           }`}
                         />
                         {w.name}
                       </div>
-                      <div className="text-[11px] text-slate-500">
+                      <div className="text-[11px] text-zinc-400">
                         {load > 0 ? `${load} active job${load === 1 ? "" : "s"} assigned` : "No active assignments"}
                       </div>
                     </div>
                     <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                      className={`px-1.5 py-0.5 rounded-md border bg-white text-[10px] font-medium ${
                         load > 0
-                          ? "bg-emerald-100 text-emerald-800"
-                          : "bg-slate-200 text-slate-700"
+                          ? "border-emerald-200 text-emerald-700"
+                          : "border-zinc-200 text-zinc-500"
                       }`}
                     >
                       {load > 0 ? "On Job" : "Ready"}
@@ -414,7 +396,7 @@ export default function DashboardPage() {
           {/* Gateway Dispatch Feed */}
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <h3 className="text-xs font-semibold text-slate-500">
                 SMS Gateway Activity
               </h3>
               <span className="text-[10px] text-slate-400">Server Audit Trail</span>
@@ -445,7 +427,7 @@ export default function DashboardPage() {
                           log.status === "SENT"
                             ? "text-emerald-700"
                             : log.status === "FAILED"
-                            ? "text-rose-700"
+                            ? "text-red-700"
                             : "text-amber-700"
                         }
                       >

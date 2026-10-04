@@ -9,6 +9,7 @@ import { getAllowedTransitions, JOB_STATUS_CONFIG } from "@/lib/state-machine";
 import type { Job } from "@/lib/types";
 import { serializeJob, redactJobForOps, withStaffNames } from "@/lib/server/serialize";
 import { recordActivity } from "@/lib/server/activity";
+import { syncJobEvent, cancelJobEvent } from "@/lib/server/google-calendar";
 
 /**
  * Serializes a single job for API responses with the same display data as the
@@ -230,6 +231,8 @@ export async function PATCH(
             : "All field workers unassigned (job returned to Scheduled)",
         actor: { id: user.id, name: user.name, role: user.role },
       });
+      // §1 Google Calendar: the event carries the team — refresh on crew change.
+      void syncJobEvent(id).catch(() => {});
       // Redact financial fields for non-super_admin callers on the way out.
       const { user: _u } = await requireUser();
       const full = await prisma.job.findUnique({
@@ -368,6 +371,13 @@ export async function PATCH(
       message: STATUS_EVENT_MESSAGES[status] || `Job moved to ${JOB_STATUS_CONFIG[status as Job["status"]]?.label || status}`,
       actor: { id: user.id, name: user.name, role: user.role },
     });
+
+    // §1 Google Calendar: refresh the event on job updates; cancel it on cancel.
+    if (status === "CANCELLED") {
+      void cancelJobEvent(id).catch(() => {});
+    } else {
+      void syncJobEvent(id).catch(() => {});
+    }
 
     // Server-authoritative commission settlement: when a referred job
     // completes, create the commission entry (idempotent) and update the

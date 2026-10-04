@@ -88,7 +88,7 @@ export default function CustomersPage() {
           <Button
             onClick={openCreate}
             size="sm"
-            className="h-9 gap-1.5 bg-slate-900 text-white font-medium"
+            className="h-9 gap-1.5 bg-rose-500 text-white font-medium"
           >
             <Plus className="h-4 w-4" />
             Register Customer
@@ -109,7 +109,7 @@ export default function CustomersPage() {
           />
         </div>
         {actionError && (
-          <p className="mt-2 text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+          <p className="mt-2 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
             {actionError}
           </p>
         )}
@@ -144,8 +144,8 @@ export default function CustomersPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900 text-base">{c.name}</span>
-                      <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 uppercase">
+                      <span className="font-semibold text-slate-900 text-base">{c.name}</span>
+                      <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800">
                         {c.status}
                       </span>
                       {partner && (
@@ -189,7 +189,7 @@ export default function CustomersPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                            className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                             onClick={(e) => {
                               e.stopPropagation();
                               setActionError("");
@@ -203,7 +203,7 @@ export default function CustomersPage() {
                       </div>
                     )}
                     <div className="text-xs text-slate-400">Lifetime Revenue</div>
-                    <div className="text-base font-bold text-slate-900">
+                    <div className="text-base font-semibold text-slate-900">
                       {typeof c.lifetimeRevenue === "number"
                         ? formatCurrency(c.lifetimeRevenue)
                         : "—"}
@@ -214,7 +214,7 @@ export default function CustomersPage() {
 
                 {/* Registered Properties Grid */}
                 <div className="space-y-2">
-                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                  <span className="text-[11px] font-semibold text-slate-500">
                     Registered Properties ({custProps.length})
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -149,7 +149,7 @@ export default function CustomerDetailPage() {
     return (
       <AdminLayout>
         <div className="flex flex-col items-center justify-center py-24 gap-3">
-          <AlertTriangle className="h-8 w-8 text-rose-500" />
+          <AlertTriangle className="h-8 w-8 text-red-500" />
           <p className="text-sm font-semibold text-slate-800">{pageError || "Customer not found."}</p>
           <Link href="/customers">
             <Button variant="outline" size="sm" className="text-xs">
@@ -304,7 +304,7 @@ export default function CustomerDetailPage() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                className="h-8 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                 onClick={() => {
                   setActionError("");
                   setIsDeleteOpen(true);
@@ -319,7 +319,7 @@ export default function CustomerDetailPage() {
       />
 
       {actionError && (
-        <p className="mb-4 text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+        <p className="mb-4 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
           {actionError}
         </p>
       )}
@@ -328,10 +328,10 @@ export default function CustomerDetailPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
         {isSuper && (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 shadow-xs">
-            <div className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
+            <div className="text-xs font-semibold text-emerald-800">
               Lifetime Revenue
             </div>
-            <div className="text-2xl font-bold text-emerald-700 mt-2">
+            <div className="text-2xl font-semibold text-emerald-700 mt-2">
               {formatCurrency(stats.lifetimeRevenue ?? 0)}
             </div>
             <div className="text-xs text-emerald-600 mt-1">
@@ -340,35 +340,35 @@ export default function CustomerDetailPage() {
           </div>
         )}
         {isSuper && (
-          <div className="rounded-lg border border-rose-200 bg-rose-50/40 p-4 shadow-xs">
-            <div className="text-xs font-semibold uppercase tracking-wider text-rose-800">
+          <div className="rounded-lg border border-red-200 bg-red-50/40 p-4 shadow-xs">
+            <div className="text-xs font-semibold text-red-800">
               Outstanding Balance
             </div>
-            <div className="text-2xl font-bold text-rose-700 mt-2">
+            <div className="text-2xl font-semibold text-red-700 mt-2">
               {formatCurrency(stats.outstanding ?? 0)}
             </div>
-            <div className="text-xs text-rose-600 mt-1">Awaiting collection</div>
+            <div className="text-xs text-red-600 mt-1">Awaiting collection</div>
           </div>
         )}
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Total Bookings
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">{stats.totalBookings}</div>
+          <div className="text-2xl font-semibold text-slate-900 mt-2">{stats.totalBookings}</div>
           <div className="text-xs text-slate-400 mt-1">All-time service bookings</div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Completed
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">{stats.completedJobs}</div>
+          <div className="text-2xl font-semibold text-slate-900 mt-2">{stats.completedJobs}</div>
           <div className="text-xs text-slate-400 mt-1">Delivered &amp; closed bookings</div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Active Pipeline
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">{stats.activeJobs}</div>
+          <div className="text-2xl font-semibold text-slate-900 mt-2">{stats.activeJobs}</div>
           <div className="text-xs text-slate-400 mt-1">Scheduled / in-progress jobs</div>
         </div>
       </div>
@@ -416,7 +416,7 @@ export default function CustomerDetailPage() {
                   <strong className="text-slate-700">{formatDate(customer.createdAt)}</strong>
                 </span>
                 <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                     customer.status === "active"
                       ? "bg-emerald-50 text-emerald-800"
                       : "bg-slate-200 text-slate-600"
@@ -434,12 +434,12 @@ export default function CustomerDetailPage() {
               {partner ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono font-bold text-slate-900">
+                    <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono font-semibold text-slate-900">
                       {partner.code}
                     </span>
                     <span className="font-semibold text-slate-800">{partner.name}</span>
                     <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                         partner.status === "active"
                           ? "bg-emerald-50 text-emerald-700"
                           : "bg-slate-200 text-slate-600"
@@ -494,13 +494,13 @@ export default function CustomerDetailPage() {
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-200 text-slate-700">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-700">
                           {c.category.replace("_", " ")}
                         </span>
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                             c.severity === "critical"
-                              ? "bg-rose-100 text-rose-800"
+                              ? "bg-red-100 text-red-800"
                               : c.severity === "high"
                               ? "bg-amber-100 text-amber-800"
                               : "bg-slate-100 text-slate-600"
@@ -524,9 +524,9 @@ export default function CustomerDetailPage() {
                     </div>
                     <div className="text-right shrink-0 space-y-1">
                       <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                           c.status === "open"
-                            ? "bg-rose-100 text-rose-800"
+                            ? "bg-red-100 text-red-800"
                             : "bg-emerald-100 text-emerald-800"
                         }`}
                       >
@@ -550,7 +550,7 @@ export default function CustomerDetailPage() {
             {canEdit && (
               <Button
                 size="sm"
-                className="h-8 text-xs bg-slate-900 text-white"
+                className="h-8 text-xs bg-rose-500 text-white"
                 onClick={() => {
                   setActionError("");
                   setPropertyDialog({ open: true, editing: null });
@@ -580,7 +580,7 @@ export default function CustomerDetailPage() {
                   <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                     <div className="flex items-center gap-2">
                       <Building2 className="h-4 w-4 text-blue-600 shrink-0" />
-                      <span className="font-bold text-slate-900 text-sm">{p.title}</span>
+                      <span className="font-semibold text-slate-900 text-sm">{p.title}</span>
                       <span className="capitalize px-2 py-0.2 rounded text-[10px] font-semibold bg-blue-50 text-blue-700">
                         {p.propertyType}
                       </span>
@@ -605,7 +605,7 @@ export default function CustomerDetailPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                            className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                             onClick={() => {
                               setActionError("");
                               setDeletePropertyTarget(p);
@@ -620,7 +620,7 @@ export default function CustomerDetailPage() {
                   </div>
 
                   <div className="flex items-start gap-1.5 text-slate-600">
-                    <MapPin className="h-3.5 w-3.5 text-rose-500 shrink-0 mt-0.5" />
+                    <MapPin className="h-3.5 w-3.5 text-zinc-400 shrink-0 mt-0.5" />
                     <span>
                       {p.address}
                       {p.city ? ` (${p.city})` : ""}
@@ -635,7 +635,7 @@ export default function CustomerDetailPage() {
                     <span>•</span>
                     <span>{p.carpetAreaSqFt ?? 1000} sq ft</span>
                     {p.recurringService && (
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                         Recurring: {p.recurringFrequency || "monthly"}
                       </span>
                     )}
@@ -686,7 +686,7 @@ export default function CustomerDetailPage() {
             <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                     <tr>
                       <th className="py-3 px-4">Scheduled</th>
                       <th className="py-3 px-4">Service</th>
@@ -712,7 +712,7 @@ export default function CustomerDetailPage() {
                           <JobStatusBadge status={j.status} />
                         </td>
                         {isSuper && (
-                          <td className="py-3 px-4 font-bold text-slate-900">
+                          <td className="py-3 px-4 font-semibold text-slate-900">
                             {formatCurrency(j.amount ?? 0)}
                           </td>
                         )}
@@ -750,7 +750,7 @@ export default function CustomerDetailPage() {
               <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px]">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                       <tr>
                         <th className="py-3 px-4">Invoice #</th>
                         <th className="py-3 px-4">Issued</th>
@@ -763,11 +763,11 @@ export default function CustomerDetailPage() {
                     <tbody className="divide-y divide-slate-100 text-slate-700">
                       {invoices.map((inv) => (
                         <tr key={inv.id} className="hover:bg-slate-50/60 transition-colors">
-                          <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                          <td className="py-3 px-4 font-mono font-semibold text-slate-900">
                             {inv.invoiceNumber}
                           </td>
                           <td className="py-3 px-4 text-slate-500">{formatDate(inv.issuedAt)}</td>
-                          <td className="py-3 px-4 font-bold text-slate-900">
+                          <td className="py-3 px-4 font-semibold text-slate-900">
                             {formatCurrency(inv.total)}
                           </td>
                           <td className="py-3 px-4">
@@ -777,7 +777,7 @@ export default function CustomerDetailPage() {
                             /
                             <span
                               className={
-                                inv.balanceDue > 0 ? "text-rose-600 font-bold" : "text-slate-400"
+                                inv.balanceDue > 0 ? "text-red-600 font-semibold" : "text-slate-400"
                               }
                             >
                               {" "}
@@ -792,7 +792,7 @@ export default function CustomerDetailPage() {
                               <Button
                                 size="sm"
                                 onClick={() => openPayment(inv)}
-                                className="h-7 text-xs bg-slate-900 text-white font-medium"
+                                className="h-7 text-xs bg-rose-500 text-white font-medium"
                               >
                                 Collect Payment
                               </Button>
@@ -818,7 +818,7 @@ export default function CustomerDetailPage() {
                       <div className="space-y-0.5">
                         <div className="font-semibold text-slate-800">
                           {formatCurrency(p.amount)}{" "}
-                          <span className="uppercase font-semibold text-[10px] text-slate-500">
+                          <span className="font-medium text-[10px] text-slate-500">
                             via {p.paymentMethod.replace("_", " ")}
                           </span>
                         </div>
@@ -845,7 +845,7 @@ export default function CustomerDetailPage() {
               <Button
                 size="sm"
                 onClick={() => setQuoteFormOpen(true)}
-                className="bg-slate-900 text-white text-xs h-8"
+                className="bg-rose-500 text-white text-xs h-8"
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Raise Quotation
@@ -867,8 +867,8 @@ export default function CustomerDetailPage() {
                     >
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-slate-900">{q.quoteNumber}</span>
-                          <span className="px-2 py-0.2 rounded text-[10px] font-bold uppercase bg-blue-50 text-blue-800">
+                          <span className="font-mono font-semibold text-slate-900">{q.quoteNumber}</span>
+                          <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-blue-50 text-blue-800">
                             {q.status}
                           </span>
                         </div>
@@ -878,7 +878,7 @@ export default function CustomerDetailPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <div className="text-base font-bold text-slate-900">
+                          <div className="text-base font-semibold text-slate-900">
                             {formatCurrency(q.total)}
                           </div>
                           <div className="text-[11px] text-slate-400">Subtotal + Tax</div>
@@ -908,7 +908,7 @@ export default function CustomerDetailPage() {
                             size="sm"
                             variant="outline"
                             onClick={() => handleDeleteQuote(q)}
-                            className="text-xs h-8 w-8 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                            className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                             title="Delete open quotation"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -1037,7 +1037,7 @@ export default function CustomerDetailPage() {
                 onFocus={(e) => e.target.select()}
                 onChange={(e) => setPayAmount(e.target.value === "" ? 0 : Number(e.target.value))}
                 required
-                className="text-xs font-bold"
+                className="text-xs font-semibold"
               />
             </div>
 
@@ -1069,7 +1069,7 @@ export default function CustomerDetailPage() {
               <Button type="button" variant="outline" size="sm" onClick={() => setPayInvoice(null)}>
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmittingPayment}>
+              <Button type="submit" size="sm" className="" disabled={isSubmittingPayment}>
                 {isSubmittingPayment ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

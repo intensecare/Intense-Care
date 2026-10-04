@@ -18,7 +18,7 @@ model User {
   name         String
   email        String   @unique
   phone        String
-  role         String   // "super_admin" | "ops_manager" | "staff"
+  role         String // "super_admin" | "ops_manager" | "staff"
   avatar       String?
   passwordHash String? // bcrypt hash; null = password login disabled until set
   active       Boolean  @default(true)
@@ -42,8 +42,9 @@ model Customer {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  properties Property[]
-  jobs       Job[]
+  properties   Property[]
+  jobs         Job[]
+  amcContracts AmcContract[]
 
   @@index([phone])
 }
@@ -67,8 +68,9 @@ model Property {
   recurringFrequency  String?
   createdAt           DateTime @default(now())
 
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  jobs     Job[]
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  jobs         Job[]
+  amcContracts AmcContract[]
 
   @@index([customerId])
 }
@@ -94,12 +96,12 @@ model Service {
 /// A company-authored quality rubric step that belongs to a service package.
 /// Jobs instantiate copies of these as JobChecklistItem records at booking.
 model ServiceChecklistItem {
-  id         String  @id @default(cuid())
-  serviceId  String
-  area       String
-  task       String
-  critical   Boolean @default(false)
-  position   Int     @default(0)
+  id        String  @id @default(cuid())
+  serviceId String
+  area      String
+  task      String
+  critical  Boolean @default(false)
+  position  Int     @default(0)
 
   service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
@@ -107,25 +109,26 @@ model ServiceChecklistItem {
 }
 
 model Job {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   customerId        String
   propertyId        String
   serviceId         String
   scheduledDate     String
   scheduledTimeSlot String
   assignedManagerId String?
-  assignedStaffIds  String[] @default([]) // directly-assigned field worker ids (first entry = lead worker)
+  assignedStaffIds  String[]  @default([]) // directly-assigned field worker ids (first entry = lead worker)
   amount            Float
-  paymentStatus     String   @default("UNPAID")
-  status            String   @default("SCHEDULED")
+  paymentStatus     String    @default("UNPAID")
+  status            String    @default("SCHEDULED")
   notes             String?
   qualityCheckId    String?
   referralPartnerId String?
   arrivedAt         DateTime?
   startedAt         DateTime?
   completedAt       DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  googleEventId     String? // §1 Google Calendar — event synced for this job (null = not connected)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   customer          Customer           @relation(fields: [customerId], references: [id])
   property          Property           @relation(fields: [propertyId], references: [id])
@@ -149,17 +152,17 @@ model Job {
 /// Per-job working checklist, instantiated from the service's rubric at
 /// booking time. Each item is completed/skipped/flagged by field workers.
 model JobChecklistItem {
-  id             String   @id @default(cuid())
-  jobId          String
-  area           String
-  task           String
-  critical       Boolean  @default(false)
-  status         String   @default("pending") // pending | completed | skipped | issue
-  skippedReason  String?
-  issueNotes     String?
-  photoEvidence  String?
-  completedBy    String?
-  completedAt    DateTime?
+  id            String    @id @default(cuid())
+  jobId         String
+  area          String
+  task          String
+  critical      Boolean   @default(false)
+  status        String    @default("pending") // pending | completed | skipped | issue
+  skippedReason String?
+  issueNotes    String?
+  photoEvidence String?
+  completedBy   String?
+  completedAt   DateTime?
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
@@ -210,12 +213,12 @@ model QualityCheck {
   jobId       String
   inspectorId String
   score       Int
-  decision    String   // "PASS" | "REWORK_REQUIRED"
+  decision    String // "PASS" | "REWORK_REQUIRED"
   notes       String?
   createdAt   DateTime @default(now())
 
-  job        Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  issues     QualityIssue[]
+  job    Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  issues QualityIssue[]
 
   @@index([jobId])
 }
@@ -339,42 +342,42 @@ model ReferralPartner {
   bankUpiId              String?
   createdAt              DateTime @default(now())
 
-  commissionRule    CommissionRule?  @relation(fields: [commissionRuleId], references: [id])
+  commissionRule    CommissionRule?   @relation(fields: [commissionRuleId], references: [id])
   commissionEntries CommissionEntry[]
   payouts           Payout[]
-  attributedJobs    Job[]            @relation("JobAttribution")
+  attributedJobs    Job[]             @relation("JobAttribution")
 
   @@index([status])
 }
 
 model CommissionRule {
-  id              String   @id @default(cuid())
-  name            String
-  partnerType     String   @default("interior_designer")
-  calculationType String   @default("percentage") // percentage | fixed | tiered | service_specific
-  value           Float    @default(10)
-  tierRules       Json?
+  id               String   @id @default(cuid())
+  name             String
+  partnerType      String   @default("interior_designer")
+  calculationType  String   @default("percentage") // percentage | fixed | tiered | service_specific
+  value            Float    @default(10)
+  tierRules        Json?
   serviceOverrides Json?
-  isDefault       Boolean  @default(false)
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
+  isDefault        Boolean  @default(false)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
 
   partners ReferralPartner[]
 }
 
 model CommissionEntry {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   partnerId        String
   referralId       String?
   jobId            String
   bookingAmount    Float
   commissionAmount Float
   ruleApplied      String
-  status           String   @default("COMMISSION_PENDING")
+  status           String    @default("COMMISSION_PENDING")
   approvedAt       DateTime?
   payoutId         String?
   reversedReason   String?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime  @default(now())
 
   partner ReferralPartner @relation(fields: [partnerId], references: [id])
   job     Job             @relation(fields: [jobId], references: [id])
@@ -415,9 +418,9 @@ model Expense {
 }
 
 model SystemSettings {
-  id          String   @id @default("singleton")
-  data        Json // full SystemSettings blob (tax, OTP policy, review URL, dispatch cutoff...)
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default("singleton")
+  data      Json // full SystemSettings blob (tax, OTP policy, review URL, dispatch cutoff...)
+  updatedAt DateTime @updatedAt
 }
 
 model AuditLog {
@@ -529,4 +532,73 @@ model CompletionInvite {
 
   @@index([jobId])
   @@index([customerId])
+}
+
+/// §2 AMC — recurring home-maintenance contract (classic use case: an NRI
+/// customer maintaining their elderly parents' home from abroad). Each
+/// contract auto-generates AmcVisit rows; a visit is executed with the same
+/// OTP → checklist → photos → QC discipline as a regular job.
+model AmcContract {
+  id                String   @id @default(cuid())
+  contractNumber    String   @unique
+  customerId        String
+  propertyId        String
+  serviceId         String? // default service performed each visit
+  // NRI owner abroad + trusted local contact on the ground
+  nriContactName    String?
+  nriContactPhone   String?
+  nriContactEmail   String?
+  localContactName  String?
+  localContactPhone String?
+  startDate         String // YYYY-MM-DD
+  endDate           String // YYYY-MM-DD
+  contractValue     Float
+  includedServices  String[] @default([])
+  visitCount        Int
+  frequency         String   @default("MONTHLY") // WEEKLY | BIMONTHLY | MONTHLY | QUARTERLY | CUSTOM
+  assignedStaffIds  String[] @default([])
+  emergencyContact  String?
+  paymentStatus     String   @default("PENDING") // PENDING | PARTIAL | PAID
+  status            String   @default("ACTIVE") // ACTIVE | EXPIRING_SOON | EXPIRED | CANCELLED
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  customer Customer   @relation(fields: [customerId], references: [id])
+  property Property   @relation(fields: [propertyId], references: [id])
+  visits   AmcVisit[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+/// One scheduled maintenance visit under an AMC contract. Optionally linked
+/// to a standard Job record so field execution reuses the strict pipeline.
+model AmcVisit {
+  id               String    @id @default(cuid())
+  contractId       String
+  visitNumber      Int
+  scheduledDate    String // YYYY-MM-DD
+  scheduledSlot    String?
+  status           String    @default("SCHEDULED") // SCHEDULED | REMINDED | IN_PROGRESS | COMPLETED | CANCELLED | RESCHEDULED
+  jobId            String?   @unique // optional spawned job running the state machine
+  arrivedAt        DateTime?
+  completedAt      DateTime?
+  otpVerified      Boolean   @default(false)
+  staffIds         String[]  @default([])
+  checklistSummary Json?
+  photoUrls        Json?
+  qcScore          Int?
+  issuesFound      String?
+  recommendations  String?
+  nriApproved      Boolean?
+  nriNotes         String?
+  reminderSentAt   DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  contract AmcContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId, scheduledDate])
+  @@index([status])
 }

@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { requireRole } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
+import { syncJobEvent } from "@/lib/server/google-calendar";
 import {
   serializeJob,
   redactJobForOps,
@@ -343,6 +344,11 @@ export async function POST(request: Request) {
       checklistItems: service.checklistTemplate.length,
       by: "api",
     });
+
+    // §1 Google Calendar: one event per booking (customer, service, time,
+    // address, team, contact, job id). Env-gated and fire-and-forget — a
+    // calendar outage can never fail a booking.
+    void syncJobEvent(result.job.id).catch(() => {});
 
     // Re-fetch with relations for the hydrated client shape. The invoice is
     // financial data: only returned to super_admins (ops/staff never see it).

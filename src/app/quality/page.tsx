@@ -144,10 +144,10 @@ export default function QualityManagementPage() {
     CHECKLIST_UPDATED: "bg-sky-50 text-sky-600",
     PHOTO_UPLOADED: "bg-blue-50 text-blue-600",
     QC_SUBMITTED: "bg-purple-50 text-purple-600",
-    REWORK_ASSIGNED: "bg-rose-50 text-rose-600",
+    REWORK_ASSIGNED: "bg-red-50 text-red-600",
     REWORK_COMPLETED: "bg-amber-50 text-amber-600",
     CUSTOMER_SIGNED: "bg-teal-50 text-teal-600",
-    ATTENTION_REQUESTED: "bg-rose-50 text-rose-600",
+    ATTENTION_REQUESTED: "bg-red-50 text-red-600",
     FEEDBACK_RECORDED: "bg-amber-50 text-amber-600",
     GOOGLE_REVIEW_CLICKED: "bg-emerald-50 text-emerald-600",
   };
@@ -261,7 +261,7 @@ export default function QualityManagementPage() {
           </span>
         </div>
         <span
-          className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${
+          className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md ${
             unreadCount > 0 ? "bg-rose-600 text-white" : "bg-white text-slate-500 border border-slate-200"
           }`}
         >
@@ -273,40 +273,40 @@ export default function QualityManagementPage() {
       {/* QC Summary Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Awaiting Initial Audit
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">
+          <div className="text-2xl font-semibold text-slate-900 mt-2">
             {jobs.filter((j) => j.status === "WORK_COMPLETED").length}
           </div>
           <div className="text-xs text-slate-400 mt-1">Ready for Inspector dispatch</div>
         </div>
 
-        <div className="rounded-lg border border-rose-200 bg-rose-50/40 p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-rose-700">
+        <div className="rounded-lg border border-red-200 bg-red-50/40 p-4 shadow-xs">
+          <div className="text-xs font-semibold text-red-700">
             Active Rework Tasks
           </div>
-          <div className="text-2xl font-bold text-rose-900 mt-2">
+          <div className="text-2xl font-semibold text-rose-600 mt-2">
             {jobs.filter((j) => j.status === "REWORK_REQUIRED" || j.status === "REWORK_COMPLETED").length}
           </div>
-          <div className="text-xs text-rose-600 mt-1">Assigned for correction</div>
+          <div className="text-xs text-red-600 mt-1">Assigned for correction</div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Audit Pass Rate
           </div>
-          <div className="text-2xl font-bold text-emerald-700 mt-2">
+          <div className="text-2xl font-semibold text-emerald-700 mt-2">
             {firstPassRate}%
           </div>
           <div className="text-xs text-slate-400 mt-1">First-pass quality score</div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Total Logged Defects
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">
+          <div className="text-2xl font-semibold text-slate-900 mt-2">
             {qualityIssues.length}
           </div>
           <div className="text-xs text-slate-400 mt-1">Across {completedJobsCount} completed job{completedJobsCount === 1 ? "" : "s"}</div>
@@ -354,12 +354,12 @@ export default function QualityManagementPage() {
                     >
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-slate-900 text-sm">
+                          <span className="font-mono font-semibold text-slate-900 text-sm">
                             {job.id}
                           </span>
                           <JobStatusBadge status={job.status} size="sm" />
                           {existingQC && (
-                            <span className="font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                            <span className="font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
                               Score: {existingQC.score}%
                             </span>
                           )}
@@ -435,7 +435,7 @@ export default function QualityManagementPage() {
 
           {/* Rework Defect Ledger */}
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <h3 className="text-xs font-semibold text-slate-500">
               Active Rework Tasks & Defect Traceability
             </h3>
 
@@ -450,12 +450,12 @@ export default function QualityManagementPage() {
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-slate-900">{issue.jobId}</span>
+                        <span className="font-mono font-semibold text-slate-900">{issue.jobId}</span>
                         <span className="font-semibold text-slate-800">{issue.area}</span>
                         <span
-                          className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase ${
+                          className={`px-1.5 py-0.2 rounded text-[10px] font-semibold ${
                             issue.severity === "critical"
-                              ? "bg-rose-600 text-white"
+                              ? "bg-red-600 text-white"
                               : "bg-amber-100 text-amber-800"
                           }`}
                         >
@@ -476,10 +476,10 @@ export default function QualityManagementPage() {
 
                     <div className="shrink-0 text-right">
                       <span
-                        className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                        className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${
                           issue.status === "resolved"
                             ? "bg-emerald-100 text-emerald-800"
-                            : "bg-rose-100 text-rose-800"
+                            : "bg-red-100 text-red-800"
                         }`}
                       >
                         {issue.status.replace("_", " ")}
@@ -502,10 +502,10 @@ export default function QualityManagementPage() {
         <div className="space-y-6">
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold uppercase tracking-wider text-slate-500 text-xs">
+              <h3 className="font-semibold text-slate-500 text-xs">
                 Field Activity — Live
               </h3>
-              <Radio className="h-4 w-4 text-emerald-500 animate-pulse" />
+              <Radio className="h-4 w-4 text-emerald-500" />
             </div>
             <p className="text-[11px] text-slate-500 leading-relaxed">
               What the field crew is doing right now, newest first.
@@ -543,7 +543,7 @@ export default function QualityManagementPage() {
           </div>
 
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs space-y-3 text-xs">
-            <h3 className="font-semibold uppercase tracking-wider text-slate-500">
+            <h3 className="font-semibold text-slate-500">
               Inspection Standards Rubric
             </h3>
             <p className="text-slate-500 text-[11px] leading-relaxed">
@@ -552,21 +552,21 @@ export default function QualityManagementPage() {
 
             <div className="space-y-2 pt-2 border-t border-slate-100">
               <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
-                <div className="font-bold text-slate-900">Kitchen & Appliances</div>
+                <div className="font-semibold text-slate-900">Kitchen & Appliances</div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Chimney baffle filters zero oil drip; hob brass burners cleared; inside cabinets vacuumed.
                 </p>
               </div>
 
               <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
-                <div className="font-bold text-slate-900">Bathrooms & Shower Glass</div>
+                <div className="font-semibold text-slate-900">Bathrooms & Shower Glass</div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Acid-free limescale removal on glass; commode rim disinfected; mirror polish streak-free.
                 </p>
               </div>
 
               <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
-                <div className="font-bold text-slate-900">Floors & Glazing</div>
+                <div className="font-semibold text-slate-900">Floors & Glazing</div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Single-disc buffing with zero water puddles; sliding track rail dirt completely extracted.
                 </p>
@@ -594,7 +594,7 @@ export default function QualityManagementPage() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between font-semibold">
                 <span>Inspection Quality Score (0 - 100%)</span>
-                <span className="text-base font-bold text-slate-900">{auditScore}%</span>
+                <span className="text-base font-semibold text-slate-900">{auditScore}%</span>
               </div>
               <input
                 type="range"
@@ -622,7 +622,7 @@ export default function QualityManagementPage() {
                     setAuditScore(96);
                     setIssuesList([]);
                   }}
-                  className={`py-2.5 rounded-lg border text-xs font-bold transition-all ${
+                  className={`py-2.5 rounded-lg border text-xs font-semibold transition-all ${
                     auditDecision === "PASS"
                       ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
                       : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
@@ -638,9 +638,9 @@ export default function QualityManagementPage() {
                     setAuditScore(75);
                     if (issuesList.length === 0) handleAddDefect();
                   }}
-                  className={`py-2.5 rounded-lg border text-xs font-bold transition-all ${
+                  className={`py-2.5 rounded-lg border text-xs font-semibold transition-all ${
                     auditDecision === "REWORK_REQUIRED"
-                      ? "bg-rose-600 text-white border-rose-600 shadow-sm"
+                      ? "bg-red-600 text-white border-red-600 shadow-sm"
                       : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                   }`}
                 >
@@ -682,7 +682,7 @@ export default function QualityManagementPage() {
                 {issuesList.map((issue, idx) => (
                   <div
                     key={idx}
-                    className="p-2.5 rounded bg-rose-50 border border-rose-200 space-y-1.5"
+                    className="p-2.5 rounded bg-red-50 border border-red-200 space-y-1.5"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <input
@@ -693,7 +693,7 @@ export default function QualityManagementPage() {
                           updated[idx].area = e.target.value;
                           setIssuesList(updated);
                         }}
-                        className="font-semibold bg-transparent border-b border-rose-200 pb-0.5 text-xs text-rose-900 focus:outline-none flex-1"
+                        className="font-semibold bg-transparent border-b border-red-200 pb-0.5 text-xs text-rose-600 focus:outline-none flex-1"
                         placeholder="Area (e.g. Kitchen, Master Bathroom)"
                       />
                       <select
@@ -703,7 +703,7 @@ export default function QualityManagementPage() {
                           updated[idx].severity = e.target.value as any;
                           setIssuesList(updated);
                         }}
-                        className="text-[10px] bg-white border border-rose-200 rounded px-1 py-0.5 font-medium text-slate-700"
+                        className="text-[10px] bg-white border border-red-200 rounded px-1 py-0.5 font-medium text-slate-700"
                       >
                         <option value="minor">Minor</option>
                         <option value="major">Major</option>
@@ -712,7 +712,7 @@ export default function QualityManagementPage() {
                       <button
                         type="button"
                         onClick={() => handleRemoveDefect(idx)}
-                        className="text-rose-500 hover:text-rose-700"
+                        className="text-zinc-400 hover:text-red-600"
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
@@ -726,7 +726,7 @@ export default function QualityManagementPage() {
                         updated[idx].itemDescription = e.target.value;
                         setIssuesList(updated);
                       }}
-                      className="w-full p-1.5 rounded bg-white border border-rose-200 text-xs text-slate-800"
+                      className="w-full p-1.5 rounded bg-white border border-red-200 text-xs text-slate-800"
                       placeholder="Defect description (e.g. Grease residue near chimney)"
                     />
 
@@ -738,7 +738,7 @@ export default function QualityManagementPage() {
                         updated[idx].notes = e.target.value;
                         setIssuesList(updated);
                       }}
-                      className="w-full p-1.5 rounded bg-white border border-rose-200 text-[11px] text-slate-600"
+                      className="w-full p-1.5 rounded bg-white border border-red-200 text-[11px] text-slate-600"
                       placeholder="Rework instructions for technician..."
                     />
                   </div>
@@ -755,7 +755,7 @@ export default function QualityManagementPage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white font-medium" disabled={isSubmittingAudit}>
+              <Button type="submit" size="sm" className="bg-rose-500 text-white font-medium" disabled={isSubmittingAudit}>
                 {isSubmittingAudit ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

@@ -120,40 +120,40 @@ export default function FinancePage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-xs font-semibold text-slate-500">
             Total Invoiced
           </div>
-          <div className="text-2xl font-bold text-slate-900 mt-2">
+          <div className="text-2xl font-semibold text-slate-900 mt-2">
             {formatCurrency(totalInvoiced)}
           </div>
           <div className="text-xs text-slate-400 mt-1">{invoices.length} Invoices Issued</div>
         </div>
 
         <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
+          <div className="text-xs font-semibold text-emerald-800">
             Actual Revenue Collected
           </div>
-          <div className="text-2xl font-bold text-emerald-700 mt-2">
+          <div className="text-2xl font-semibold text-emerald-700 mt-2">
             {formatCurrency(totalCollected)}
           </div>
           <div className="text-xs text-emerald-600 mt-1">Verified cash/bank receipts</div>
         </div>
 
-        <div className="rounded-lg border border-rose-200 bg-rose-50/40 p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-rose-800">
+        <div className="rounded-lg border border-red-200 bg-red-50/40 p-4 shadow-xs">
+          <div className="text-xs font-semibold text-red-800">
             Total Expenses
           </div>
-          <div className="text-2xl font-bold text-rose-700 mt-2">
+          <div className="text-2xl font-semibold text-red-700 mt-2">
             {formatCurrency(totalExpenses)}
           </div>
-          <div className="text-xs text-rose-600 mt-1">{expenses.length} Recorded expenses</div>
+          <div className="text-xs text-red-600 mt-1">{expenses.length} Recorded expenses</div>
         </div>
 
         <div className="rounded-lg border border-purple-200 bg-purple-50/40 p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-purple-800">
+          <div className="text-xs font-semibold text-purple-800">
             Referral Commissions Paid
           </div>
-          <div className="text-2xl font-bold text-purple-700 mt-2">
+          <div className="text-2xl font-semibold text-purple-700 mt-2">
             {formatCurrency(totalCommissionsPaid)}
           </div>
           <div className="text-xs text-purple-600 mt-1">
@@ -162,10 +162,10 @@ export default function FinancePage() {
         </div>
 
         <div className="rounded-lg border border-slate-900 bg-slate-900 text-white p-4 shadow-xs">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+          <div className="text-xs font-semibold text-slate-300">
             Net Operating Result
           </div>
-          <div className="text-2xl font-bold mt-2">
+          <div className="text-2xl font-semibold mt-2">
             {formatCurrency(netOperatingIncome)}
           </div>
           <div className="text-xs text-slate-400 mt-1">Collected revenue − Expenses − Commissions</div>
@@ -185,7 +185,7 @@ export default function FinancePage() {
             <Button
               size="sm"
               onClick={() => setShowExpenseModal(true)}
-              className="bg-slate-900 text-white text-xs h-8"
+              className="bg-rose-500 text-white text-xs h-8"
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
               Record Business Expense
@@ -204,7 +204,7 @@ export default function FinancePage() {
               <Button
                 size="sm"
                 onClick={() => setQuoteFormOpen(true)}
-                className="bg-slate-900 text-white text-xs h-8"
+                className="bg-rose-500 text-white text-xs h-8"
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Raise Quotation
@@ -225,7 +225,7 @@ export default function FinancePage() {
             <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                     <tr>
                       <th className="py-3 px-4">Invoice #</th>
                       <th className="py-3 px-4">Job ID</th>
@@ -248,7 +248,7 @@ export default function FinancePage() {
                           className="hover:bg-slate-50/60 transition-colors cursor-pointer"
                           title="Open invoice details"
                         >
-                          <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                          <td className="py-3 px-4 font-mono font-semibold text-slate-900">
                             {inv.invoiceNumber}
                           </td>
                           <td className="py-3 px-4 font-mono">
@@ -262,12 +262,12 @@ export default function FinancePage() {
                           <td className="py-3 px-4 text-slate-500">
                             {formatCurrency(inv.subtotal)} + {formatCurrency(inv.tax)}
                           </td>
-                          <td className="py-3 px-4 font-bold text-slate-900">
+                          <td className="py-3 px-4 font-semibold text-slate-900">
                             {formatCurrency(inv.total)}
                           </td>
                           <td className="py-3 px-4">
                             <span className="text-emerald-700 font-semibold">{formatCurrency(inv.amountPaid)}</span> /{" "}
-                            <span className={inv.balanceDue > 0 ? "text-rose-600 font-bold" : "text-slate-400"}>
+                            <span className={inv.balanceDue > 0 ? "text-red-600 font-semibold" : "text-slate-400"}>
                               {formatCurrency(inv.balanceDue)}
                             </span>
                           </td>
@@ -282,7 +282,7 @@ export default function FinancePage() {
                                   e.stopPropagation();
                                   handleOpenPaymentModal(inv);
                                 }}
-                                className="h-7 text-xs bg-slate-900 text-white font-medium"
+                                className="h-7 text-xs bg-rose-500 text-white font-medium"
                               >
                                 Collect Payment
                               </Button>
@@ -310,7 +310,7 @@ export default function FinancePage() {
             <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                     <tr>
                       <th className="py-3 px-4">Payment ID</th>
                       <th className="py-3 px-4">Job ID</th>
@@ -324,7 +324,7 @@ export default function FinancePage() {
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {payments.map((p) => (
                       <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                        <td className="py-3 px-4 font-mono font-semibold text-slate-900">
                           {p.id}
                         </td>
                         <td className="py-3 px-4 font-mono">
@@ -332,10 +332,10 @@ export default function FinancePage() {
                             {p.jobId}
                           </Link>
                         </td>
-                        <td className="py-3 px-4 font-bold text-emerald-700">
+                        <td className="py-3 px-4 font-semibold text-emerald-700">
                           {formatCurrency(p.amount)}
                         </td>
-                        <td className="py-3 px-4 uppercase font-semibold text-[11px] text-slate-700">
+                        <td className="py-3 px-4 font-semibold text-[11px] text-slate-700">
                           {p.paymentMethod}
                         </td>
                         <td className="py-3 px-4 font-mono text-slate-600 text-[11px]">
@@ -345,7 +345,7 @@ export default function FinancePage() {
                           {formatDateTime(p.paidAt)}
                         </td>
                         <td className="py-3 px-4">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
                             {p.status}
                           </span>
                         </td>
@@ -373,8 +373,8 @@ export default function FinancePage() {
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-slate-900">{q.quoteNumber}</span>
-                        <span className="px-2 py-0.2 rounded text-[10px] font-bold uppercase bg-blue-50 text-blue-800">
+                        <span className="font-mono font-semibold text-slate-900">{q.quoteNumber}</span>
+                        <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-blue-50 text-blue-800">
                           {q.status}
                         </span>
                       </div>
@@ -386,7 +386,7 @@ export default function FinancePage() {
 
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <div className="text-base font-bold text-slate-900">{formatCurrency(q.total)}</div>
+                        <div className="text-base font-semibold text-slate-900">{formatCurrency(q.total)}</div>
                         <div className="text-[11px] text-slate-400">Subtotal + Tax</div>
                       </div>
 
@@ -427,7 +427,7 @@ export default function FinancePage() {
                             setActionError("");
                             setDeleteTarget({ kind: "quote", id: q.id, label: q.quoteNumber });
                           }}
-                          className="text-xs h-8 w-8 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                          className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                           title="Delete open quotation"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -453,14 +453,14 @@ export default function FinancePage() {
             <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                     <tr>
                       <th className="py-3 px-4">Date</th>
                       <th className="py-3 px-4">Category</th>
                       <th className="py-3 px-4">Description</th>
                       <th className="py-3 px-4">Payment Method</th>
                       <th className="py-3 px-4">Reference</th>
-                      <th className="py-3 px-4 font-bold text-right">Amount</th>
+                      <th className="py-3 px-4 font-semibold text-right">Amount</th>
                       <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -476,27 +476,27 @@ export default function FinancePage() {
                           {formatDate(exp.date)}
                         </td>
                         <td className="py-3 px-4">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-700">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
                             {exp.category}
                           </span>
                         </td>
                         <td className="py-3 px-4 font-medium text-slate-900">
                           {exp.description}
                         </td>
-                        <td className="py-3 px-4 uppercase font-semibold text-[11px] text-slate-600">
+                        <td className="py-3 px-4 font-semibold text-[11px] text-slate-600">
                           {exp.paymentMethod.replace("_", " ")}
                         </td>
                         <td className="py-3 px-4 font-mono text-slate-500 text-[11px]">
                           {exp.reference || "—"}
                         </td>
-                        <td className="py-3 px-4 font-bold text-rose-700 text-right">
+                        <td className="py-3 px-4 font-semibold text-red-700 text-right">
                           {formatCurrency(exp.amount)}
                         </td>
                         <td className="py-3 px-4 text-right">
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-7 w-7 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                            className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                             onClick={(e) => {
                               e.stopPropagation();
                               setActionError("");
@@ -518,7 +518,7 @@ export default function FinancePage() {
       </Tabs>
 
       {actionError && (
-        <p className="mt-3 text-[11px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-2.5 py-1.5">
+        <p className="mt-3 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
           {actionError}
         </p>
       )}
@@ -584,8 +584,8 @@ export default function FinancePage() {
                       </div>
                     )}
                     <div className="p-2.5 flex justify-between bg-slate-50">
-                      <span className="font-bold text-slate-900">Total</span>
-                      <span className="font-bold text-slate-900">{formatCurrency(detailInvoice.total)}</span>
+                      <span className="font-semibold text-slate-900">Total</span>
+                      <span className="font-semibold text-slate-900">{formatCurrency(detailInvoice.total)}</span>
                     </div>
                     <div className="p-2.5 flex justify-between">
                       <span className="text-slate-500">Amount paid</span>
@@ -593,14 +593,14 @@ export default function FinancePage() {
                     </div>
                     <div className="p-2.5 flex justify-between">
                       <span className="text-slate-500">Balance due</span>
-                      <span className={detailInvoice.balanceDue > 0 ? "font-bold text-rose-600" : "font-semibold text-slate-400"}>
+                      <span className={detailInvoice.balanceDue > 0 ? "font-semibold text-red-600" : "font-semibold text-slate-400"}>
                         {formatCurrency(detailInvoice.balanceDue)}
                       </span>
                     </div>
                   </div>
 
                   <div className="space-y-1">
-                    <h4 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    <h4 className="text-[11px] font-semibold text-slate-500">
                       Settlements ({invoicePayments.length})
                     </h4>
                     {invoicePayments.length === 0 ? (
@@ -610,11 +610,11 @@ export default function FinancePage() {
                         {invoicePayments.map((p) => (
                           <div key={p.id} className="p-2.5 flex items-center justify-between">
                             <div>
-                              <div className="font-bold text-emerald-700">{formatCurrency(p.amount)}</div>
+                              <div className="font-semibold text-emerald-700">{formatCurrency(p.amount)}</div>
                               <div className="text-[10px] text-slate-400 font-mono">{p.transactionReference}</div>
                             </div>
                             <div className="text-right text-[10px] text-slate-500">
-                              <div className="uppercase">{p.paymentMethod.replace("_", " ")}</div>
+                              <div className="capitalize">{p.paymentMethod.replace("_", " ")}</div>
                               <div>{formatDateTime(p.paidAt)}</div>
                             </div>
                           </div>
@@ -628,7 +628,7 @@ export default function FinancePage() {
                   {detailInvoice.balanceDue > 0 && (
                     <Button
                       size="sm"
-                      className="text-xs bg-slate-900 text-white"
+                      className="text-xs bg-rose-500 text-white"
                       onClick={() => {
                         const target = detailInvoice;
                         setDetailInvoiceId(null);
@@ -662,7 +662,7 @@ export default function FinancePage() {
                   <DialogTitle className="flex items-center gap-2 text-base">
                     <FileText className="h-4 w-4 text-blue-600" />
                     {detailQuote.quoteNumber}
-                    <span className="px-2 py-0.2 rounded text-[10px] font-bold uppercase bg-blue-50 text-blue-800">
+                    <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-blue-50 text-blue-800">
                       {detailQuote.status}
                     </span>
                   </DialogTitle>
@@ -707,8 +707,8 @@ export default function FinancePage() {
                       <span className="font-semibold text-slate-800">{formatCurrency(detailQuote.tax)}</span>
                     </div>
                     <div className="p-2.5 flex justify-between bg-slate-50">
-                      <span className="font-bold text-slate-900">Total</span>
-                      <span className="font-bold text-slate-900">{formatCurrency(detailQuote.total)}</span>
+                      <span className="font-semibold text-slate-900">Total</span>
+                      <span className="font-semibold text-slate-900">{formatCurrency(detailQuote.total)}</span>
                     </div>
                   </div>
 
@@ -754,7 +754,7 @@ export default function FinancePage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                        className="text-xs text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                         onClick={() => {
                           const q = detailQuote;
                           setDetailQuoteId(null);
@@ -784,9 +784,9 @@ export default function FinancePage() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 text-base">
-                  <DollarSign className="h-4 w-4 text-rose-500" />
+                  <DollarSign className="h-4 w-4 text-zinc-400" />
                   {formatCurrency(detailExpense.amount)}
-                  <span className="px-2 py-0.2 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-700">
+                  <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
                     {detailExpense.category}
                   </span>
                 </DialogTitle>
@@ -826,7 +826,7 @@ export default function FinancePage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                  className="text-xs text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
                   onClick={() => {
                     const exp = detailExpense;
                     setDetailExpenseId(null);
@@ -920,7 +920,7 @@ export default function FinancePage() {
                 onFocus={(e) => e.target.select()}
                 onChange={(e) => setPayAmount(e.target.value === "" ? 0 : Number(e.target.value))}
                 required
-                className="text-xs font-bold"
+                className="text-xs font-semibold"
               />
             </div>
 
@@ -957,7 +957,7 @@ export default function FinancePage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmittingPayment}>
+              <Button type="submit" size="sm" className="" disabled={isSubmittingPayment}>
                 {isSubmittingPayment ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1008,7 +1008,7 @@ export default function FinancePage() {
                 onFocus={(e) => e.target.select()}
                 onChange={(e) => setExpAmount(e.target.value === "" ? 0 : Number(e.target.value))}
                 required
-                className="text-xs font-bold"
+                className="text-xs font-semibold"
               />
             </div>
 
@@ -1056,7 +1056,7 @@ export default function FinancePage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-slate-900 text-white" disabled={isSubmittingExpense}>
+              <Button type="submit" size="sm" className="" disabled={isSubmittingExpense}>
                 {isSubmittingExpense ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

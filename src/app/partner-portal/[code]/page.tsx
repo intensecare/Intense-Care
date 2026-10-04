@@ -81,7 +81,7 @@ export default function PartnerPortalPage() {
   if (error || !partner) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-xl shadow-md border border-slate-200 text-center max-w-md w-full">
+        <div className="bg-white p-8 rounded-lg shadow-md border border-slate-200 text-center max-w-md w-full">
           <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <Share2 className="h-6 w-6" />
           </div>
@@ -91,7 +91,7 @@ export default function PartnerPortalPage() {
               `The referral partner code provided (${partnerCode}) is invalid or has expired. Please check your partner link or contact operations support.`}
           </p>
           <Link href="/login">
-            <Button size="sm" className="bg-slate-900 text-white">
+            <Button size="sm" className="">
               Return to Staff Portal
             </Button>
           </Link>
@@ -131,17 +131,17 @@ export default function PartnerPortalPage() {
               <ChevronLeft className="h-4 w-4" />
             </Link>
             <div>
-              <div className="text-sm font-bold text-slate-900">
+              <div className="text-sm font-semibold text-slate-900">
                 Intense Care Partner Network
               </div>
-              <div className="text-[10px] text-purple-700 font-semibold uppercase tracking-wider">
+              <div className="text-[10px] text-purple-700 font-semibold">
                 Official Affiliate Dashboard
               </div>
             </div>
           </div>
 
           <div className="text-right">
-            <div className="text-xs font-bold text-slate-900">{partner.name}</div>
+            <div className="text-xs font-semibold text-slate-900">{partner.name}</div>
             <div className="text-[10px] text-slate-400 capitalize">
               {partner.partnerType.replace("_", " ")}
             </div>
@@ -152,12 +152,12 @@ export default function PartnerPortalPage() {
       {/* Main Container */}
       <main className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
         {/* Welcome Banner */}
-        <div className="rounded-xl border border-purple-200 bg-purple-900 text-white p-6 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="rounded-lg border border-purple-200 bg-purple-900 text-white p-6 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider bg-purple-800 text-purple-200 px-2 py-0.5 rounded">
+            <span className="text-[10px] font-semibold bg-purple-800 text-purple-200 px-2 py-0.5 rounded">
               {partner.status === "active" ? "Verified Partner" : "Partner (Inactive)"}
             </span>
-            <h1 className="text-xl sm:text-2xl font-bold">
+            <h1 className="text-xl sm:text-2xl font-semibold">
               Welcome, {partner.name}
             </h1>
             <p className="text-xs text-purple-200 leading-relaxed max-w-lg">
@@ -166,18 +166,18 @@ export default function PartnerPortalPage() {
           </div>
 
           <div className="bg-purple-800/80 p-3 rounded-lg border border-purple-700 text-center sm:text-right shrink-0">
-            <div className="text-[10px] uppercase font-semibold text-purple-300">
+            <div className="text-[10px] font-semibold text-purple-300">
               Your Exclusive Referral Code
             </div>
-            <div className="text-xl font-mono font-black text-amber-300 tracking-wider mt-0.5">
+            <div className="text-xl font-mono font-semibold text-amber-300 tracking-wider mt-0.5">
               {partner.code}
             </div>
           </div>
         </div>
 
         {/* Shareable Link & QR Code Box */}
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+          <h3 className="text-xs font-semibold text-slate-500">
             Your Tracking Links & Promo Tools
           </h3>
 
@@ -223,10 +223,10 @@ export default function PartnerPortalPage() {
         {/* Stats Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-            <span className="text-[10px] font-semibold uppercase text-slate-400">
+            <span className="text-[10px] font-semibold text-slate-400">
               Total Clients Referred
             </span>
-            <div className="text-2xl font-bold text-slate-900 mt-1">
+            <div className="text-2xl font-semibold text-slate-900 mt-1">
               {partner.totalReferrals}
             </div>
             <div className="text-[11px] text-emerald-600 font-medium">
@@ -235,30 +235,30 @@ export default function PartnerPortalPage() {
           </div>
 
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-            <span className="text-[10px] font-semibold uppercase text-slate-400">
+            <span className="text-[10px] font-semibold text-slate-400">
               Generated Sales
             </span>
-            <div className="text-2xl font-bold text-slate-900 mt-1">
+            <div className="text-2xl font-semibold text-slate-900 mt-1">
               {formatCurrency(partner.totalRevenueGenerated)}
             </div>
             <div className="text-[11px] text-slate-400">Gross deep clean value</div>
           </div>
 
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-            <span className="text-[10px] font-semibold uppercase text-slate-400">
+            <span className="text-[10px] font-semibold text-slate-400">
               Earned Commission
             </span>
-            <div className="text-2xl font-bold text-emerald-700 mt-1">
+            <div className="text-2xl font-semibold text-emerald-700 mt-1">
               {formatCurrency(partner.totalCommissionEarned)}
             </div>
             <div className="text-[11px] text-slate-400">Lifetime earnings</div>
           </div>
 
           <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 shadow-xs">
-            <span className="text-[10px] font-semibold uppercase text-amber-700">
+            <span className="text-[10px] font-semibold text-amber-700">
               Pending Payout
             </span>
-            <div className="text-2xl font-bold text-amber-900 mt-1">
+            <div className="text-2xl font-semibold text-amber-900 mt-1">
               {formatCurrency(partner.totalCommissionPending)}
             </div>
             <div className="text-[11px] text-amber-700 font-medium">Ready for transfer</div>
@@ -266,7 +266,7 @@ export default function PartnerPortalPage() {
         </div>
 
         {/* Commission Entries Table */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
           <div className="p-4 bg-slate-50/75 border-b border-slate-200">
             <h3 className="text-sm font-semibold text-slate-900">
               Referred Jobs & Commission Ledger
@@ -278,7 +278,7 @@ export default function PartnerPortalPage() {
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[11px]">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
                 <tr>
                   <th className="py-3 px-4">Booking Ref</th>
                   <th className="py-3 px-4">Date</th>
@@ -297,7 +297,7 @@ export default function PartnerPortalPage() {
                 ) : (
                   partnerCommissions.map((c) => (
                     <tr key={c.id} className="hover:bg-slate-50/60">
-                      <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                      <td className="py-3 px-4 font-mono font-semibold text-slate-900">
                         {c.jobId}
                       </td>
                       <td className="py-3 px-4 text-slate-500">
@@ -306,12 +306,12 @@ export default function PartnerPortalPage() {
                       <td className="py-3 px-4 font-semibold text-slate-900">
                         {formatCurrency(c.bookingAmount)}
                       </td>
-                      <td className="py-3 px-4 font-bold text-emerald-700">
+                      <td className="py-3 px-4 font-semibold text-emerald-700">
                         {formatCurrency(c.commissionAmount)}
                       </td>
                       <td className="py-3 px-4">
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                             c.status === "PAID"
                               ? "bg-emerald-100 text-emerald-800"
                               : c.status === "APPROVED"
@@ -332,7 +332,7 @@ export default function PartnerPortalPage() {
 
         {/* Payout History */}
         {partnerPayouts.length > 0 && (
-          <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+          <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
             <div className="p-4 bg-slate-50/75 border-b border-slate-200">
               <h3 className="text-sm font-semibold text-slate-900">Settlement History</h3>
               <p className="text-xs text-slate-500">Commissions paid out to your account</p>
@@ -341,12 +341,12 @@ export default function PartnerPortalPage() {
               {partnerPayouts.map((p) => (
                 <div key={p.id} className="p-4 flex items-center justify-between text-xs">
                   <div>
-                    <div className="font-bold text-slate-900">{formatCurrency(p.amount)}</div>
+                    <div className="font-semibold text-slate-900">{formatCurrency(p.amount)}</div>
                     <div className="text-[11px] text-slate-400">
                       {formatDate(p.createdAt)} · {p.payoutMethod.replace("_", " ")} · {p.referenceNumber}
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
                     {p.status}
                   </span>
                 </div>

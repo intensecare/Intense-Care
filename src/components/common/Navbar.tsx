@@ -98,8 +98,8 @@ export function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
         {/* Quick New Job Button - Super Admin Only */}
         {currentUser?.role === "super_admin" && (
           <Link href="/jobs?create=true">
-            <Button size="sm" className="h-8 text-xs bg-zinc-900 hover:bg-zinc-800 text-white font-medium rounded px-3 shadow-xs border border-zinc-800">
-              <Plus className="h-3.5 w-3.5 mr-1 text-rose-400" />
+            <Button size="sm" className="h-8 text-xs bg-rose-500 hover:bg-rose-600 text-white font-medium rounded px-3 shadow-xs border border-zinc-800">
+              <Plus className="h-3.5 w-3.5 mr-1" />
               <span className="hidden sm:inline">New Booking</span>
               <span className="sm:hidden">New</span>
             </Button>
@@ -118,7 +118,7 @@ export function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
           >
             <Bell className="h-4 w-4" />
             {smsGatewayLogs.some((l) => l.status === "FAILED") && (
-              <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-rose-600" />
+              <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-red-500" />
             )}
           </button>
 
@@ -151,11 +151,11 @@ export function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
                       <div className="flex items-center justify-between font-medium text-zinc-900">
                         <span className="truncate font-mono">{n.jobId || "—"}</span>
                         <span
-                          className={`text-[10px] uppercase font-mono px-1 rounded ${
+                          className={`text-[10px] font-mono px-1 rounded ${
                             n.status === "SENT"
                               ? "bg-emerald-100 text-emerald-800"
                               : n.status === "FAILED"
-                              ? "bg-rose-100 text-rose-800"
+                              ? "bg-red-100 text-red-800"
                               : "bg-amber-100 text-amber-800"
                           }`}
                         >
@@ -176,14 +176,14 @@ export function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
         {/* User Chip & Logout */}
         {currentUser && (
           <div className="flex items-center gap-2 pl-2 border-l border-zinc-200">
-            <div className="h-7 w-7 rounded bg-black text-white flex items-center justify-center text-xs font-semibold">
+            <div className="h-7 w-7 rounded bg-rose-500 text-white flex items-center justify-center text-xs font-semibold">
               {currentUser.name.charAt(0)}
             </div>
             <div className="hidden lg:block text-left">
               <div className="text-xs font-medium text-zinc-900 leading-none">
                 {currentUser.name}
               </div>
-              <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono mt-0.5">
+              <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
                 {currentUser.role.replace("_", " ")}
               </div>
             </div>
