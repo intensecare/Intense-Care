@@ -64,6 +64,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { compressImageForUpload } from "@/lib/image-compress";
+import { QrLinkPanel } from "@/components/common/QrLinkPanel";
 
 /**
  * Pipeline stage → the display section that matters at that stage (PDF §4).
@@ -913,6 +914,10 @@ export default function JobDetailPage() {
       <div className="mb-6">
         <JobTimeline job={job} />
       </div>
+
+      {/* §35 Unified QR & Secure Links panel — mint per purpose with one tap.
+          Tokens are hashed server-side; links are revealed once on mint. */}
+      {canManage && <QrLinkPanel jobId={job.id} />}
 
       {/* Tabbed Job Detail Content — the active tab follows the pipeline
           stage; the live dot shows the file auto-syncs while open. */}

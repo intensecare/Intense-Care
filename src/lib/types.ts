@@ -22,6 +22,8 @@ export type JobStatus =
   | "QUALITY_CHECK"
   | "PASS"
   | "REWORK_REQUIRED"
+  | "REWORK_ASSIGNED" // §19 rework dispatched to a specific staff member
+  | "REWORK_IN_PROGRESS" // §19 staff opened the rework link / started work
   | "REWORK_COMPLETED"
   | "REINSPECTION"
   | "CUSTOMER_APPROVAL"

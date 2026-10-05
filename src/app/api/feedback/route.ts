@@ -5,6 +5,7 @@ import { prisma } from "@/lib/server/prisma";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { recordActivity } from "@/lib/server/activity";
+import { resolveQrToken } from "@/lib/server/qr-service";
 
 /** Invite tokens are stored only as SHA-256 hashes (see completion-service). */
 function hashToken(token: string): string {
@@ -22,7 +23,13 @@ const BodySchema = z.object({
 /**
  * POST /api/feedback — records post-service customer feedback on the
  * completion invite (token-gated, public to the customer holding the link).
- * The invite's token is verified server-side; raw tokens are never stored.
+ *
+ * Two token flavors are accepted so both handover surfaces agree:
+ *  1. legacy completion-invite token (SHA-256 hash stored on the invite);
+ *  2. unified QR CUSTOMER_APPROVAL token — the /approval/[token] page uses
+ *     this one, so ratings submitted from the secure approval link land on
+ *     the same invite record (§24: feedback is part of the single journey).
+ * Raw tokens are never stored.
  */
 export async function POST(request: Request) {
   try {
@@ -34,14 +41,39 @@ export async function POST(request: Request) {
       );
     }
 
-    const invite = await prisma.completionInvite.findUnique({
+    let invite = await prisma.completionInvite.findUnique({
       where: { tokenHash: hashToken(parsed.data.token) },
     });
+
+    // Fallback: unified QR approval token. Only a live, unexpired,
+    // unrevoked CUSTOMER_APPROVAL token may attach feedback.
     if (!invite) {
-      return NextResponse.json(
-        { success: false, error: "This link is invalid or has expired." },
-        { status: 404 }
-      );
+      const resolved = await resolveQrToken(parsed.data.token, "CUSTOMER_APPROVAL");
+      if (!resolved.ok) {
+        return NextResponse.json(
+          { success: false, error: "This link is invalid or has expired." },
+          { status: 404 }
+        );
+      }
+      const { tokenRow, job } = resolved.data;
+      invite = await prisma.completionInvite.findFirst({
+        where: { jobId: job.id },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!invite) {
+        // Jobs approved purely through the QR journey may have no invite yet —
+        // create a carrier record so the rating still lands on the job.
+        invite = await prisma.completionInvite.create({
+          data: {
+            // Unique, non-secret carrier hash (the QR service never exposes
+            // token hash material outside its module).
+            tokenHash: `qr:${tokenRow.id}`,
+            tokenLast4: tokenRow.id.slice(-4),
+            jobId: job.id,
+            customerId: job.customerId,
+          },
+        });
+      }
     }
 
     const updated = await prisma.completionInvite.update({

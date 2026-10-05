@@ -114,7 +114,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   REWORK_REQUIRED: {
     label: "Rework Required",
-    shortDescription: "Defects found during QC, assigned to field staff",
+    shortDescription: "Defects found during QC, awaiting dispatch to field staff",
     color: {
       bg: "bg-rose-50",
       text: "text-rose-700",
@@ -123,9 +123,31 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
       badgeVariant: "destructive",
     },
   },
+  REWORK_ASSIGNED: {
+    label: "Rework Assigned",
+    shortDescription: "Rework tasks dispatched to the assigned field staff",
+    color: {
+      bg: "bg-orange-50",
+      text: "text-orange-700",
+      border: "border-orange-300",
+      dot: "bg-orange-500",
+      badgeVariant: "destructive",
+    },
+  },
+  REWORK_IN_PROGRESS: {
+    label: "Rework In Progress",
+    shortDescription: "Field staff opened the rework link and started corrective work",
+    color: {
+      bg: "bg-orange-50",
+      text: "text-orange-800",
+      border: "border-orange-300",
+      dot: "bg-orange-500",
+      badgeVariant: "destructive",
+    },
+  },
   REWORK_COMPLETED: {
     label: "Rework Completed",
-    shortDescription: "Staff finished rework tasks, ready for reinspection",
+    shortDescription: "Staff finished corrective work, ready for reinspection",
     color: {
       bg: "bg-amber-50",
       text: "text-amber-700",
@@ -328,6 +350,13 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           buttonVariant: "destructive",
           allowedRoles: ["super_admin", "ops_manager"],
         },
+        {
+          status: "REWORK_ASSIGNED",
+          label: "Mark Rework Required & Dispatch",
+          description: "Flag defects, notify staff and mint the rework secure link",
+          buttonVariant: "destructive",
+          allowedRoles: ["super_admin", "ops_manager"],
+        },
       ];
 
     case "PASS":
@@ -341,6 +370,41 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
       ];
 
     case "REWORK_REQUIRED":
+      // §19: rework is DISPATCHED (notification + REWORK token mint) by the
+      // ops desk; the REWORK_REQUIRED → REWORK_ASSIGNED edge below fires
+      // server-side when the rework link is opened / notification sent.
+      return [
+        {
+          status: "REWORK_ASSIGNED",
+          label: "Dispatch Rework",
+          description: "Send rework task + secure link to the assigned staff",
+          allowedRoles: ["super_admin", "ops_manager", "staff"],
+        },
+        {
+          status: "REWORK_COMPLETED",
+          label: "Mark Rework Completed",
+          description: "Field worker completed corrective rework tasks (Field App)",
+          allowedRoles: ["super_admin", "staff"],
+        },
+      ];
+
+    case "REWORK_ASSIGNED":
+      return [
+        {
+          status: "REWORK_IN_PROGRESS",
+          label: "Start Rework",
+          description: "Staff opened the rework link and began corrective work",
+          allowedRoles: ["super_admin", "staff"],
+        },
+        {
+          status: "REWORK_COMPLETED",
+          label: "Mark Rework Completed",
+          description: "Field worker completed corrective rework tasks (Field App)",
+          allowedRoles: ["super_admin", "staff"],
+        },
+      ];
+
+    case "REWORK_IN_PROGRESS":
       return [
         {
           status: "REWORK_COMPLETED",
@@ -450,10 +514,16 @@ export function validateTransition(
   }
 
   if (nextStatus === "IN_PROGRESS" && job.otpVerification.status !== "verified") {
-    return {
-      allowed: false,
-      reason: "Customer OTP must be verified before starting job.",
-    };
+    // The customer may also verify via the secure-link confirmation flow
+    // (§8 NRI remote) — the API layer checks customerConfirmedAt for that
+    // path; this type-level gate only applies when no confirmation exists.
+    const confirmedElsewhere = (job as unknown as { customerConfirmedAt?: string | null }).customerConfirmedAt;
+    if (!confirmedElsewhere) {
+      return {
+        allowed: false,
+        reason: "Customer verification (OTP or secure-link confirmation) is required before starting the job.",
+      };
+    }
   }
 
   return { allowed: true };

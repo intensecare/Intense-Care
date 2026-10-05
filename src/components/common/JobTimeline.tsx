@@ -53,6 +53,8 @@ const ORDERED_STEPS: {
 const STATUS_STEP_MAP: Partial<Record<JobStatus, JobStatus>> = {
   PASS: "QUALITY_CHECK",
   REWORK_REQUIRED: "QUALITY_CHECK",
+  REWORK_ASSIGNED: "QUALITY_CHECK",
+  REWORK_IN_PROGRESS: "QUALITY_CHECK",
   REWORK_COMPLETED: "QUALITY_CHECK",
   REINSPECTION: "QUALITY_CHECK",
   CLOSED: "FEEDBACK_REQUESTED",
@@ -77,7 +79,12 @@ function buildWavePath(count: number): string {
 }
 
 export function JobTimeline({ job, className }: JobTimelineProps) {
-  const isRework = job.status === "REWORK_REQUIRED" || job.status === "REWORK_COMPLETED" || job.status === "REINSPECTION";
+  const isRework =
+    job.status === "REWORK_REQUIRED" ||
+    job.status === "REWORK_ASSIGNED" ||
+    job.status === "REWORK_IN_PROGRESS" ||
+    job.status === "REWORK_COMPLETED" ||
+    job.status === "REINSPECTION";
   const isCancelled = job.status === "CANCELLED";
 
   const currentIndex = ORDERED_STEPS.findIndex((s) => s.status === STATUS_STEP_MAP[job.status] || s.status === job.status);

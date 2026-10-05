@@ -329,16 +329,18 @@ export async function PATCH(
     }
 
     // OTP integrity gate: CUSTOMER_VERIFIED may ONLY be reached through the
-    // server-verified OTP flow (/api/otp/verify), never by mirroring a status
-    // value directly — for any role. This closes the bypass where a client
-    // PATCH could skip customer verification entirely.
+    // server-verified OTP flow (/api/otp/verify) or the customer's secure-link
+    // confirmation (customerConfirmedAt set by /api/customer/job/[token]),
+    // never by mirroring a status value directly — for any role. This closes
+    // the bypass where a client PATCH could skip customer verification.
     if (status === "CUSTOMER_VERIFIED") {
-      const verified = await prisma.otpChallenge.findFirst({
-        where: { jobId: id, status: "VERIFIED" },
-      });
-      if (!verified) {
+      const [verified, confirmed] = await Promise.all([
+        prisma.otpChallenge.findFirst({ where: { jobId: id, status: "VERIFIED" } }),
+        prisma.job.findUnique({ where: { id }, select: { customerConfirmedAt: true } }),
+      ]);
+      if (!verified && !confirmed?.customerConfirmedAt) {
         return NextResponse.json(
-          { success: false, error: "Customer OTP must be verified before this transition." },
+          { success: false, error: "Customer verification (OTP or secure-link confirmation) is required before this transition." },
           { status: 409 }
         );
       }
@@ -377,6 +379,17 @@ export async function PATCH(
       void cancelJobEvent(id).catch(() => {});
     } else {
       void syncJobEvent(id).catch(() => {});
+    }
+
+    // §16 unified flow: work completion fires the QC notification + QC token
+    // mint server-side (field app and manager link both benefit).
+    if (status === "WORK_COMPLETED") {
+      try {
+        const { onWorkCompleted } = await import("@/lib/server/workflow-service");
+        void onWorkCompleted(id, { id: user.id, name: user.name }).catch(() => {});
+      } catch {
+        // never fail the transition on notification issues
+      }
     }
 
     // Server-authoritative commission settlement: when a referred job

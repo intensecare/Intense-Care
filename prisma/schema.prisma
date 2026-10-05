@@ -60,6 +60,10 @@ model Property {
   bedrooms            Int      @default(1)
   bathrooms           Int      @default(1)
   areaSqFt            Int      @default(1000)
+  // §11 GPS coordinates for arrival geofencing (null = not captured yet;
+  // arrival then requires an explicit bypass reason until coords are set).
+  lat                 Float?
+  lng                 Float?
   accessCode          String?
   accessNotes         String?
   parkingInstructions String?
@@ -127,6 +131,24 @@ model Job {
   startedAt         DateTime?
   completedAt       DateTime?
   googleEventId     String? // §1 Google Calendar — event synced for this job (null = not connected)
+  // §11 GPS-verified arrival: the coordinates the manager reported when they
+  // tapped [ARRIVED] and how the gate decided. arrivalVerification = "gps"
+  // (inside geofence) | "manual" (outside/unavailable + explicit reason). The
+  // distance is stored (metres) so the audit timeline can show the verdict.
+  arrivalLat        Float?
+  arrivalLng        Float?
+  arrivalAccuracy   Float?
+  arrivalVerification String?
+  arrivalDistanceM  Float?
+  arrivalBypassReason String?
+  customerConfirmedAt DateTime?
+  // Unified QR/link workflow wiring (§3): the customer-confirmation token and
+  // the current QR tokens resolve back to this single Job ID — never a copy.
+  jobSerial         String?
+  customerTokenId   String?
+  approvedAt        DateTime?
+  approvedBy        String?
+  approvalMethod    String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -143,6 +165,7 @@ model Job {
   reworkTasks       ReworkTask[]
   complaints        Complaint[]
   commissionEntries CommissionEntry[]
+  qrTokens          QrToken[]
 
   @@index([scheduledDate])
   @@index([status])
@@ -415,6 +438,33 @@ model Expense {
   reference     String?
   createdBy     String
   createdAt     DateTime @default(now())
+}
+
+/// Unified dynamic QR / secure-link token (§3–§6). A QR contains ONLY the
+/// random token — every permission decision is made here: purpose, expiry,
+/// revocation, and per-use counters. The raw token is never persisted — only
+/// its SHA-256 hash — so a database dump cannot mint working links.
+model QrToken {
+  id           String    @id @default(cuid())
+  tokenHash    String    @unique // SHA-256 hex of the raw token
+  tokenLast4   String // masked display only
+  purpose      String // CUSTOMER_JOB | CUSTOMER_VERIFICATION | CUSTOMER_APPROVAL | MANAGER_JOB | QC_INSPECTION | REWORK | REINSPECTION
+  jobId        String
+  expiresAt    DateTime? // null = governed by job status (e.g. QC link until revoked)
+  revokedAt    DateTime?
+  revokedBy    String?
+  revokedReason String?
+  usageCount   Int       @default(0)
+  lastUsedAt   DateTime?
+  createdBy    String?
+  createdByName String?
+  createdAt    DateTime  @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([purpose])
+  @@index([jobId, purpose])
 }
 
 model SystemSettings {

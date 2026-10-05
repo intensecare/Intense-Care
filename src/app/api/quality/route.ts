@@ -162,15 +162,34 @@ export async function POST(request: Request) {
             data: { reworkTaskId: task.id },
           });
         }
+        // §19 unified loop: flag → dispatch (mint REWORK token + notify) so the
+        // job lands in REWORK_ASSIGNED, not a limbo state.
         await prisma.job.update({
           where: { id: d.jobId },
-          data: { status: "REWORK_REQUIRED", qualityCheckId: qc.id },
+          data: { status: "REWORK_ASSIGNED", qualityCheckId: qc.id },
         });
+        try {
+          const { mintQrToken } = await import("@/lib/server/qr-service");
+          const { notifyReworkAssigned } = await import("@/lib/server/notify");
+          const minted = await mintQrToken(d.jobId, "REWORK", { id: user.id, name: user.name });
+          if (minted.success) void notifyReworkAssigned(d.jobId, minted.data.linkUrl).catch(() => {});
+          else void notifyReworkAssigned(d.jobId).catch(() => {});
+        } catch {
+          // notification/token failure must never fail the QC decision
+        }
       } else {
+        // §17/§21 unified flow: PASS → customer handover (approval token +
+        // invite + notification) is minted server-side, never by the client.
         await prisma.job.update({
           where: { id: d.jobId },
-          data: { status: "CUSTOMER_APPROVAL", qualityCheckId: qc.id },
+          data: { status: "PASS", qualityCheckId: qc.id },
         });
+        try {
+          const { onQcPassed } = await import("@/lib/server/workflow-service");
+          void onQcPassed(d.jobId, { id: user.id, name: user.name }).catch(() => {});
+        } catch {
+          // handover mint failure must never fail the QC decision
+        }
       }
 
       logger.info("quality.check_submitted", { jobId: d.jobId, decision: d.decision, by: user.id });
@@ -259,6 +278,16 @@ export async function POST(request: Request) {
 
       await authorizeJobAccess(d.jobId);
       const now = new Date();
+      // §20/§21 unified flow: reinspection pass lands on PASS first — the
+      // customer handover (approval token + invite + notification) is minted
+      // server-side, then the pre-existing transition still completes.
+      await prisma.job.update({ where: { id: d.jobId }, data: { status: "PASS" } });
+      try {
+        const { onQcPassed } = await import("@/lib/server/workflow-service");
+        await onQcPassed(d.jobId, { id: user.id, name: user.name });
+      } catch {
+        // handover mint failure must never fail the reinspection
+      }
       await prisma.$transaction([
         prisma.job.update({ where: { id: d.jobId }, data: { status: "CUSTOMER_APPROVAL" } }),
         prisma.qualityIssue.updateMany({

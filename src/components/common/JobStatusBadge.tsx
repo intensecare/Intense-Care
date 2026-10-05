@@ -25,7 +25,10 @@ export function JobStatusBadge({
   const tone =
     status === "COMPLETED" || status === "PASS"
       ? "success"
-      : status === "REWORK_REQUIRED" || status === "CANCELLED"
+      : status === "REWORK_REQUIRED" ||
+        status === "REWORK_ASSIGNED" ||
+        status === "REWORK_IN_PROGRESS" ||
+        status === "CANCELLED"
       ? "alert"
       : status === "SCHEDULED" ||
         status === "QUALITY_CHECK" ||
