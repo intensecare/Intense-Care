@@ -114,7 +114,7 @@ export default function DashboardPage() {
     <AdminLayout>
       <PageHeader
         title="Operations Dispatch & Overview"
-        description="Real-time control tower for on-site field workers, customer OTP verification, and independent QC audits."
+        description="Real-time control tower for on-site field workers, secure customer confirmation, and independent QC audits."
         actions={
           currentRole === "super_admin" ? (
             <>
@@ -269,7 +269,7 @@ export default function DashboardPage() {
                           <JobStatusBadge status={job.status} size="sm" />
                           {job.status === "ARRIVED" && (
                             <span className="text-[10px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded">
-                              Customer OTP Pending
+                              Customer Confirmation Pending
                             </span>
                           )}
                         </div>
@@ -317,7 +317,7 @@ export default function DashboardPage() {
                 href: "/field",
                 icon: Smartphone,
                 title: "Field Staff Portal",
-                desc: "Mobile view for Arrive, OTP verify, and checklists",
+                desc: "Mobile view for Arrive, customer confirmation, and checklists",
               },
               {
                 href: "/quality",
@@ -405,7 +405,7 @@ export default function DashboardPage() {
             <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
               {smsGatewayLogs.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-6">
-                  No OTP dispatches recorded yet.
+                  No customer notifications recorded yet.
                 </p>
               ) : (
                 smsGatewayLogs.slice(0, 7).map((log) => (
@@ -419,7 +419,7 @@ export default function DashboardPage() {
                       </span>
                     </div>
                     <p className="text-slate-700 text-[11px] leading-tight">
-                      Arrival OTP to {log.recipientMasked}
+                      Customer notification to {log.recipientMasked}
                     </p>
                     <div className="text-[10px] font-medium">
                       <span

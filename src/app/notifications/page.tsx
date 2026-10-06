@@ -41,7 +41,7 @@ export default function NotificationsPage() {
     <AdminLayout>
       <PageHeader
         title="SMS Gateway Dispatch Logs"
-        description="Server-side audit trail of every 2Factor SMS dispatch: customer arrival OTPs. Recipients are masked; message bodies and provider session ids are never exposed."
+        description="Server-side audit trail of every customer notification dispatch (WhatsApp-first with SMS fallback). Recipients are masked; message bodies and provider session ids are never exposed."
         breadcrumbs={[
           { label: "Operations", href: "/" },
           { label: "Notifications" },
@@ -81,15 +81,15 @@ export default function NotificationsPage() {
         </div>
       </div>
 
-      {/* SMS Gateway (2Factor AUTOGEN OTP dispatches) */}
+      {/* SMS Gateway (customer notification dispatches) */}
       <div className="bg-white border border-slate-200 rounded-lg mb-5 shadow-xs overflow-hidden">
         <div className="p-3.5 bg-slate-50/75 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-slate-700" />
             <div>
-              <h3 className="text-sm font-semibold text-slate-900">SMS Gateway — Arrival OTPs (2Factor)</h3>
+              <h3 className="text-sm font-semibold text-slate-900">SMS Gateway — Customer Notifications</h3>
               <p className="text-[11px] text-slate-500">
-                Provider-generated OTPs delivered via 2Factor's pre-approved DLT template.
+                Arrival, rework and completion notifications delivered via the SMS gateway.
               </p>
             </div>
           </div>
@@ -100,7 +100,7 @@ export default function NotificationsPage() {
 
         {smsGatewayLogs.length === 0 ? (
           <div className="p-4 text-xs text-slate-400 text-center">
-            {loaded ? "No OTP dispatches recorded yet." : "Loading dispatch history…"}
+            {loaded ? "No dispatches recorded yet." : "Loading dispatch history…"}
           </div>
         ) : (
           <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
@@ -157,13 +157,13 @@ export default function NotificationsPage() {
           All ({smsGatewayLogs.length})
         </button>
         <button
-          onClick={() => setPurposeFilter("OTP_VERIFICATION")}
+          onClick={() => setPurposeFilter("CUSTOMER_ARRIVED")}
           className={`px-3 py-1 rounded text-xs font-semibold flex items-center gap-1 ${
-            purposeFilter === "OTP_VERIFICATION" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            purposeFilter === "CUSTOMER_ARRIVED" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
           }`}
         >
           <Smartphone className="h-3 w-3" />
-          Arrival OTP
+          Arrival Notices
         </button>
       </div>
 

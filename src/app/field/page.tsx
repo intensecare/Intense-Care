@@ -3,7 +3,6 @@
 import React, { useState } from "react";
 import { useApp } from "@/lib/app-context";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
-import { OTPModal } from "@/components/common/OTPModal";
 import { formatDateTime, cn } from "@/lib/utils";
 import {
   Smartphone,
@@ -13,7 +12,6 @@ import {
   Check,
   CheckCircle2,
   Clock,
-  KeyRound,
   Play,
   Camera,
   Layers,
@@ -47,7 +45,6 @@ export default function FieldStaffPage() {
     refreshJobs,
     refreshQuality,
     refreshPhotos,
-    sendJobArrivalOTP,
     updateChecklistItem,
     addJobPhoto,
     completeReworkTask,
@@ -69,7 +66,6 @@ export default function FieldStaffPage() {
   const [selectedJobId, setSelectedJobId] = useState<string>(
     assignedJobs[0]?.id || ""
   );
-  const [isOtpOpen, setIsOtpOpen] = useState(false);
   const [photoArea, setPhotoArea] = useState("Kitchen");
   const [photoType, setPhotoType] = useState<"before" | "after">("before");
   const [photoDataUrl, setPhotoDataUrl] = useState("");
@@ -119,21 +115,19 @@ export default function FieldStaffPage() {
   const jobIssues = qualityIssues.filter((i) => i.jobId === currentJob?.id && i.status !== "resolved" && i.status !== "reinspected_pass");
   const jobRework = reworkTasks.filter((r) => r.jobId === currentJob?.id && r.status !== "completed");
 
-  // Server-rejected transition on the job currently open (e.g. OTP gate).
+  // Server-rejected transition on the job currently open (e.g. confirmation gate).
   const currentTransitionError =
     transitionError && currentJob && transitionError.jobId === currentJob.id ? transitionError.message : null;
 
-  // Lead-worker gate: the FIRST entry of assignedStaffIds controls the
-  // customer OTP flow (receive via SMS, enter/verify, unlock work). Support
-  // workers on the same job execute it without OTP control. The owner may
-  // override; the ops_manager supervises and never verifies entry — the
-  // customer reads the OTP to the worker standing on site.
+  // Lead-worker context: the FIRST entry of assignedStaffIds is the lead.
+  // Confirmation itself is performed by the CUSTOMER on their secure link —
+  // the lead worker simply waits for it (the desk can mint/share that link).
   const isLeadForJob =
     currentUser.role === "super_admin" ||
     currentJob?.assignedManagerId === currentUser.id ||
     currentJob?.assignedStaffIds?.[0] === currentUser.id;
 
-  // Role separation: field EXECUTION (arrival, OTP, checklist, photos,
+  // Role separation: field EXECUTION (arrival, checklist, photos,
   // completing work) belongs to the assigned field worker; the owner may
   // override from the desk. The ops_manager (QC) gets a read-only supervisor
   // view — dispatch and quality audits are theirs, physical work is not.
@@ -172,21 +166,16 @@ export default function FieldStaffPage() {
     }
     showToast("Arrival confirmed!");
     if (isLeadForJob) {
-      // Wait for the server to confirm ARRIVED, then open the OTP modal —
-      // opening it triggers the real SMS dispatch (2Factor AUTOGEN).
+      // The desk/manager mints the customer-verification link on arrival;
+      // the crew waits for the customer to confirm on that secure link.
       await refreshJobs();
-      setIsOtpOpen(true);
     }
   };
 
   const handleStartJob = async () => {
     if (!currentJob) return;
-    if (currentJob.otpVerification.status !== "verified") {
-      if (isLeadForJob) {
-        setIsOtpOpen(true);
-      } else {
-        showToast("Waiting for the lead worker to verify the customer OTP.");
-      }
+    if (!currentJob.customerConfirmedAt) {
+      showToast("Waiting for the customer to confirm arrival on their secure link.");
       return;
     }
     setIsProcessingAction(true);
@@ -270,7 +259,10 @@ export default function FieldStaffPage() {
         return { label: "Mark Arrived at Property", run: handleMarkArrived, tone: "coral" as const };
       case "ARRIVED":
         return isLeadForJob
-          ? { label: "Enter Customer OTP to Unlock Entry", run: () => setIsOtpOpen(true), tone: "amber" as const }
+          ? { label: "Wait for Customer Confirmation (Secure Link)", run: async () => {
+              await refreshJobs();
+              showToast("The customer confirms on their secure link — the desk can re-share it from the job file.");
+            }, tone: "amber" as const }
           : null;
       case "CUSTOMER_VERIFIED":
         return { label: "Start Job & Begin Cleaning", run: handleStartJob, tone: "coral" as const };
@@ -462,7 +454,7 @@ export default function FieldStaffPage() {
                   <Eye className="h-4 w-4" />
                   Supervisor View — read-only
                 </div>
-                Arrival, OTP verification, checklist and evidence uploads are performed by the assigned field worker on their device. Your desk controls dispatch (Jobs) and quality audits (Quality Control).
+                Arrival, customer confirmation, checklist and evidence uploads are performed by the assigned field worker on their device. Your desk controls dispatch (Jobs) and quality audits (Quality Control).
               </div>
             )}
 
@@ -487,25 +479,22 @@ export default function FieldStaffPage() {
               </Button>
             )}
 
-            {/* Step 2: ARRIVED -> Verify Customer OTP (lead worker only) */}
+            {/* Step 2: ARRIVED -> wait for customer confirmation (secure link) */}
             {currentJob.status === "ARRIVED" && canExecuteFieldWork && (
               <div className="space-y-2">
                 {isLeadForJob ? (
                   <>
-                    <Button
-                      onClick={() => setIsOtpOpen(true)}
-                      className="w-full h-12 text-sm font-semibold bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg shadow-sm"
-                    >
-                      <KeyRound className="h-4 w-4 mr-2" />
-                      Enter Customer OTP to Unlock Entry
-                    </Button>
+                    <div className="w-full h-12 flex items-center justify-center text-sm font-semibold bg-amber-100 text-amber-900 rounded-lg border border-amber-300">
+                      <Clock className="h-4 w-4 mr-2" />
+                      Waiting for Customer Confirmation
+                    </div>
                     <div className="p-2.5 rounded bg-amber-50 border border-amber-200 text-amber-900 text-xs">
-                      <strong>Notice:</strong> Cleaning equipment cannot be unloaded until the customer shares their 6-digit OTP (sent by SMS to their registered number) and it is verified.
+                      <strong>Notice:</strong> Work unlocks only after the customer confirms team arrival on their secure link. The desk can share that link from the job file (QR &amp; Links panel).
                     </div>
                   </>
                 ) : (
                   <div className="p-3 rounded bg-slate-50 border border-slate-200 text-slate-700 text-xs">
-                    <strong>Lead worker step:</strong> the lead worker assigned to this job must enter the customer OTP to unlock entry. You can begin your assigned tasks once verification completes.
+                    <strong>Lead worker step:</strong> the customer must confirm team arrival on their secure link before work starts. You can begin your assigned tasks once confirmation completes.
                   </div>
                 )}
               </div>
@@ -774,17 +763,6 @@ export default function FieldStaffPage() {
         </main>
       )}
 
-      {/* OTP Modal — mounted ONLY for the lead worker (or owner override) */}
-      {currentJob && isLeadForJob && canExecuteFieldWork && (
-        <OTPModal
-          job={currentJob}
-          isOpen={isOtpOpen}
-          onClose={() => setIsOtpOpen(false)}
-          onSuccess={() => {
-            showToast("Customer OTP verified! Work unlocked.");
-          }}
-        />
-      )}
 
       {/* Add Photo Modal */}
       {showPhotoModal && (
@@ -976,7 +954,7 @@ export default function FieldStaffPage() {
                 </>
               ) : (
                 <>
-                  {fieldPrimaryAction.tone === "amber" && <KeyRound className="h-4 w-4 mr-2" />}
+                  {fieldPrimaryAction.tone === "amber" && <Clock className="h-4 w-4 mr-2" />}
                   {fieldPrimaryAction.label}
                 </>
               )}

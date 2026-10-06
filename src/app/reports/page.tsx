@@ -254,7 +254,7 @@ export default function ReportsPage() {
                   <div>
                     <div className="font-semibold text-slate-900">{w.name}</div>
                     <div className="text-[11px] text-slate-500">
-                      {w.completed} job{w.completed === 1 ? "" : "s"} closed • led {w.leadJobs} (OTP holder)
+                      {w.completed} job{w.completed === 1 ? "" : "s"} closed • led {w.leadJobs} as lead
                     </div>
                   </div>
 

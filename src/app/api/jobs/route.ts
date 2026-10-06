@@ -11,7 +11,6 @@ import {
   serializeInvoice,
   serializeChecklistItem,
   withStaffNames,
-  type JobOtpResolvedState,
   ok,
   fail,
   readJson,
@@ -41,59 +40,16 @@ interface JobDisplayContext {
   /** id → name; ops_manager/staff cannot read the user directory, so names
    *  are resolved here rather than in the client. */
   userNameById: Map<string, string>;
-  verifiedByJob: Map<string, { updatedAt: Date; createdByUserId: string }>;
-  pendingByJob: Set<string>;
 }
 
 /**
- * Batch-resolves the display data every dispatch surface needs: worker names
- * and the authoritative OTP verification state per job. Serializing without
- * this used to hardcode otpVerification.status="none", which clobbered the
- * verified state on every re-sync and made the field app ask for the
- * customer's OTP a second time.
+ * Batch-resolves worker display names for every dispatch surface.
  */
-async function buildJobDisplayContext(jobIds: string[]): Promise<JobDisplayContext> {
-  const [users, challenges] = await Promise.all([
-    prisma.user.findMany({ select: { id: true, name: true } }),
-    jobIds.length
-      ? prisma.otpChallenge.findMany({
-          where: { jobId: { in: jobIds }, status: { in: ["PENDING", "VERIFIED"] } },
-          orderBy: { createdAt: "desc" },
-          select: { jobId: true, status: true, updatedAt: true, createdByUserId: true },
-        })
-      : Promise.resolve(
-          [] as { jobId: string; status: string; updatedAt: Date; createdByUserId: string }[]
-        ),
-  ]);
-
-  const ctx: JobDisplayContext = {
+async function buildJobDisplayContext(): Promise<JobDisplayContext> {
+  const users = await prisma.user.findMany({ select: { id: true, name: true } });
+  return {
     userNameById: new Map(users.map((u) => [u.id, u.name])),
-    verifiedByJob: new Map(),
-    pendingByJob: new Set(),
   };
-  for (const c of challenges) {
-    if (c.status === "VERIFIED") {
-      if (!ctx.verifiedByJob.has(c.jobId)) {
-        ctx.verifiedByJob.set(c.jobId, { updatedAt: c.updatedAt, createdByUserId: c.createdByUserId });
-      }
-    } else if (!ctx.verifiedByJob.has(c.jobId)) {
-      ctx.pendingByJob.add(c.jobId);
-    }
-  }
-  return ctx;
-}
-
-function otpDisplayState(jobId: string, ctx: JobDisplayContext): JobOtpResolvedState | undefined {
-  const verified = ctx.verifiedByJob.get(jobId);
-  if (verified) {
-    return {
-      status: "verified",
-      verifiedAt: verified.updatedAt.toISOString(),
-      verifiedBy: verified.createdByUserId,
-    };
-  }
-  if (ctx.pendingByJob.has(jobId)) return { status: "pending" };
-  return undefined;
 }
 
 /**
@@ -113,11 +69,11 @@ export async function GET() {
         orderBy: { updatedAt: "desc" },
         include: JOB_LIST_INCLUDE,
       });
-      const ctx = await buildJobDisplayContext(jobs.map((j) => j.id));
+      const ctx = await buildJobDisplayContext();
       return NextResponse.json({
         success: true,
         data: jobs.map((j) =>
-          withStaffNames(serializeJob(j, otpDisplayState(j.id, ctx)), ctx.userNameById)
+          withStaffNames(serializeJob(j), ctx.userNameById)
         ),
       });
     }
@@ -146,12 +102,12 @@ export async function GET() {
       });
     }
 
-    const ctx = await buildJobDisplayContext((jobs as JobListRow[]).map((j) => j.id));
+    const ctx = await buildJobDisplayContext();
     return NextResponse.json({
       success: true,
       data: (jobs as JobListRow[]).map((j) =>
         withStaffNames(
-          redactJobForOps(serializeJob(j, otpDisplayState(j.id, ctx))),
+          redactJobForOps(serializeJob(j)),
           ctx.userNameById
         )
       ),
@@ -362,8 +318,8 @@ export async function POST(request: Request) {
     });
 
     const isSuperAdmin = user.role === "super_admin";
-    // Fresh job: no OTP challenges exist yet; resolve names for the store.
-    const createdCtx = await buildJobDisplayContext([result.job.id]);
+    // Fresh job: resolve names for the store.
+    const createdCtx = await buildJobDisplayContext();
     return NextResponse.json(
       {
         success: true,
@@ -371,8 +327,8 @@ export async function POST(request: Request) {
           job: full
             ? withStaffNames(
                 isSuperAdmin
-                  ? serializeJob(full, otpDisplayState(full.id, createdCtx))
-                  : redactJobForOps(serializeJob(full, otpDisplayState(full.id, createdCtx))),
+                  ? serializeJob(full)
+                  : redactJobForOps(serializeJob(full)),
                 createdCtx.userNameById
               )
             : null,

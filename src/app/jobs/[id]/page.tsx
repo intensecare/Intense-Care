@@ -7,7 +7,6 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { JobStatusBadge, PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { JobTimeline } from "@/components/common/JobTimeline";
 import { BeforeAfterGallery } from "@/components/common/BeforeAfterGallery";
-import { OTPModal } from "@/components/common/OTPModal";
 import { PrintableInvoiceModal } from "@/components/common/PrintableInvoiceModal";
 import { ImageLightboxModal } from "@/components/common/ImageLightboxModal";
 import { PromptModal } from "@/components/common/PromptModal";
@@ -282,7 +281,6 @@ export default function JobDetailPage() {
       // so the ops desk can select and copy it manually.
     }
   };
-  const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
   const [photoUploadOpen, setPhotoUploadOpen] = useState(false);
   const [photoArea, setPhotoArea] = useState("Kitchen");
   const [photoType, setPhotoType] = useState<"before" | "after">("before");
@@ -385,7 +383,7 @@ export default function JobDetailPage() {
   }, [job?.status, job, currentRole]);
 
   // Role separation on this file: field-execution controls (checklist ticks,
-  // evidence uploads, arrival/OTP) belong to the assigned field worker; the
+  // evidence uploads, arrival) belong to the assigned field worker; the
   // owner may override. The ops_manager runs dispatch + QC and gets a
   // read-only execution view.
   const canExecuteFieldWork = currentRole === "super_admin" || currentRole === "staff";
@@ -474,13 +472,6 @@ export default function JobDetailPage() {
     return { id, name: viaStore?.name || viaServer || `Worker ${idx + 1}` };
   });
   const leadWorker = assignedWorkers[0];
-  // The customer OTP belongs to the lead worker on site (the customer reads
-  // the code to THEM). The ops desk never verifies entry on the customer's
-  // behalf — only the lead worker (or the owner as override) may enter it.
-  const isLeadViewer =
-    currentUser?.role === "super_admin" ||
-    leadWorker?.id === currentUser?.id ||
-    (currentUser?.role === "staff" && job.assignedStaffIds?.[0] === currentUser?.id);
   const jobChecklist = checklistItems.filter((item) => item.jobId === job.id);
   const jobPhotos = photos.filter((p) => p.jobId === job.id);
   const qc = qualityChecks.find((q) => q.jobId === job.id);
@@ -512,7 +503,7 @@ export default function JobDetailPage() {
   );
 
   // --- §5 Next-Action: derive the single primary action for this state ---
-  const otpStillNeeded = job.status === "ARRIVED" && job.otpVerification.status !== "verified";
+  const customerNotConfirmed = job.status === "ARRIVED" && !job.customerConfirmedAt;
   const teamUnassigned = job.assignedStaffIds.length === 0;
   const hasTransition = (target: string) => allowedTransitions.some((t) => t.status === target);
 
@@ -533,8 +524,8 @@ export default function JobDetailPage() {
           ? { kind: "transition", target: "ARRIVED", label: "Mark Arrival On Site", hint: "The worker taps arrived in the field app." }
           : null;
       case "ARRIVED":
-        return otpStillNeeded
-          ? { kind: "otp", label: "Verify Customer OTP", hint: "The customer reads the OTP to the lead worker.", tone: "amber" }
+        return customerNotConfirmed
+          ? { kind: "otp", label: "Await Customer Confirmation", hint: "The customer confirms team arrival on their secure link.", tone: "amber" }
           : null;
       case "CUSTOMER_VERIFIED":
         return hasTransition("IN_PROGRESS")
@@ -582,7 +573,9 @@ export default function JobDetailPage() {
     if (nextAction.kind === "transition" && nextAction.target) {
       void handleExecuteTransition(nextAction.target);
     } else if (nextAction.kind === "otp") {
-      setIsOtpModalOpen(true);
+      setActionError(
+        "Customer confirmation through the secure link is required — share the Customer Verification link via the QR & Links panel."
+      );
     } else if (nextAction.kind === "assign") {
       openAssignmentModal();
     } else if (nextAction.kind === "tab" && nextAction.target) {
@@ -600,8 +593,10 @@ export default function JobDetailPage() {
 
   const handleExecuteTransition = async (targetStatus: any) => {
     setActionError(null);
-    if (targetStatus === "CUSTOMER_VERIFIED" || (job.status === "ARRIVED" && targetStatus === "IN_PROGRESS")) {
-      setIsOtpModalOpen(true);
+    if (targetStatus === "CUSTOMER_VERIFIED" && !job.customerConfirmedAt) {
+      setActionError(
+        "Customer confirmation through the secure link is required before this transition — share the Customer Verification link via the QR & Links panel."
+      );
       return;
     }
     // SCHEDULED/DRAFT → ASSIGNED requires worker selection: the bare status
@@ -694,14 +689,14 @@ export default function JobDetailPage() {
                 "h-11 w-11 rounded-xl flex items-center justify-center border shrink-0",
                 job.status === "CANCELLED"
                   ? "bg-red-50 text-red-600 border-red-100"
-                  : job.otpVerification.status === "verified" || job.status === "PASS" || job.status === "COMPLETED" || job.status === "CLOSED"
+                  : job.customerConfirmedAt || job.status === "PASS" || job.status === "COMPLETED" || job.status === "CLOSED"
                   ? "bg-emerald-50 text-emerald-600 border-emerald-100"
                   : "bg-rose-50 text-rose-600 border-rose-100"
               )}
             >
               {job.status === "CANCELLED" ? (
                 <AlertTriangle className="h-5 w-5" />
-              ) : job.otpVerification.status === "verified" || job.status === "PASS" || job.status === "COMPLETED" || job.status === "CLOSED" ? (
+              ) : job.customerConfirmedAt || job.status === "PASS" || job.status === "COMPLETED" || job.status === "CLOSED" ? (
                 <CheckCircle2 className="h-5 w-5" />
               ) : (
                 <Clock className="h-5 w-5" />
@@ -723,7 +718,7 @@ export default function JobDetailPage() {
 
           {/* What's Next — the ONE primary action for this state */}
           <div className="flex items-center gap-2 flex-wrap lg:justify-end">
-            {nextAction && (nextAction.kind !== "otp" || isLeadViewer) && (
+            {nextAction && (nextAction.kind !== "otp" || canManage) && (
               <div className="w-full lg:w-auto mb-1 lg:mb-0">
                 <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide lg:text-right">
                   What's Next
@@ -736,7 +731,7 @@ export default function JobDetailPage() {
               <Button
                 size="lg"
                 onClick={runNextAction}
-                disabled={isTransitioning || (nextAction.kind === "otp" && !isLeadViewer)}
+                disabled={isTransitioning || (nextAction.kind === "otp" && !canManage)}
                 className={cn(
                   "font-semibold gap-1.5 h-10 text-sm shadow-sm",
                   nextAction.tone === "amber"
@@ -751,7 +746,7 @@ export default function JobDetailPage() {
                   </>
                 ) : (
                   <>
-                    {nextAction.tone === "amber" && <KeyRound className="h-4 w-4" />}
+                    {nextAction.tone === "amber" && <Clock className="h-4 w-4" />}
                     {nextAction.label}
                     {nextAction.tone !== "amber" && <ArrowRight className="h-4 w-4" />}
                   </>
@@ -1026,12 +1021,12 @@ export default function JobDetailPage() {
 
             </div>
 
-              {/* Worker Assignment & OTP Security Box (assignment is driven
-                  by the single “Assign Staff” action in the lifecycle bar) */}
+              {/* Worker Assignment & Customer Confirmation box (assignment is
+                  driven by the single “Assign Staff” action in the lifecycle bar) */}
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xs space-y-4">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-xs font-semibold text-slate-500">
-                    Field Workers & Security Verification
+                    Field Workers & Customer Confirmation
                   </h3>
                 </div>
 
@@ -1045,7 +1040,7 @@ export default function JobDetailPage() {
                         {w.name}
                         {idx === 0 && (
                           <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                            Lead • OTP holder
+                            Lead
                           </span>
                         )}
                       </div>
@@ -1054,51 +1049,35 @@ export default function JobDetailPage() {
                 )}
               </div>
 
-              {/* OTP Box */}
+              {/* Customer confirmation box — secure-link only. */}
               <div className="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-2 text-xs">
                 <div className="flex items-center justify-between font-semibold">
                   <span className="flex items-center gap-1.5 text-slate-700">
-                    <KeyRound className="h-3.5 w-3.5 text-slate-500" />
-                    Customer Arrival OTP
+                    <ShieldCheck className="h-3.5 w-3.5 text-slate-500" />
+                    Customer Arrival Confirmation
                   </span>
                   <span
                     className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                      job.otpVerification.status === "verified"
+                      job.customerConfirmedAt
                         ? "bg-emerald-100 text-emerald-800"
                         : "bg-amber-100 text-amber-800"
                     }`}
                   >
-                    {job.otpVerification.status}
+                    {job.customerConfirmedAt ? "Confirmed" : "Awaiting"}
                   </span>
                 </div>
 
                 <div className="text-[11px] text-slate-500">
-                  {job.otpVerification.status === "verified" ? (
+                  {job.customerConfirmedAt ? (
                     <span className="text-emerald-700">
-                      ✓ Verified at {formatDateTime(job.otpVerification.verifiedAt)}
+                      ✓ Confirmed via secure link at {formatDateTime(job.customerConfirmedAt)}
                     </span>
                   ) : (
                     <span>
-                      OTP sent by SMS to the registered customer number upon arrival. Verification is performed server-side.
+                      The customer confirms team arrival by opening their secure verification link (QR & Links panel) — no OTP involved.
                     </span>
                   )}
                 </div>
-
-                {job.otpVerification.status !== "verified" &&
-                  (isLeadViewer ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setIsOtpModalOpen(true)}
-                      className="w-full text-xs h-7 mt-1 bg-white"
-                    >
-                      Enter / Verify Customer OTP
-                    </Button>
-                  ) : (
-                    <div className="text-[11px] text-slate-500 mt-1">
-                      Only the lead worker ({leadWorker?.name || "first-assigned"}) can verify the customer OTP.
-                    </div>
-                  ))}
               </div>
             </div>
           </div>
@@ -1697,7 +1676,7 @@ export default function JobDetailPage() {
             {activityEvents.length === 0 ? (
               <div className="py-8 text-center text-xs text-slate-400">
                 No activity recorded for this job yet — every field-worker and QC
-                action (arrival, OTP, checklist ticks, photos, rework, customer
+                action (arrival, confirmation, checklist ticks, photos, rework, customer
                 sign-off) will appear here as it happens.
               </div>
             ) : (
@@ -1728,13 +1707,6 @@ export default function JobDetailPage() {
         </TabsContent>
       </Tabs>
 
-      {/* OTP Verification Modal */}
-      <OTPModal
-        job={job}
-        isOpen={isOtpModalOpen}
-        onClose={() => setIsOtpModalOpen(false)}
-      />
-
       {/* Staff Assignment Modal — worker picker with availability & conflicts,
           backed by the same PATCH assignment path as the dispatcher. */}
       <Dialog open={assignmentOpen} onOpenChange={(o) => !assignmentSaving && setAssignmentOpen(o)}>
@@ -1746,7 +1718,7 @@ export default function JobDetailPage() {
             </DialogTitle>
             <DialogDescription>
               Job {job.id} • {formatDate(job.scheduledDate)} • {formatTimeSlot(job.scheduledTimeSlot)}. The first
-              selected worker becomes the lead (customer OTP holder).
+              selected worker becomes the lead.
             </DialogDescription>
           </DialogHeader>
 
@@ -1786,7 +1758,7 @@ export default function JobDetailPage() {
                         {w.name}
                         {isLead && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-indigo-100 text-indigo-700 border border-indigo-200">
-                            Lead • OTP holder
+                            Lead • runs confirmation
                           </span>
                         )}
                       </span>

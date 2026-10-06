@@ -148,7 +148,7 @@ export async function POST(request: Request, { params }: { params: { token: stri
       });
       await recordActivity({
         jobId: job.id,
-        type: "OTP_VERIFIED",
+        type: "STATUS_CHANGED",
         message: `Customer confirmed team arrival via secure link${customerName ? ` — ${customerName}` : ""}`,
         actor: { name: customerName, role: "customer" },
       });

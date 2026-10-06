@@ -10,7 +10,7 @@ function createPrismaClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error(
-      "DATABASE_URL is not set. Server-side OTP/SMS state persistence is unavailable."
+      "DATABASE_URL is not set. Server-side persistence is unavailable."
     );
   }
   const adapter = new PrismaPg({ connectionString });

@@ -46,11 +46,6 @@ export function formatTime(timeString?: string | Date | null): string {
   }).format(date);
 }
 
-export function generateRandomOTP(length: number = 6): string {
-  const min = Math.pow(10, length - 1);
-  return Math.floor(min + Math.random() * (min * 9)).toString();
-}
-
 /**
  * Returns the local calendar date (YYYY-MM-DD) for a given Date.
  * Uses local timezone instead of UTC so day boundaries match what the user sees.

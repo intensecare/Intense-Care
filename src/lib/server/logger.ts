@@ -1,7 +1,7 @@
 /**
  * Minimal structured logger for server-side security flows.
  *
- * Never logs: OTP codes, API keys, full portal tokens, message bodies with
+ * Never logs: API keys, raw tokens, message bodies with
  * secrets. Phone numbers are always masked before emission.
  */
 

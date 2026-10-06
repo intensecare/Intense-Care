@@ -13,38 +13,23 @@ import { syncJobEvent, cancelJobEvent } from "@/lib/server/google-calendar";
 
 /**
  * Serializes a single job for API responses with the same display data as the
- * list route: resolved staff names and the authoritative OTP verification
- * state (a hardcoded "none" here used to revert verified jobs after
- * transitions and re-prompt the customer's OTP).
+ * list route: resolved staff names. The customer's verification state lives on
+ * the Job itself (customerConfirmedAt — set by the secure-link confirm), so no
+ * extra lookup is needed.
  */
 async function serializeJobWithDisplayData(
   full: Parameters<typeof serializeJob>[0],
   isSuperAdmin: boolean
 ) {
-  const [verified, users] = await Promise.all([
-    prisma.otpChallenge.findFirst({
-      where: { jobId: full.id, status: "VERIFIED" },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.user.findMany({ select: { id: true, name: true } }),
-  ]);
+  const users = await prisma.user.findMany({ select: { id: true, name: true } });
   const nameMap = new Map(users.map((u) => [u.id, u.name]));
-  const otp = verified
-    ? {
-        status: "verified" as const,
-        verifiedAt: verified.updatedAt.toISOString(),
-        verifiedBy: verified.createdByUserId,
-      }
-    : undefined;
-  const serialized = isSuperAdmin
-    ? serializeJob(full, otp)
-    : redactJobForOps(serializeJob(full, otp));
+  const serialized = isSuperAdmin ? serializeJob(full) : redactJobForOps(serializeJob(full));
   return withStaffNames(serialized, nameMap);
 }
 
 /**
- * GET /api/jobs/[id] — server-side view of a job: lifecycle status, latest OTP
- * challenge summary (no codes), and the current completion invite (masked).
+ * GET /api/jobs/[id] — server-side view of a single job (same shape as the
+ * list route, including customer-confirmation state).
  */
 export async function GET(
   _request: Request,
@@ -54,7 +39,14 @@ export async function GET(
     const { id } = params;
     await authorizeJobAccess(id);
 
-    const job = await prisma.job.findUnique({ where: { id } });
+    const job = await prisma.job.findUnique({
+      where: { id },
+      include: {
+        customer: { select: { name: true, phone: true } },
+        property: { select: { title: true, address: true } },
+        service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
+      },
+    });
     if (!job) {
       return NextResponse.json({ success: false, error: "Job not found." }, { status: 404 });
     }
@@ -75,46 +67,9 @@ export async function GET(
       }
     }
 
-    const [latestChallenge, verifiedChallenge, invite] = await Promise.all([
-      prisma.otpChallenge.findFirst({ where: { jobId: id }, orderBy: { createdAt: "desc" } }),
-      prisma.otpChallenge.findFirst({ where: { jobId: id, status: "VERIFIED" } }),
-      prisma.completionInvite.findFirst({ where: { jobId: id }, orderBy: { createdAt: "desc" } }),
-    ]);
-
-    const customer = await prisma.customer.findUnique({ where: { id: job.customerId } });
-
     return NextResponse.json({
       success: true,
-      data: {
-        id: job.id,
-        status: job.status,
-        customerId: job.customerId,
-        customerName: customer?.name ?? null,
-        customerPhoneMasked: customer
-          ? `******${customer.phone.replace(/[^0-9]/g, "").slice(-4)}`
-          : null,
-        otp: {
-          hasPendingChallenge: latestChallenge?.status === "PENDING",
-          verified: !!verifiedChallenge,
-          attemptsUsed: latestChallenge?.attempts ?? 0,
-          maxAttempts: latestChallenge?.maxAttempts ?? 0,
-          expiresAt: latestChallenge?.expiresAt ?? null,
-          status: verifiedChallenge
-            ? "verified"
-            : latestChallenge
-            ? latestChallenge.status.toLowerCase()
-            : "none",
-          sentToLast4: latestChallenge?.phoneLast4 ?? null,
-        },
-        completionInvite: invite
-          ? {
-              id: invite.id,
-              signStatus: invite.signStatus,
-              signedAt: invite.signedAt,
-              createdAt: invite.createdAt,
-            }
-          : null,
-      },
+      data: await serializeJobWithDisplayData(job, user.role === "super_admin"),
     });
   } catch (err) {
     return errorResponse(err, "jobs.get_one.route_error");
@@ -256,7 +211,7 @@ export async function PATCH(
 
     // Role separation: field-execution states belong to the assigned field
     // worker (they are physically on site). The ops_manager runs dispatch and
-    // the QC desk — not arrival, OTP, work progress or rework completion.
+    // the QC desk — not arrival, work progress or rework completion.
     const FIELD_EXECUTION_STATUSES = [
       "ARRIVED",
       "CUSTOMER_VERIFIED",
@@ -269,7 +224,7 @@ export async function PATCH(
         {
           success: false,
           error:
-            "Field execution actions (arrival, OTP, work progress, rework completion) are performed by the assigned field worker. Use the Quality Control desk for audits and rework.",
+            "Field execution actions (arrival, work progress, rework completion) are performed by the assigned field worker. Use the Quality Control desk for audits and rework.",
         },
         { status: 403 }
       );
@@ -283,8 +238,7 @@ export async function PATCH(
     // Authorization FIRST (before state validation) so unassigned workers
     // get a clear 403 rather than leaking state-machine details.
     // Directly-assigned workers may only update jobs they are assigned to;
-    // only the lead (first-assigned) worker can drive the OTP-gated
-    // CUSTOMER_VERIFIED transition; managers/admins may transition all.
+    // managers/admins may transition all.
     if (user.role !== "super_admin" && user.role !== "ops_manager") {
       if (
         existing.assignedManagerId !== user.id &&
@@ -295,15 +249,6 @@ export async function PATCH(
           { status: 403 }
         );
       }
-      if (
-        status === "CUSTOMER_VERIFIED" &&
-        existing.assignedStaffIds[0] !== user.id
-      ) {
-        return NextResponse.json(
-          { success: false, error: "Only the lead worker assigned to this job can verify the customer OTP." },
-          { status: 403 }
-        );
-      }
     }
 
     // Server-side state-machine gate: reject transitions the lifecycle does
@@ -311,13 +256,7 @@ export async function PATCH(
     // arbitrary/unrelated states). Managers/admins are the mirror origin and
     // stay unrestricted.
     if (user.role === "staff") {
-      const otpVerified = await prisma.otpChallenge.findFirst({
-        where: { jobId: id, status: "VERIFIED" },
-      });
-      const allowed = getAllowedTransitions({
-        ...existing,
-        otpVerification: { status: otpVerified ? "verified" : "pending" } as Job["otpVerification"],
-      } as unknown as Job)
+      const allowed = getAllowedTransitions(existing as unknown as Job)
         .filter((t) => t.allowedRoles.includes("staff"))
         .map((t) => t.status as string);
       if (!allowed.includes(status)) {
@@ -328,19 +267,18 @@ export async function PATCH(
       }
     }
 
-    // OTP integrity gate: CUSTOMER_VERIFIED may ONLY be reached through the
-    // server-verified OTP flow (/api/otp/verify) or the customer's secure-link
-    // confirmation (customerConfirmedAt set by /api/customer/job/[token]),
-    // never by mirroring a status value directly — for any role. This closes
-    // the bypass where a client PATCH could skip customer verification.
+    // Verification integrity gate: CUSTOMER_VERIFIED may ONLY be reached
+    // through the customer's secure-link confirmation (customerConfirmedAt set
+    // by /api/customer/job/[token]) — never by mirroring a status value
+    // directly, for any role. This closes any bypass that skips verification.
     if (status === "CUSTOMER_VERIFIED") {
-      const [verified, confirmed] = await Promise.all([
-        prisma.otpChallenge.findFirst({ where: { jobId: id, status: "VERIFIED" } }),
-        prisma.job.findUnique({ where: { id }, select: { customerConfirmedAt: true } }),
-      ]);
-      if (!verified && !confirmed?.customerConfirmedAt) {
+      const confirmed = await prisma.job.findUnique({
+        where: { id },
+        select: { customerConfirmedAt: true },
+      });
+      if (!confirmed?.customerConfirmedAt) {
         return NextResponse.json(
-          { success: false, error: "Customer verification (OTP or secure-link confirmation) is required before this transition." },
+          { success: false, error: "Customer confirmation via the secure link is required before this transition." },
           { status: 409 }
         );
       }
@@ -355,8 +293,8 @@ export async function PATCH(
     const STATUS_EVENT_MESSAGES: Record<string, string> = {
       SCHEDULED: "Job scheduled",
       ASSIGNED: "Field staff assigned to the job",
-      ARRIVED: "Field worker arrived on site — awaiting customer OTP",
-      CUSTOMER_VERIFIED: "Customer OTP verified — property entry authorized",
+      ARRIVED: "Field worker arrived on site — awaiting customer confirmation",
+      CUSTOMER_VERIFIED: "Customer confirmed via secure link — property entry authorized",
       IN_PROGRESS: "Work started — cleaning in progress",
       WORK_COMPLETED: "Field worker marked work completed — submitted for QC audit",
       QUALITY_CHECK: "QC inspection started",

@@ -48,7 +48,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   ARRIVED: {
     label: "Staff Arrived",
-    shortDescription: "Field worker on site, awaiting Customer OTP",
+    shortDescription: "Field worker on site, awaiting customer confirmation",
     color: {
       bg: "bg-amber-50",
       text: "text-amber-800",
@@ -59,7 +59,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   CUSTOMER_VERIFIED: {
     label: "Customer Verified",
-    shortDescription: "Customer OTP verified, ready to start",
+    shortDescription: "Customer confirmed via secure link, ready to start",
     color: {
       bg: "bg-emerald-50",
       text: "text-emerald-700",
@@ -290,10 +290,10 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
       return [
         {
           status: "CUSTOMER_VERIFIED",
-          label: "Verify Customer OTP",
-          description: "Customer provides OTP to the lead worker on site to authorize property entry",
+          label: "Confirm via Customer Link",
+          description: "Customer confirms arrival through the secure verification link",
           allowedRoles: ["super_admin", "staff"],
-          requirementNotes: "Customer OTP verification required",
+          requirementNotes: "Customer confirmation via the secure link required",
         },
         {
           status: "CANCELLED",
@@ -513,17 +513,11 @@ export function validateTransition(
     };
   }
 
-  if (nextStatus === "IN_PROGRESS" && job.otpVerification.status !== "verified") {
-    // The customer may also verify via the secure-link confirmation flow
-    // (§8 NRI remote) — the API layer checks customerConfirmedAt for that
-    // path; this type-level gate only applies when no confirmation exists.
-    const confirmedElsewhere = (job as unknown as { customerConfirmedAt?: string | null }).customerConfirmedAt;
-    if (!confirmedElsewhere) {
-      return {
-        allowed: false,
-        reason: "Customer verification (OTP or secure-link confirmation) is required before starting the job.",
-      };
-    }
+  if (nextStatus === "IN_PROGRESS" && !job.customerConfirmedAt) {
+    return {
+      allowed: false,
+      reason: "Customer confirmation via the secure link is required before starting the job.",
+    };
   }
 
   return { allowed: true };

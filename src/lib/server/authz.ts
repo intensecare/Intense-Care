@@ -98,50 +98,9 @@ export async function authorizeJobAccess(jobId: string): Promise<AuthContext> {
 }
 
 /**
- * Ensures the acting staff user is the lead (first-assigned) worker of the
- * job. Managers/admins pass unrestricted; every other role — including
- * non-lead assigned workers — is rejected. Used to gate OTP send/verify:
- * only the lead worker receives the customer OTP and controls the
- * OTP-based start-work flow.
- */
-export async function authorizeLeadWorker(jobId: string): Promise<AuthContext> {
-  const ctx = await requireUser();
-  if (isManagerRole(ctx.user.role)) {
-    return ctx;
-  }
-
-  const job = await prisma.job.findUnique({ where: { id: jobId } });
-  if (!job) {
-    // Route layer turns this into the same 404 the job lookup produces.
-    throw new HttpError(404, "Job not found.");
-  }
-  if (!isAssignedWorker(job, ctx.user.id)) {
-    logger.warn("authz.otp_worker_not_assigned", {
-      userId: ctx.user.id,
-      role: ctx.user.role,
-      jobId,
-    });
-    throw new HttpError(403, "You are not assigned to this job.");
-  }
-  if (!isLeadWorker(job, ctx.user.id)) {
-    logger.warn("authz.otp_non_lead_denied", {
-      userId: ctx.user.id,
-      jobId,
-      leadWorkerId: job.assignedStaffIds[0] ?? null,
-    });
-    throw new HttpError(
-      403,
-      "Only the lead worker assigned to this job can receive or verify the customer OTP."
-    );
-  }
-  return ctx;
-}
-
-/**
  * Ensures the acting staff user is allowed to transition this job to the
- * target status. Directly-assigned (non-lead) workers may execute their work
- * (arrive, start after lead verification, complete, rework) but never
- * perform the OTP-gated verification themselves; managers/admins may do all.
+ * target status. Directly-assigned workers may execute their work (arrive,
+ * start, complete, rework); managers/admins may do all.
  */
 export async function authorizeJobTransition(
   jobId: string,
@@ -163,17 +122,6 @@ export async function authorizeJobTransition(
       nextStatus,
     });
     throw new HttpError(403, "You are not assigned to this job.");
-  }
-  if (nextStatus === "CUSTOMER_VERIFIED" && !isLeadWorker(job, ctx.user.id)) {
-    logger.warn("authz.transition_non_lead_denied", {
-      userId: ctx.user.id,
-      jobId,
-      nextStatus,
-    });
-    throw new HttpError(
-      403,
-      "Only the lead worker assigned to this job can verify the customer OTP."
-    );
   }
   return ctx;
 }

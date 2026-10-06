@@ -67,7 +67,7 @@ export default function QualityManagementPage() {
   );
 
   // ---- Live pipeline feed --------------------------------------------------
-  // Every field-worker action (arrival, OTP, checklist tick, photo upload,
+  // Every field-worker action (arrival, checklist tick, photo upload,
   // rework progress) is written server-side to /api/activity. This desk
   // polls it while visible, so the QC person watches work happen instead of
   // asking for status or refreshing the browser.
@@ -257,7 +257,7 @@ export default function QualityManagementPage() {
           </span>
           <strong>Live pipeline feed</strong>
           <span className="text-emerald-700">
-            field-worker actions (arrival, OTP, photos, rework) stream in every 8s — no refresh needed
+            field-worker actions (arrival, photos, rework) stream in every 8s — no refresh needed
           </span>
         </div>
         <span

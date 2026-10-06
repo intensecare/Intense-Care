@@ -62,8 +62,7 @@ export interface SystemSettings {
   gstin: string;
   /** SAC/service accounting code printed on statutory invoice documents. */
   sacCode: string;
-  otpExpiryMinutes: number;
-  otpMaxRetries: number;
+  /** Seconds a customer must wait between secure-link resend notifications. */
   resendCooldownSeconds: number;
 }
 
@@ -447,13 +446,6 @@ export interface Payout {
   createdAt: string;
 }
 
-/**
- * Client-side mirror of the server-authoritative OTP state.
- *
- * The plaintext OTP never exists on the client: codes are generated on the
- * server, delivered by 2Factor SMS, and verified server-side. The UI reads
- * only masked/derived status from /api/jobs/[id] and the OTP endpoints.
- */
 /** One job assignment inside the staff directory (read-only operational
  *  view — amounts/payment are financial and intentionally omitted). */
 export interface StaffDirectoryJob {
@@ -528,19 +520,6 @@ export interface JobActivityEvent {
   createdAt: string;
 }
 
-export interface JobOTP {
-  phone: string; // registered customer phone (masked display only)
-  sentToLast4?: string;
-  expiresAt?: string;
-  attempts: number;
-  maxAttempts: number;
-  resendCooldownSeconds?: number;
-  lastSentAt?: string;
-  verifiedAt?: string;
-  verifiedBy?: string;
-  status: "none" | "pending" | "verified" | "expired" | "locked" | "cancelled";
-}
-
 export interface Job {
   id: string; // e.g. "JOB-2026-0841"
   customerId: string;
@@ -550,8 +529,8 @@ export interface Job {
   scheduledTimeSlot: string; // "09:00 AM - 01:00 PM"
   assignedManagerId?: string;
   /** Directly-assigned field workers. The FIRST entry is the lead worker:
-   *  only they receive/verify the customer arrival OTP and gate the start-work
-   *  flow; other assigned workers execute the job without OTP control. */
+   *  they gate the start-work flow once the customer confirms via the secure
+   *  link; other assigned workers execute the job without extra control. */
   assignedStaffIds: string[];
   /** Server-resolved display names for assignedStaffIds (attached by the jobs
    *  API; ops_manager/staff cannot read the full user directory). */
@@ -563,7 +542,17 @@ export interface Job {
   status: JobStatus;
   notes?: string;
   accessCode?: string;
-  otpVerification: JobOTP;
+  /** Set when the customer confirms team arrival via the secure link
+   *  (POST /api/customer/job/[token] action=confirm). Gates IN_PROGRESS. */
+  customerConfirmedAt?: string;
+  /** Customer digital sign-off written by the secure approval link. */
+  approvedAt?: string;
+  approvedBy?: string;
+  approvalMethod?: string;
+  /** Unified-journey feedback captured on the customer's secure link. */
+  customerFeedbackRating?: number;
+  customerFeedbackAt?: string;
+  googleReviewClicked?: boolean;
   qualityCheckId?: string;
   customerApprovalId?: string;
   feedbackId?: string;
@@ -654,7 +643,7 @@ export interface NotificationRecord {
 export interface SmsGatewayLog {
   id: string;
   jobId: string | null;
-  purpose: "OTP_VERIFICATION";
+  purpose: string; // e.g. CUSTOMER_ARRIVED, QC_READY, REWORK_ASSIGNED, CUSTOMER_COMPLETED
   provider: string;
   status: "QUEUED" | "SENT" | "FAILED";
   error?: string | null;
@@ -702,7 +691,6 @@ export interface AmcVisit {
   jobId?: string | null;
   arrivedAt?: string | null;
   completedAt?: string | null;
-  otpVerified?: boolean;
   staffIds: string[];
   staffNames?: string[];
   qcScore?: number | null;

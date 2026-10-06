@@ -1,10 +1,7 @@
 /**
- * Server-side security policy for OTP + SMS flows.
+ * Server-side policy values shared by the workflow and link flows.
  *
  * Values resolve from environment variables with safe, documented defaults.
- * The ERP's client-side Settings page remains operational configuration for
- * display/ops purposes; the server enforces its own environment-driven limits
- * so a tampered client cannot weaken security.
  */
 
 function intFromEnv(name: string, fallback: number, min: number, max: number): number {
@@ -14,26 +11,14 @@ function intFromEnv(name: string, fallback: number, min: number, max: number): n
   return Math.min(max, Math.max(min, parsed));
 }
 
-export const otpPolicy = {
-  /** OTP validity window in minutes. */
-  expiryMinutes: () => intFromEnv("OTP_EXPIRY_MINUTES", 10, 1, 60),
-  /** Max verification attempts per OTP before the challenge locks. */
-  maxAttempts: () => intFromEnv("OTP_MAX_ATTEMPTS", 5, 1, 10),
-  /** Cooldown between OTP sends to the same job, in seconds. */
-  resendCooldownSeconds: () => intFromEnv("OTP_RESEND_COOLDOWN_SECONDS", 60, 10, 600),
-  /** Maximum OTP sends per job per rolling hour. */
-  maxSendsPerJobPerHour: () => intFromEnv("OTP_MAX_SENDS_PER_JOB_PER_HOUR", 5, 1, 20),
-  /** Maximum OTP sends per destination phone per rolling hour (anti-SMS-pumping). */
-  maxSendsPerPhonePerHour: () => intFromEnv("OTP_MAX_SENDS_PER_PHONE_PER_HOUR", 10, 1, 50),
-} as const;
-
-export const invitePolicy = {
-  /** Portal handover link validity in days (resend mints a fresh link). */
-  expiryDays: () => intFromEnv("PORTAL_LINK_EXPIRY_DAYS", 30, 1, 365),
+export const linkPolicy = {
+  /** Maximum token mints per job per rolling hour (anti-link-pumping). */
+  maxMintsPerJobPerHour: () => intFromEnv("QR_MAX_MINTS_PER_JOB_PER_HOUR", 5, 1, 20),
 } as const;
 
 /**
- * Public origin used in customer-facing links (portal handover, statements).
+ * Public origin used in customer-facing links (secure verification/approval
+ * links, statements).
  *
  * Resolution order:
  *  1. APP_BASE_URL env — deliberate override, recommended in production so
@@ -68,5 +53,5 @@ export function resolveBaseUrl(requestOrigin: string | null): string {
  */
 export function dispatchCutoffTime(): string {
   const raw = process.env.NEXT_DAY_DISPATCH_TIME || "20:00";
-  return /^\d{1,2}:\d{2}$/.test(raw) ? raw : "20:00";
+  return /^\d{2}:\d{2}$/.test(raw) ? raw : "20:00";
 }

@@ -3,7 +3,6 @@ import { logger } from "./logger";
 import { recordActivity } from "./activity";
 import { mintQrToken, buildLinkUrl, type QrPurpose } from "./qr-service";
 import { notifyCustomerArrived, notifyQcReady, notifyReworkAssigned, notifyCustomerCompleted } from "./notify";
-import { sendCompletionInvite } from "./completion-service";
 
 /**
  * §16–§24 — workflow glue between the state machine and the token system.
@@ -169,17 +168,15 @@ export async function completeRework(
 }
 
 /**
- * §21 — QC passed: mint the customer handover link (approval token) and the
- * unified customer job link, then notify the customer. Called on PASS.
+ * §21 — QC passed: mint the customer handover link (approval token) and
+ * notify the customer. Called on PASS. The approval link IS the handover —
+ * one unified surface, no parallel invite tokens.
  */
 export async function onQcPassed(jobId: string, actor: { id?: string; name?: string }) {
   try {
-    const invite = await sendCompletionInvite(jobId);
-    const approvalLink = invite.success ? invite.data.linkUrl : undefined;
     const jobLink = await mintSafe(jobId, "CUSTOMER_APPROVAL", actor);
-    const link = jobLink ?? approvalLink;
-    if (link) await notifyCustomerCompleted(jobId, link);
-    return approvalLink ?? null;
+    if (jobLink) await notifyCustomerCompleted(jobId, jobLink);
+    return jobLink;
   } catch (e) {
     logger.warn("workflow.on_qc_passed_failed", {
       jobId,

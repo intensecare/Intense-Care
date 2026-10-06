@@ -132,7 +132,7 @@ export function CustomerFormDialog({
           </div>
 
           <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Phone (OTP & Notifications) *</label>
+            <label className="font-semibold text-slate-700">Phone (Notifications) *</label>
             <Input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}

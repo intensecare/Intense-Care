@@ -85,8 +85,8 @@ function JobsPageInner() {
     { value: "DRAFT", label: "Draft" },
     { value: "SCHEDULED", label: "Scheduled" },
     { value: "ASSIGNED", label: "Workers Assigned" },
-    { value: "ARRIVED", label: "Arrived (OTP Pending)" },
-    { value: "CUSTOMER_VERIFIED", label: "OTP Verified" },
+    { value: "ARRIVED", label: "Arrived (Awaiting Confirmation)" },
+    { value: "CUSTOMER_VERIFIED", label: "Customer Confirmed" },
     { value: "IN_PROGRESS", label: "In Progress" },
     { value: "WORK_COMPLETED", label: "Work Completed (QC Ready)" },
     { value: "QUALITY_CHECK", label: "Quality Check" },
@@ -500,7 +500,7 @@ function JobsPageInner() {
                         <JobStatusBadge status={job.status} size="sm" />
                         {job.status === "ARRIVED" && (
                           <div className="text-[10px] text-amber-700 font-semibold mt-1">
-                            Awaiting OTP
+                            Awaiting customer confirmation
                           </div>
                         )}
                       </td>
@@ -588,7 +588,7 @@ function JobsPageInner() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="font-semibold text-slate-700">Phone (for OTP) *</label>
+                    <label className="font-semibold text-slate-700">Phone (Notifications) *</label>
                     <Input
                       value={inlinePhone}
                       onChange={(e) => setInlinePhone(e.target.value)}
@@ -738,7 +738,7 @@ function JobsPageInner() {
                 </div>
                 {assignedStaffIds.length === 0 && (
                   <p className="text-[11px] text-slate-400">
-                    Leave unassigned to keep the job in the dispatcher pool. Workers see only jobs assigned to them; the first-assigned worker receives the customer OTP.
+                    Leave unassigned to keep the job in the dispatcher pool. Workers see only jobs assigned to them; the first-assigned worker is the lead.
                   </p>
                 )}
               </div>

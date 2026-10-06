@@ -11,7 +11,7 @@ import type { SystemSettings } from "@/lib/types";
 
 /**
  * GET /api/settings — current company configuration. Any signed-in user may
- * read (staff need OTP policy fields for UI hints).
+ * read (staff need the notification cooldown for UI hints).
  */
 export async function GET() {
   try {
@@ -52,8 +52,6 @@ export async function PATCH(request: Request) {
     ];
     const numberFields: (keyof SystemSettings)[] = [
       "taxRatePercent",
-      "otpExpiryMinutes",
-      "otpMaxRetries",
       "resendCooldownSeconds",
     ];
 

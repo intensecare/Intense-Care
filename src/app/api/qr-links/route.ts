@@ -18,7 +18,7 @@ import {
 /**
  * §35 — ADMIN → QR & SECURE LINKS.
  *
- * super_admin only. Table of every token with Type / Job / Purpose / Created /
+ * super_admin + ops_manager (the QC desk mints approval links on pass). Table of every token with Type / Job / Purpose / Created /
  * Expires / Status / Last Used / Actions. Actions:
  *   [SHOW QR]   → PNG data URL of the short URL (only until revealed)
  *   [COPY LINK] → the raw link, revealed once on demand (never stored raw)
@@ -30,7 +30,7 @@ import {
 
 export async function GET() {
   try {
-    await requireRole(["super_admin"]);
+    await requireRole(["super_admin", "ops_manager"]);
     const rows = await prisma.qrToken.findMany({ orderBy: { createdAt: "desc" }, take: 500 });
     const jobIds = Array.from(new Set(rows.map((r) => r.jobId)));
     const jobs = await prisma.job.findMany({

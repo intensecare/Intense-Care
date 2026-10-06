@@ -8,6 +8,7 @@ import {
   UserPlus,
   MapPin,
   KeyRound,
+  UserCheck,
   Sparkles,
   ClipboardCheck,
   ShieldCheck,
@@ -39,7 +40,7 @@ const ORDERED_STEPS: {
   { status: "SCHEDULED", label: "Confirmed Schedule", shortLabel: "Scheduled", icon: CalendarCheck },
   { status: "ASSIGNED", label: "Team Dispatched", shortLabel: "Assigned", icon: UserPlus },
   { status: "ARRIVED", label: "Arrived On Site", shortLabel: "Arrived", icon: MapPin },
-  { status: "CUSTOMER_VERIFIED", label: "Customer OTP Verified", shortLabel: "OTP Verified", icon: KeyRound },
+  { status: "CUSTOMER_VERIFIED", label: "Customer Confirmed", shortLabel: "Confirmed", icon: UserCheck },
   { status: "IN_PROGRESS", label: "Cleaning In Progress", shortLabel: "Cleaning", icon: Sparkles },
   { status: "WORK_COMPLETED", label: "Work Completed", shortLabel: "Work Done", icon: ClipboardCheck },
   { status: "QUALITY_CHECK", label: "Quality Inspection", shortLabel: "Quality Check", icon: ShieldCheck },
@@ -96,7 +97,7 @@ export function JobTimeline({ job, className }: JobTimelineProps) {
       case "ARRIVED":
         return job.arrivedAt ? new Date(job.arrivedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
       case "CUSTOMER_VERIFIED":
-        return job.otpVerification?.verifiedAt ? new Date(job.otpVerification.verifiedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
+        return job.customerConfirmedAt ? new Date(job.customerConfirmedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
       case "IN_PROGRESS":
         return job.startedAt ? new Date(job.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
       case "WORK_COMPLETED":

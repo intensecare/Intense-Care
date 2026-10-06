@@ -90,7 +90,6 @@ export async function GET() {
           jobId: v.jobId,
           arrivedAt: v.arrivedAt?.toISOString() ?? null,
           completedAt: v.completedAt?.toISOString() ?? null,
-          otpVerified: v.otpVerified,
           staffIds: v.staffIds,
           staffNames: v.staffIds.map((id) => nameById.get(id)).filter(Boolean),
           qcScore: v.qcScore,

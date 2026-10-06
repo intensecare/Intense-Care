@@ -163,7 +163,7 @@ export function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
                         </span>
                       </div>
                       <p className="text-[11px] text-zinc-500 mt-1 font-mono">
-                        Arrival OTP to {n.recipientMasked}
+                        Customer notification to {n.recipientMasked}
                       </p>
                     </div>
                   ))

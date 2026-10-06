@@ -149,6 +149,11 @@ model Job {
   approvedAt        DateTime?
   approvedBy        String?
   approvalMethod    String?
+  // §24 unified-journey feedback: star rating captured on the customer's
+  // secure approval link right after they approve completion.
+  customerFeedbackRating  Int?
+  customerFeedbackAt      DateTime?
+  googleReviewClicked     Boolean   @default(false)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -158,8 +163,6 @@ model Job {
   referralPartner   ReferralPartner?   @relation("JobAttribution", fields: [referralPartnerId], references: [id])
   checklistItems    JobChecklistItem[]
   invoices          Invoice[]
-  otpChallenges     OtpChallenge[]
-  completionInvites CompletionInvite[]
   photos            JobPhoto[]
   qualityChecks     QualityCheck[]
   reworkTasks       ReworkTask[]
@@ -488,36 +491,6 @@ model AuditLog {
   @@index([timestamp])
 }
 
-/// One arrival-verification OTP challenge for a job. The plaintext code is
-/// NEVER persisted — only a SHA-256 hash. 2Factor handles SMS delivery with
-/// our generated code; we verify the submitted code against the stored hash
-/// with constant-time comparison. Expired/consumed challenges are retained
-/// for audit.
-model OtpChallenge {
-  id                String    @id @default(cuid())
-  jobId             String
-  codeHash          String? // SHA-256 hex of the code (null when provider-managed AUTOGEN)
-  providerManaged   Boolean   @default(false) // true: OTP generated + verified by 2Factor session
-  phone             String // last-4 only is exposed via API; full number is for audit
-  phoneLast4        String
-  status            String    @default("PENDING") // PENDING | VERIFIED | EXPIRED | LOCKED | CANCELLED
-  attempts          Int       @default(0)
-  maxAttempts       Int
-  expiresAt         DateTime
-  consumedAt        DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  provider          String    @default("2factor")
-  providerSessionId String? // 2Factor "Details" session id (AUTOGEN / custom-OTP sessions)
-  createdByUserId   String // staff user who triggered arrival
-  createdByRole     String
-
-  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  @@index([jobId, status])
-  @@index([expiresAt])
-}
-
 /// Real-time pipeline activity event for a job. Written server-side on every
 /// field-worker action (arrival, OTP verification, checklist ticks, photo
 /// uploads, rework progress) and QC decision so supervisors see a live,
@@ -552,36 +525,6 @@ model SmsLog {
 
   @@index([jobId])
   @@index([purpose, createdAt])
-}
-
-/// Tokenized customer handover. Created when a job passes QC; the token is a
-/// 256-bit random URL-safe value handed to the customer (ops desk shares the
-/// link). The handover snapshot is resolved from live job state at request
-/// time; the invite records issuance and the customer's sign-off.
-model CompletionInvite {
-  id                  String    @id @default(cuid())
-  tokenHash           String    @unique // SHA-256 hex of the portal token
-  tokenLast4          String // masked display only
-  jobId               String
-  customerId          String
-  signStatus          String    @default("PENDING") // PENDING | APPROVED | ATTENTION_REQUESTED
-  signedAt            DateTime?
-  signatoryName       String?
-  signUserAgent       String?
-  signIpHash          String?
-  attentionNotes      String? // customer-reported issues when signStatus = ATTENTION_REQUESTED
-  feedbackRating      Int? // 1-5 post-service rating
-  feedbackComment     String?
-  feedbackTags        String[]
-  googleReviewClicked Boolean   @default(false)
-  feedbackAt          DateTime?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-
-  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  @@index([jobId])
-  @@index([customerId])
 }
 
 /// §2 AMC — recurring home-maintenance contract (classic use case: an NRI
@@ -634,7 +577,6 @@ model AmcVisit {
   jobId            String?   @unique // optional spawned job running the state machine
   arrivedAt        DateTime?
   completedAt      DateTime?
-  otpVerified      Boolean   @default(false)
   staffIds         String[]  @default([])
   checklistSummary Json?
   photoUrls        Json?

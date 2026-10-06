@@ -96,19 +96,6 @@ interface AppContextType {
   /** Last server-rejected status transition, for UI error display. */
   transitionError: { jobId: string; message: string } | null;
 
-  sendJobArrivalOTP: (
-    jobId: string
-  ) => Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number; devCode?: string }>;
-
-  verifyJobOTP: (
-    jobId: string,
-    enteredCode: string
-  ) => Promise<{ success: boolean; message: string }>;
-
-  resendJobOTP: (
-    jobId: string
-  ) => Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number; devCode?: string }>;
-
   fetchSmsGatewayLog: () => Promise<SmsGatewayLog[]>;
 
   addJobPhoto: (photo: {
@@ -181,7 +168,7 @@ interface AppContextType {
     scheduledDate: string;
     scheduledTimeSlot: string;
     /** Directly-assigned field worker ids; first entry becomes the lead
-     *  worker who controls the customer OTP verification flow. */
+     *  worker who gates the start-work flow. */
     assignedStaffIds?: string[];
     notes?: string;
     referralPartnerId?: string;
@@ -579,7 +566,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!job) return { success: false, message: "Job not found" };
 
     // Optimistic local update; the server PATCH is the authority for staff
-    // transitions (it re-validates the state machine and OTP gates).
+    // transitions (it re-validates the state machine and confirmation gates).
     const now = new Date().toISOString();
     const updatedJob: Job = {
       ...job,
@@ -597,8 +584,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ status: nextStatus }),
       });
       if (!r.ok) {
-        // Roll back on server rejection (e.g. OTP gate, visibility window) and
-        // surface the authoritative error instead of a fake success.
+        // Roll back on server rejection (e.g. confirmation gate, visibility
+        // window) and surface the authoritative error instead of a fake success.
         setJobs((prev) => prev.map((j) => (j.id === jobId ? job : j)));
         setTransitionError({ jobId, message: r.error || "Transition rejected by the server." });
         return;
@@ -606,7 +593,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setTransitionError(null);
       await logAudit("job", jobId, "STATUS_TRANSITION", `→ ${nextStatus}${overrideNotes ? `: ${overrideNotes}` : ""}`);
 
-      // Re-sync from the server so status, timestamps and OTP state stay
+      // Re-sync from the server so status, timestamps and confirmation state stay
       // authoritative (also refreshes other viewers of the same job). Also
       // re-sync the referral ledger: completing an attributed job settles a
       // commission entry server-side, and the ledger/partner counters must
@@ -616,106 +603,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     })();
 
     return { success: true, message: `Job transitioned to ${nextStatus}` };
-  };
-
-  // --- Server-authoritative OTP flows (2Factor SMS) --------------------------
-  const sendJobArrivalOTP = async (
-    jobId: string
-  ): Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number; devCode?: string }> => {
-    const r = await api<{
-      maskedPhone: string;
-      cooldownSeconds?: number;
-      sentVia?: string;
-      devCode?: string;
-    }>("/api/otp/send", {
-      method: "POST",
-      body: JSON.stringify({ jobId }),
-    });
-    if (!r.ok) return { success: false, message: r.error || "OTP dispatch failed. Please retry." };
-    if (r.data?.devCode) {
-      // Dev mode (OTP_DEV_MODE=1): no SMS was sent; the code comes back inline.
-      return {
-        success: true,
-        message: `DEV MODE: OTP is ${r.data.devCode} — no SMS was sent.`,
-        maskedPhone: r.data?.maskedPhone,
-        cooldownSeconds: r.data?.cooldownSeconds,
-        devCode: r.data.devCode,
-      };
-    }
-    await logAudit("otp", jobId, "OTP_SENT", `Arrival OTP dispatched via 2Factor SMS to ${r.data?.maskedPhone}`);
-    return {
-      success: true,
-      message: `OTP sent via SMS to ${r.data?.maskedPhone}.`,
-      maskedPhone: r.data?.maskedPhone,
-      cooldownSeconds: r.data?.cooldownSeconds,
-    };
-  };
-
-  const verifyJobOTP = async (
-    jobId: string,
-    enteredCode: string
-  ): Promise<{ success: boolean; message: string }> => {
-    const r = await api<{ verifiedAt?: string }>("/api/otp/verify", {
-      method: "POST",
-      body: JSON.stringify({ jobId, code: enteredCode.trim() }),
-    });
-    if (!r.ok) {
-      await logAudit("otp", jobId, "OTP_VERIFICATION_FAILED", r.error);
-      return { success: false, message: r.error || "Verification failed. Please retry." };
-    }
-    const now = new Date().toISOString();
-    setJobs((prev) =>
-      prev.map((j) =>
-        j.id === jobId
-          ? {
-              ...j,
-              status: "CUSTOMER_VERIFIED",
-              otpVerification: {
-                ...j.otpVerification,
-                status: "verified",
-                verifiedAt: r.data?.verifiedAt || now,
-                verifiedBy: currentUser.id,
-              },
-              updatedAt: now,
-            }
-          : j
-      )
-    );
-    await logAudit("otp", jobId, "OTP_VERIFIED", "Customer OTP verified (server-side)");
-    // Re-sync in the background so other viewers see the verified state too.
-    void refreshJobs();
-    return { success: true, message: "Customer OTP verified successfully! You may now begin work." };
-  };
-
-  const resendJobOTP = async (
-    jobId: string
-  ): Promise<{ success: boolean; message: string; maskedPhone?: string; cooldownSeconds?: number; devCode?: string }> => {
-    const r = await api<{
-      maskedPhone: string;
-      cooldownSeconds?: number;
-      sentVia?: string;
-      devCode?: string;
-    }>("/api/otp/resend", {
-      method: "POST",
-      body: JSON.stringify({ jobId }),
-    });
-    if (!r.ok) return { success: false, message: r.error || "OTP resend failed. Please retry." };
-    if (r.data?.devCode) {
-      return {
-        success: true,
-        message: `DEV MODE: new OTP is ${r.data.devCode} — no SMS was sent.`,
-        maskedPhone: r.data?.maskedPhone,
-        cooldownSeconds: r.data?.cooldownSeconds,
-        devCode: r.data.devCode,
-      };
-    }
-    await logAudit("otp", jobId, "OTP_RESENT", `Fresh OTP dispatched via 2Factor SMS to ${r.data?.maskedPhone}`);
-    return {
-      success: true,
-      message: `New OTP sent via SMS to ${r.data?.maskedPhone}.`,
-      maskedPhone: r.data?.maskedPhone,
-      cooldownSeconds: r.data?.cooldownSeconds,
-    };
   };
 
   const fetchSmsGatewayLog = async (): Promise<SmsGatewayLog[]> => {
@@ -939,17 +826,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const sendCompletionLink = async (
     jobId: string
   ): Promise<{ success: boolean; message: string; linkPath?: string; linkUrl?: string }> => {
-    const r = await api<{ linkPath: string; linkUrl?: string }>(`/api/jobs/${encodeURIComponent(jobId)}/completion-link`, {
+    // The unified QR workflow owns the customer-approval token now: mint (or
+    // cooldown-reuse) the CUSTOMER_APPROVAL secure link server-side.
+    const r = await api<{ reveal?: string; linkUrl?: string }>("/api/qr-links", {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ action: "mint", jobId, purpose: "CUSTOMER_APPROVAL" }),
     });
     if (!r.ok) return { success: false, message: r.error || "Link generation failed." };
+    const linkUrl = r.data?.reveal || r.data?.linkUrl || "";
+    const linkPath = linkUrl ? linkUrl.replace(/^https?:\/\/[^/]+/, "") : undefined;
     await logAudit("customer", jobId, "COMPLETION_LINK_GENERATED", "Secure handover link generated.");
     return {
       success: true,
       message: "Secure link generated. Copy and share it with the customer.",
-      linkPath: r.data?.linkPath,
-      linkUrl: r.data?.linkUrl,
+      linkPath,
+      linkUrl: linkUrl || undefined,
     };
   };
 
@@ -1595,9 +1486,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         refreshQuality,
         refreshPhotos,
         transitionError,
-        sendJobArrivalOTP,
-        verifyJobOTP,
-        resendJobOTP,
         fetchSmsGatewayLog,
         sendCompletionLink,
         updateChecklistItem,

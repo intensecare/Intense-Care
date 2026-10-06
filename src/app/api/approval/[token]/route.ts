@@ -154,7 +154,6 @@ export async function POST(request: Request, { params }: { params: { token: stri
       }
 
       const now = new Date();
-      const ua = request.headers.get("user-agent") || undefined;
       await prisma.job.update({
         where: { id: job.id },
         data: {
@@ -166,26 +165,6 @@ export async function POST(request: Request, { params }: { params: { token: stri
           updatedAt: now,
         },
       });
-
-      // Mirror the sign-off onto the newest completion invite (idempotent —
-      // invite stays PENDING when the approval came through the QR approval
-      // route, so both surfaces agree).
-      const invite = await prisma.completionInvite.findFirst({
-        where: { jobId: job.id, signStatus: "PENDING" },
-        orderBy: { createdAt: "desc" },
-      });
-      if (invite) {
-        await prisma.completionInvite.update({
-          where: { id: invite.id },
-          data: {
-            signStatus: "APPROVED",
-            signedAt: now,
-            signatoryName: parsed.data.signatoryName,
-            signUserAgent: ua?.slice(0, 500),
-            signIpHash: hashIp(request.headers.get("x-forwarded-for")),
-          },
-        });
-      }
 
       await recordActivity({
         jobId: job.id,

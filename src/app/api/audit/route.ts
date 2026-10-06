@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     const action = typeof body?.action === "string" ? body.action : "";
 
     // Staff may record operational audit entries for their own actions
-    // (status transitions, OTP events) but never touch commission settlement.
+    // (status transitions, notification events) but never touch commission settlement.
     if (action === "status-audit") {
       const { user } = await requireUser();
       const entityType = typeof body?.entityType === "string" ? body.entityType.slice(0, 40) : "job";

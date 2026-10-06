@@ -8,7 +8,7 @@ import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 export const metadata: Metadata = {
   title: "Intense Care Deep Cleaning Operations ERP",
   description:
-    "Enterprise Field-Service ERP for Intense Care Deep Cleaning Operations — OTP Verification, Checklists, Independent QC, Customer Sign-off, and Commission Engine",
+    "Enterprise Field-Service ERP for Intense Care Deep Cleaning Operations — Secure Customer Links, Checklists, Independent QC, Customer Sign-off, and Commission Engine",
 };
 
 export default function RootLayout({

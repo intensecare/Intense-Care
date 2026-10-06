@@ -30,8 +30,6 @@ export default function SettingsPage() {
   } = useApp();
   const { currentUser } = useAuth();
 
-  const [otpExpiryMinutes, setOtpExpiryMinutes] = useState(systemSettings.otpExpiryMinutes || 15);
-  const [otpMaxRetries, setOtpMaxRetries] = useState(systemSettings.otpMaxRetries || 3);
   const [resendCooldownSeconds, setResendCooldownSeconds] = useState(systemSettings.resendCooldownSeconds || 60);
   const [nextDayDispatchTime, setNextDayDispatchTime] = useState(systemSettings.nextDayDispatchTime || "20:00");
   const [taxRatePercent, setTaxRatePercent] = useState(
@@ -49,31 +47,6 @@ export default function SettingsPage() {
   const [companyPhone, setCompanyPhone] = useState(systemSettings.companyPhone || "");
   const [companyEmail, setCompanyEmail] = useState(systemSettings.companyEmail || "");
 
-  // Live 2Factor credit check (super_admin) — a delivery failure where the
-  // provider accepts sends but messages never arrive (zero route credits,
-  // template issues) is invisible in the dispatch logs; this surfaces it.
-  const [balance, setBalance] = useState<{
-    configured: boolean;
-    mode?: string;
-    otpSmsCredits?: string | null;
-    transactionalSmsCredits?: string | null;
-    error?: string;
-  } | null>(null);
-  const [balanceBusy, setBalanceBusy] = useState(false);
-
-  const checkBalance = async () => {
-    setBalanceBusy(true);
-    try {
-      const res = await fetch("/api/sms/balance");
-      const json = await res.json().catch(() => null);
-      if (json?.success) setBalance(json.data);
-      else setBalance({ configured: true, error: "balance_check_failed" });
-    } catch {
-      setBalance({ configured: true, error: "network_error" });
-    } finally {
-      setBalanceBusy(false);
-    }
-  };
   const [sacCode, setSacCode] = useState(systemSettings.sacCode || "");
   const [googleReviewUrl, setGoogleReviewUrl] = useState(systemSettings.googleBusinessReviewUrl || "");
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -111,8 +84,6 @@ export default function SettingsPage() {
     e.preventDefault();
     setIsSaving(true);
     await updateSystemSettings({
-      otpExpiryMinutes,
-      otpMaxRetries,
       resendCooldownSeconds,
       nextDayDispatchTime,
       companyName: companyName.trim(),
@@ -248,47 +219,6 @@ export default function SettingsPage() {
               </span>
             </div>
 
-            {currentUser?.role === "super_admin" && (
-              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold text-slate-700">2Factor Account Credits</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[11px] gap-1"
-                    disabled={balanceBusy}
-                    onClick={() => void checkBalance()}
-                  >
-                    <RefreshCw className={`h-3 w-3 ${balanceBusy ? "animate-spin" : ""}`} />
-                    {balanceBusy ? "Checking…" : "Check Live"}
-                  </Button>
-                </div>
-                {balance && (
-                  <div className="text-[11px] space-y-1">
-                    <div className="text-slate-600">
-                      Delivery mode: <strong className="font-mono">{balance.mode}</strong>
-                      {balance.mode === "autogen" && (
-                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                          shared template route
-                        </span>
-                      )}
-                    </div>
-                    {balance.error ? (
-                      <span className="text-red-700 font-medium">Provider error: {balance.error}</span>
-                    ) : (
-                      <div className="flex gap-4">
-                        <span className={Number(balance.otpSmsCredits ?? 0) > 0 ? "text-emerald-700" : "text-red-700 font-semibold"}>
-                          OTP/SMS credits: <strong>{balance.otpSmsCredits ?? "—"}</strong>
-                        </span>
-                        <span className={Number(balance.transactionalSmsCredits ?? 0) > 0 ? "text-emerald-700" : "text-red-700 font-semibold"}>
-                          Transactional: <strong>{balance.transactionalSmsCredits ?? "—"}</strong>
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80 text-[11px] space-y-1 max-h-40 overflow-y-auto">
               {smsGatewayLogs.length === 0 ? (
                 <span className="text-slate-400">No dispatches recorded yet.</span>
@@ -392,7 +322,7 @@ export default function SettingsPage() {
 
             <form onSubmit={handleSave} className="space-y-4 text-xs">
               <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
-                <strong>Security notice:</strong> OTP expiry, attempt limits, resend cooldowns, and SMS
+                <strong>Security notice:</strong> notification cooldowns and SMS
                 rate caps are enforced <strong>server-side</strong> from environment variables (see{" "}
                 <code className="font-mono bg-amber-100 px-1 rounded">.env.example</code>). Values below
                 are operational display defaults only and do not weaken gateway security.
@@ -477,29 +407,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="font-semibold text-slate-700">OTP Expiry Window (Minutes)</label>
-                <Input
-                  type="number"
-                  value={otpExpiryMinutes}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) => setOtpExpiryMinutes(e.target.value === "" ? 0 : Number(e.target.value))}
-                  className="text-xs"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">Max OTP Verification Attempts</label>
-                <Input
-                  type="number"
-                  value={otpMaxRetries}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) => setOtpMaxRetries(e.target.value === "" ? 0 : Number(e.target.value))}
-                  className="text-xs"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">Resend Cooldown (Seconds)</label>
+                <label className="font-semibold text-slate-700">Notification Resend Cooldown (Seconds)</label>
                 <Input
                   type="number"
                   value={resendCooldownSeconds}

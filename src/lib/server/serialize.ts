@@ -123,20 +123,12 @@ export function redactJobForOps(job: SerializedJob): OpsSafeJob {
 }
 
 /** Job shape from the DB joined with customer/property/service display names. */
-export type SerializedJob = Omit<Job, "otpVerification"> & {
-  otpVerification: Job["otpVerification"];
+export type SerializedJob = Job & {
   customerName?: string;
   customerPhone?: string;
   propertyTitle?: string;
   service?: Pick<Service, "id" | "name" | "basePrice" | "estimatedDurationHours">;
 };
-
-/** Server-resolved OTP display state attached to serialized jobs. */
-export interface JobOtpResolvedState {
-  status: "pending" | "verified";
-  verifiedAt?: string;
-  verifiedBy?: string;
-}
 
 export function serializeJob(
   j: Prisma.JobGetPayload<{
@@ -145,8 +137,7 @@ export function serializeJob(
       property: { select: { title: true; address: true } };
       service: { select: { id: true; name: true; basePrice: true; estimatedDurationHours: true } };
     };
-  }>,
-  otpResolved?: JobOtpResolvedState | null
+  }>
 ): SerializedJob {
   return {
     id: j.id,
@@ -161,18 +152,17 @@ export function serializeJob(
     paymentStatus: j.paymentStatus as PaymentStatus,
     status: j.status as JobStatus,
     notes: j.notes ?? undefined,
-    // OTP truth lives server-side. The resolved state (VERIFIED challenge
-    // exists?) is passed in by the route so the client can trust it — a
-    // hardcoded value here used to clobber verified state on every re-sync,
-    // making the field app demand the customer's OTP a second time.
-    otpVerification: {
-      phone: j.customer.phone,
-      attempts: 0,
-      maxAttempts: 5,
-      status: otpResolved?.status ?? "none",
-      ...(otpResolved?.verifiedAt ? { verifiedAt: otpResolved.verifiedAt } : {}),
-      ...(otpResolved?.verifiedBy ? { verifiedBy: otpResolved.verifiedBy } : {}),
-    },
+    customerConfirmedAt: j.customerConfirmedAt
+      ? new Date(j.customerConfirmedAt).toISOString()
+      : undefined,
+    approvedAt: j.approvedAt ? new Date(j.approvedAt).toISOString() : undefined,
+    approvedBy: j.approvedBy ?? undefined,
+    approvalMethod: j.approvalMethod ?? undefined,
+    customerFeedbackRating: j.customerFeedbackRating ?? undefined,
+    customerFeedbackAt: j.customerFeedbackAt
+      ? new Date(j.customerFeedbackAt).toISOString()
+      : undefined,
+    googleReviewClicked: j.googleReviewClicked,
     qualityCheckId: j.qualityCheckId ?? undefined,
     referralAttribution: undefined,
     arrivedAt: j.arrivedAt ? new Date(j.arrivedAt).toISOString() : undefined,

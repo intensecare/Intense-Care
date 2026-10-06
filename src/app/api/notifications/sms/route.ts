@@ -6,7 +6,7 @@ import { errorResponse } from "@/lib/server/http";
 
 /**
  * GET /api/notifications/sms — masked audit trail of every outbound gateway
- * dispatch (OTP + completion handover). Managers/admins only; recipients are
+ * dispatch (arrival/rework/completion notices). Managers/admins only; recipients are
  * masked, no message bodies or provider session ids are exposed.
  */
 export async function GET() {

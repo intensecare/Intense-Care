@@ -21,7 +21,5 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   taxLabel: "GST",
   gstin: "",
   sacCode: "",
-  otpExpiryMinutes: 15,
-  otpMaxRetries: 3,
   resendCooldownSeconds: 60,
 };

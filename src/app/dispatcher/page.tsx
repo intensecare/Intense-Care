@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button";
  *  - availability = active worker AND not already booked on another job in the
  *    same local date + overlapping time slot (conflict check, DB-derived),
  *  - each job shows the count currently assigned, the lead worker (first
- *    assigned = OTP holder), and supports adding/removing individual workers,
+ *    assigned = lead), and supports adding/removing individual workers,
  *  - every change writes through PATCH /api/jobs/[id] and re-syncs from the
  *    server response, so the UI can never drift from the database.
  */
@@ -196,7 +196,7 @@ export default function DispatcherPage() {
 
         <div className="p-4 rounded-lg border border-amber-200 bg-amber-50/40 shadow-xs">
           <div className="text-xs font-semibold text-amber-800">
-            Arrived • Pending OTP
+            Arrived • Awaiting Customer Confirmation
           </div>
           <div className="text-2xl font-semibold text-amber-900 mt-1">
             {visibleJobs.filter((j) => j.status === "ARRIVED").length}
@@ -346,7 +346,7 @@ export default function DispatcherPage() {
 
                     <p className="text-[10px] text-slate-400">
                       Struck-through workers are booked on another job in the same date &amp; time slot. The first
-                      assigned worker is the <strong>Lead</strong> — only they receive/verify the customer OTP.
+                      assigned worker is the <strong>Lead</strong>.
                     </p>
                   </div>
                 </div>
@@ -442,7 +442,7 @@ export default function DispatcherPage() {
                         {leadWorkerName && (
                           <div className="text-[11px] text-slate-500 flex items-center gap-1">
                             <UserCheck className="h-3 w-3 text-indigo-500" />
-                            Lead (OTP holder): {leadWorkerName}
+                            Lead: {leadWorkerName}
                           </div>
                         )}
                       </div>
