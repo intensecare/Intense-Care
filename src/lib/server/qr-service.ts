@@ -3,98 +3,76 @@ import { prisma } from "./prisma";
 import { logger, maskToken } from "./logger";
 
 /**
- * Unified QR + Secure Link token service (§3–§6, §27, §29, §36).
+ * Customer secure link service — ONE link per job, for the whole journey.
  *
- * ONE centralized registry of dynamic tokens. Every QR code and secure link
- * in the platform mints here; every resolution validates here. Design rules:
+ * The customer link is minted when the job is created (or a quotation is
+ * converted) and stays valid until revoked or regenerated. The SAME link:
+ *   1. lets the customer confirm the team's arrival,
+ *   2. shows live progress (checklist + photos) through the service,
+ *   3. carries the final sign-off (approve / report an issue),
+ *   4. shows the final report, rating and the Google-review step.
  *
- *  - The raw token is a 256-bit URL-safe random value. ONLY its SHA-256 hash
- *    is stored, so a database leak can never mint working links.
- *  - Purpose-scoped expiry: customer verification links are short-lived;
- *    QC/reinspection links live until inspection completes or the token is
- *    revoked; manager links ride the job's active window.
- *  - Revoke → regenerate is instant: revoked hashes resolve to HTTP 410.
- *  - Usage is audited (usageCount / lastUsedAt) on every successful resolve.
+ * Design rules:
+ *  - The raw token is a 256-bit URL-safe random value. Only its SHA-256 hash
+ *    is used for verification; an AES-256-GCM encrypted copy (tokenEnc) lets
+ *    the desk re-show/QR the SAME link without rotating it.
+ *  - Regen replaces: minting again supersedes (auto-revokes) the previous
+ *    link so exactly ONE active link exists per job.
+ *  - Revoke is the kill switch; usage is audited on every resolve.
  */
 
-export type QrPurpose =
-  | "CUSTOMER_JOB"
-  | "CUSTOMER_VERIFICATION"
-  | "CUSTOMER_APPROVAL"
-  | "MANAGER_JOB"
-  | "QC_INSPECTION"
-  | "REWORK"
-  | "REINSPECTION";
+export type QrPurpose = "CUSTOMER_JOB";
 
-export const QR_PURPOSES: QrPurpose[] = [
-  "CUSTOMER_JOB",
-  "CUSTOMER_VERIFICATION",
-  "CUSTOMER_APPROVAL",
-  "MANAGER_JOB",
-  "QC_INSPECTION",
-  "REWORK",
-  "REINSPECTION",
-];
-
-/** §27 — the route scope each purpose unlocks. Never trust the URL alone:
- *  the SCOPE is derived from the token record, not from the path alone. */
-export const PURPOSE_SCOPE: Record<QrPurpose, string> = {
-  CUSTOMER_JOB: "customer",
-  CUSTOMER_VERIFICATION: "customer",
-  CUSTOMER_APPROVAL: "approval",
-  MANAGER_JOB: "manager",
-  QC_INSPECTION: "qc",
-  REWORK: "rework",
-  REINSPECTION: "qc",
-};
+export const QR_PURPOSES: QrPurpose[] = ["CUSTOMER_JOB"];
 
 export const PURPOSE_LABEL: Record<QrPurpose, string> = {
-  CUSTOMER_JOB: "Customer Job Link",
-  CUSTOMER_VERIFICATION: "Customer Verification Link",
-  CUSTOMER_APPROVAL: "Customer Approval Link",
-  MANAGER_JOB: "Manager Job Link",
-  QC_INSPECTION: "QC Inspection Link",
-  REWORK: "Rework Link",
-  REINSPECTION: "Reinspection Link",
+  CUSTOMER_JOB: "Customer Link",
 };
-
-/** §6 — purpose-scoped expiry (hours). Env-overridable, clamped. */
-function hoursFromEnv(name: string, fallback: number, min: number, max: number): number {
-  const raw = process.env[name];
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isNaN(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
-
-export function qrExpiryHours(purpose: QrPurpose): number | null {
-  switch (purpose) {
-    case "CUSTOMER_VERIFICATION":
-      return hoursFromEnv("QR_CUSTOMER_VERIFICATION_HOURS", 24, 1, 24 * 30); // short-lived verification window
-    case "CUSTOMER_JOB":
-      return hoursFromEnv("QR_CUSTOMER_JOB_HOURS", 24 * 30, 1, 24 * 365);
-    case "CUSTOMER_APPROVAL":
-      return hoursFromEnv("QR_CUSTOMER_APPROVAL_HOURS", 24 * 14, 1, 24 * 365);
-    case "MANAGER_JOB":
-      return hoursFromEnv("QR_MANAGER_JOB_HOURS", 24 * 7, 1, 24 * 90);
-    case "QC_INSPECTION":
-    case "REINSPECTION":
-      return null; // valid until inspection completed or token revoked
-    case "REWORK":
-      return hoursFromEnv("QR_REWORK_HOURS", 24 * 7, 1, 24 * 90);
-    default:
-      return null;
-  }
-}
 
 export function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+/* ------------------------------------------------------------------ */
+/* Encrypted at-rest copy of the raw token (AES-256-GCM).              */
+/* The hash verifies; tokenEnc lets the desk re-show the SAME link.    */
+/* ------------------------------------------------------------------ */
+
+function encKey(): Buffer {
+  const secret = process.env.ERP_SESSION_SECRET ?? "";
+  return crypto.createHash("sha256").update(secret, "utf8").digest();
+}
+
+function encryptToken(raw: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", encKey(), iv);
+  const ct = Buffer.concat([cipher.update(raw, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString("base64url")}.${tag.toString("base64url")}.${ct.toString("base64url")}`;
+}
+
+function decryptToken(enc: string): string | null {
+  try {
+    const [ivB64, tagB64, ctB64] = enc.split(".");
+    if (!ivB64 || !tagB64 || !ctB64) return null;
+    const decipher = crypto.createDecipheriv("aes-256-gcm", encKey(), Buffer.from(ivB64, "base64url"));
+    decipher.setAuthTag(Buffer.from(tagB64, "base64url"));
+    return Buffer.concat([decipher.update(Buffer.from(ctB64, "base64url")), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** Decrypt a stored token row to its raw value (desk re-show only). */
+export function rawTokenOfRow(row: { tokenEnc: string | null }): string | null {
+  return row.tokenEnc ? decryptToken(row.tokenEnc) : null;
 }
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString("base64url"); // 256-bit, URL-safe
 }
 
-/** Resolve the shareable base URL exactly like the completion-invite flow. */
+/** Resolve the shareable base URL (APP_BASE_URL → Vercel → localhost). */
 function baseUrl(): string {
   const configured = process.env.APP_BASE_URL;
   if (configured && /^https?:\/\//.test(configured)) return configured.replace(/\/$/, "");
@@ -107,20 +85,15 @@ function baseUrl(): string {
   return "http://localhost:3000";
 }
 
-export function buildLinkPath(purpose: QrPurpose, token: string): string {
-  const scope = PURPOSE_SCOPE[purpose];
-  if (scope === "approval") return `/approval/${token}`;
-  if (scope === "manager") return `/manager/job/${token}`;
-  if (scope === "qc") return `/qc/job/${token}`;
-  if (scope === "rework") return `/rework/${token}`;
+export function buildLinkPath(token: string): string {
   return `/customer/job/${token}`;
 }
 
-export function buildLinkUrl(purpose: QrPurpose, token: string): string {
-  return `${baseUrl()}${buildLinkPath(purpose, token)}`;
+export function buildLinkUrl(token: string): string {
+  return `${baseUrl()}${buildLinkPath(token)}`;
 }
 
-/** §27 short alias scanned from the physical QR — resolves to the real scope. */
+/** Short alias scanned from the physical QR — redirects to the customer page. */
 export function buildShortUrl(token: string): string {
   return `${baseUrl()}/q/${token}`;
 }
@@ -134,7 +107,7 @@ const MINT_COOLDOWN_MS = 15 * 1000;
 const MINT_WINDOW_MS = 10 * 60 * 1000;
 const MAX_MINTS_PER_WINDOW = 8;
 
-export interface MintSuccess {
+export interface LinkInfo {
   tokenId: string;
   purpose: QrPurpose;
   linkPath: string;
@@ -144,52 +117,96 @@ export interface MintSuccess {
 }
 
 /**
- * Mints a fresh token for (jobId, purpose). Each call creates a NEW token —
- * older tokens of the same purpose keep working until revoked/expired so a
- * re-shared link never orphans a customer mid-flow; REVOKE is the kill switch.
+ * The ONE customer link for a job: mint-once, reuse forever. Returns the
+ * existing live link (decrypted) or mints a fresh one when none exists.
+ * Never rotates an existing link — regeneration is an explicit desk action.
  */
-export async function mintQrToken(
+export async function ensureCustomerLink(
   jobId: string,
-  purpose: QrPurpose,
   actor: { id?: string; name?: string } = {}
-): Promise<{ success: true; data: MintSuccess } | { success: false; failure: MintFailure }> {
+): Promise<{ success: true; data: LinkInfo; created: boolean } | { success: false; failure: MintFailure }> {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) {
     return { success: false, failure: { kind: "not_found", message: "Job not found." } };
   }
 
-  // Rate limit per (job, purpose): cooldown + rolling cap.
+  const live = await prisma.qrToken.findFirst({
+    where: { jobId, purpose: "CUSTOMER_JOB", revokedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (live) {
+    const raw = rawTokenOfRow(live);
+    if (raw) {
+      return {
+        success: true,
+        created: false,
+        data: {
+          tokenId: live.id,
+          purpose: "CUSTOMER_JOB",
+          linkPath: buildLinkPath(raw),
+          linkUrl: buildLinkUrl(raw),
+          shortUrl: buildShortUrl(raw),
+          expiresAt: live.expiresAt?.toISOString() ?? null,
+        },
+      };
+    }
+    // Unreadable legacy row (pre-encryption): revoke and fall through to mint.
+    await prisma.qrToken.update({
+      where: { id: live.id },
+      data: { revokedAt: new Date(), revokedReason: "Superseded — legacy token re-issued" },
+    });
+  }
+
+  return mintCustomerLink(jobId, actor);
+}
+
+/**
+ * Mint a fresh customer link for (jobId), superseding any previous one.
+ * The old link dies instantly — regeneration is the explicit rotate action.
+ */
+export async function mintCustomerLink(
+  jobId: string,
+  actor: { id?: string; name?: string } = {}
+): Promise<{ success: true; data: LinkInfo; created: true } | { success: false; failure: MintFailure }> {
+  const job = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!job) {
+    return { success: false, failure: { kind: "not_found", message: "Job not found." } };
+  }
+
+  // Rate limit per job: cooldown + rolling cap (guards token spam).
   const last = await prisma.qrToken.findFirst({
-    where: { jobId, purpose },
+    where: { jobId, purpose: "CUSTOMER_JOB" },
     orderBy: { createdAt: "desc" },
   });
   if (last && Date.now() - last.createdAt.getTime() < MINT_COOLDOWN_MS) {
     const secs = Math.ceil((MINT_COOLDOWN_MS - (Date.now() - last.createdAt.getTime())) / 1000);
     return {
       success: false,
-      failure: { kind: "cooldown", message: `Please wait ${secs}s before generating another ${PURPOSE_LABEL[purpose]}.` },
+      failure: { kind: "cooldown", message: `Please wait ${secs}s before generating a new customer link.` },
     };
   }
   const windowStart = new Date(Date.now() - MINT_WINDOW_MS);
   const recent = await prisma.qrToken.count({
-    where: { jobId, purpose, createdAt: { gt: windowStart } },
+    where: { jobId, purpose: "CUSTOMER_JOB", createdAt: { gt: windowStart } },
   });
   if (recent >= MAX_MINTS_PER_WINDOW) {
     return {
       success: false,
-      failure: { kind: "rate_limited", message: `Too many ${PURPOSE_LABEL[purpose]} tokens generated for this job. Try again later.` },
+      failure: { kind: "rate_limited", message: "Too many customer links generated for this job. Try again later." },
     };
   }
 
   const token = generateToken();
-  const hours = qrExpiryHours(purpose);
-  const expiresAt = hours ? new Date(Date.now() + hours * 3600 * 1000) : null;
+  // Optional env-set expiry in days; the sole link stays valid until revoked by default.
+  const daysRaw = process.env.QR_CUSTOMER_LINK_DAYS ? Number.parseInt(process.env.QR_CUSTOMER_LINK_DAYS, 10) : NaN;
+  const expiresAt = Number.isFinite(daysRaw) && daysRaw > 0 ? new Date(Date.now() + daysRaw * 24 * 3600 * 1000) : null;
 
   const row = await prisma.qrToken.create({
     data: {
       tokenHash: hashToken(token),
+      tokenEnc: encryptToken(token),
       tokenLast4: token.slice(-4),
-      purpose,
+      purpose: "CUSTOMER_JOB",
       jobId,
       expiresAt,
       createdBy: actor.id ?? null,
@@ -197,36 +214,39 @@ export async function mintQrToken(
     },
   });
 
-  logger.info("qr.minted", {
+  // Supersede: kill older live tokens of this job so only the fresh link stays active.
+  const superseded = await prisma.qrToken.updateMany({
+    where: { jobId, purpose: "CUSTOMER_JOB", id: { not: row.id }, revokedAt: null },
+    data: { revokedAt: new Date(), revokedBy: actor.id ?? null, revokedReason: "Superseded by a newly minted link" },
+  });
+
+  logger.info("qr.customer_link_minted", {
     jobId,
-    purpose,
     tokenId: row.id,
     token: maskToken(token),
     expiresAt: expiresAt?.toISOString() ?? null,
+    supersededCount: superseded.count,
   });
 
   return {
     success: true,
+    created: true,
     data: {
       tokenId: row.id,
-      purpose,
-      linkPath: buildLinkPath(purpose, token),
-      linkUrl: buildLinkUrl(purpose, token),
+      purpose: "CUSTOMER_JOB",
+      linkPath: buildLinkPath(token),
+      linkUrl: buildLinkUrl(token),
       shortUrl: buildShortUrl(token),
       expiresAt: expiresAt?.toISOString() ?? null,
     },
   };
 }
 
-/** What mintQrToken returns must NEVER include the raw token; callers share
- *  linkUrl/shortUrl once and the QR image is fetched separately. */
-
 export type ResolveFailureKind =
   | "not_found" // unknown token (404)
   | "expired" // 410
   | "revoked" // 410
-  | "forbidden" // purpose mismatch — wrong scope for this route (403)
-  | "wrong_status"; // token valid but the job cannot use this purpose now (409)
+  | "wrong_status"; // link valid but the job cannot act right now (409)
 
 export interface ResolveFailure {
   kind: ResolveFailureKind;
@@ -256,51 +276,23 @@ export interface ResolvedQrToken {
   };
 }
 
-/** Job statuses each purpose may operate on (§27 "Job status check"). */
-function purposeAllowedStatuses(purpose: QrPurpose): string[] | null {
-  switch (purpose) {
-    case "CUSTOMER_JOB":
-      return ["SCHEDULED", "ASSIGNED", "ARRIVED", "CUSTOMER_VERIFIED", "IN_PROGRESS", "WORK_COMPLETED", "QUALITY_CHECK", "PASS", "REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS", "REWORK_COMPLETED", "REINSPECTION", "CUSTOMER_APPROVAL", "COMPLETED", "FEEDBACK_REQUESTED"];
-    case "CUSTOMER_VERIFICATION":
-      // §30: stays valid after confirmation so a second tap still resolves
-      // (the confirm action itself answers idempotently). Only rejects once
-      // work has begun in earnest.
-      return ["SCHEDULED", "ASSIGNED", "ARRIVED", "CUSTOMER_VERIFIED", "IN_PROGRESS"];
-    case "CUSTOMER_APPROVAL":
-      return ["PASS", "CUSTOMER_APPROVAL", "COMPLETED", "FEEDBACK_REQUESTED"];
-    case "MANAGER_JOB":
-      return ["SCHEDULED", "ASSIGNED", "ARRIVED", "CUSTOMER_VERIFIED", "IN_PROGRESS", "REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
-    case "QC_INSPECTION":
-      // Stays valid through the whole rework loop so QC can re-flag issues
-      // idempotently (§30) without a fresh link each cycle.
-      return ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS", "REWORK_COMPLETED", "REINSPECTION"];
-    case "REWORK":
-      return ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
-    case "REINSPECTION":
-      return ["REWORK_COMPLETED", "REINSPECTION"];
-    default:
-      return null;
-  }
-}
-
 /**
- * The full §27 validation chain, server-side on EVERY request:
- *   token hash → revocation → expiry → job existence → purpose/job-status
- *   compatibility → (caller-supplied role check) → minimum-info projection.
- * Returns a discriminated result; routes translate to status codes.
+ * The full validation chain, server-side on EVERY request:
+ *   token hash → revocation → expiry → job existence → minimum-info projection.
+ * The customer link never gates on job status at resolve time — the journey
+ * page adapts to the stage; individual actions enforce their own gates.
  */
 export async function resolveQrToken(
-  rawToken: string,
-  expectedPurpose?: QrPurpose | QrPurpose[]
+  rawToken: string
 ): Promise<{ ok: true; data: ResolvedQrToken } | { ok: false; failure: ResolveFailure }> {
   if (!rawToken || rawToken.length < 16 || rawToken.length > 200) {
-    return { ok: false, failure: { kind: "not_found", message: "This QR code is invalid or has expired." } };
+    return { ok: false, failure: { kind: "not_found", message: "This link is invalid or has expired." } };
   }
 
   const row = await prisma.qrToken.findUnique({ where: { tokenHash: hashToken(rawToken) } });
   if (!row) {
     logger.warn("qr.resolve.unknown_token");
-    return { ok: false, failure: { kind: "not_found", message: "This QR code is invalid or has expired." } };
+    return { ok: false, failure: { kind: "not_found", message: "This link is invalid or has expired." } };
   }
 
   if (row.revokedAt) {
@@ -318,21 +310,6 @@ export async function resolveQrToken(
     };
   }
 
-  const expectedList = expectedPurpose
-    ? Array.isArray(expectedPurpose)
-      ? expectedPurpose
-      : [expectedPurpose]
-    : null;
-  if (expectedList && !expectedList.includes(row.purpose as QrPurpose)) {
-    // §28 permission failure BEFORE any job-status probing — a manager token
-    // probing the customer route must read as "no permission", not "bad stage".
-    logger.warn("qr.resolve.purpose_mismatch", { tokenId: row.id, expected: expectedList.join(","), actual: row.purpose });
-    return {
-      ok: false,
-      failure: { kind: "forbidden", message: "You don't have permission to access this job with this link." },
-    };
-  }
-
   const job = await prisma.job.findUnique({
     where: { id: row.jobId },
     include: {
@@ -345,21 +322,6 @@ export async function resolveQrToken(
     return { ok: false, failure: { kind: "not_found", message: "The job for this link no longer exists." } };
   }
 
-  const allowed = purposeAllowedStatuses(row.purpose as QrPurpose);
-  if (allowed && !allowed.includes(job.status)) {
-    logger.warn("qr.resolve.status_rejected", { tokenId: row.id, purpose: row.purpose, jobStatus: job.status });
-    return {
-      ok: false,
-      failure: {
-        kind: "wrong_status",
-        message:
-          row.purpose === "CUSTOMER_VERIFICATION"
-            ? "This confirmation link is only active while the team is arriving or on site."
-            : "This link is not active for the job's current stage.",
-      },
-    };
-  }
-
   // Usage audit — best-effort, never blocks a legitimate use.
   void prisma.qrToken
     .update({
@@ -367,8 +329,6 @@ export async function resolveQrToken(
       data: { usageCount: { increment: 1 }, lastUsedAt: new Date() },
     })
     .catch(() => {});
-
-  const service = await prisma.service.findUnique({ where: { id: job.serviceId }, select: { name: true } });
 
   return {
     ok: true,
@@ -397,7 +357,7 @@ export async function resolveQrToken(
   };
 }
 
-/** Revoke one token (by id) — the §5 kill switch. */
+/** Revoke one token (by id) — the kill switch. */
 export async function revokeQrToken(
   tokenId: string,
   actor: { id?: string; name?: string },
@@ -411,18 +371,18 @@ export async function revokeQrToken(
   return row.count > 0;
 }
 
-/** Revoke every live token of a purpose for a job (e.g. compromise response). */
-export async function revokeAllForJob(jobId: string, purpose?: QrPurpose, reason = "Revoked") {
+/** Revoke every live customer link of a job (compromise response). */
+export async function revokeAllForJob(jobId: string, reason = "Revoked") {
   const row = await prisma.qrToken.updateMany({
-    where: { jobId, revokedAt: null, ...(purpose ? { purpose } : {}) },
+    where: { jobId, revokedAt: null },
     data: { revokedAt: new Date(), revokedReason: reason },
   });
-  logger.info("qr.revoked_all", { jobId, purpose: purpose ?? "all", count: row.count });
+  logger.info("qr.revoked_all", { jobId, count: row.count });
   return row.count;
 }
 
 /* ------------------------------------------------------------------ */
-/* §36 rate limiting for public token endpoints (per-IP, in-memory).   */
+/* Rate limiting for public token endpoints (per-IP, in-memory).       */
 /* ------------------------------------------------------------------ */
 
 const buckets = new Map<string, { count: number; resetAt: number }>();
@@ -447,7 +407,7 @@ export function clientIp(request: Request): string {
   return request.headers.get("x-real-ip") || "unknown";
 }
 
-/** Serialize a QrToken row for the admin table — hashes stay server-side. */
+/** Serialize a QrToken row for the desk table — raw token never leaves. */
 export function serializeQrToken(row: {
   id: string;
   purpose: string;
@@ -462,9 +422,9 @@ export function serializeQrToken(row: {
 }) {
   return {
     id: row.id,
-    purpose: row.purpose as QrPurpose,
-    purposeLabel: PURPOSE_LABEL[row.purpose as QrPurpose] ?? row.purpose,
-    scope: PURPOSE_SCOPE[row.purpose as QrPurpose] ?? "customer",
+    purpose: "CUSTOMER_JOB" as QrPurpose,
+    purposeLabel: PURPOSE_LABEL.CUSTOMER_JOB,
+    scope: "customer",
     jobId: row.jobId,
     expiresAt: row.expiresAt?.toISOString() ?? null,
     revokedAt: row.revokedAt?.toISOString() ?? null,

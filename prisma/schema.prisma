@@ -449,7 +449,8 @@ model Expense {
 /// its SHA-256 hash — so a database dump cannot mint working links.
 model QrToken {
   id           String    @id @default(cuid())
-  tokenHash    String    @unique // SHA-256 hex of the raw token
+  tokenHash    String    @unique // SHA-256 hex of the raw token (verification only)
+  tokenEnc     String?   // AES-256-GCM encrypted raw token — lets admins re-show the SAME link without minting
   tokenLast4   String // masked display only
   purpose      String // CUSTOMER_JOB | CUSTOMER_VERIFICATION | CUSTOMER_APPROVAL | MANAGER_JOB | QC_INSPECTION | REWORK | REINSPECTION
   jobId        String

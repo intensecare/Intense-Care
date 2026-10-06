@@ -6,26 +6,24 @@ import { requireRole } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import {
-  mintQrToken,
+  ensureCustomerLink,
+  mintCustomerLink,
   revokeQrToken,
-  revokeAllForJob,
+  rawTokenOfRow,
+  buildLinkUrl,
+  buildShortUrl,
   serializeQrToken,
-  QR_PURPOSES,
-  PURPOSE_LABEL,
-  type QrPurpose,
 } from "@/lib/server/qr-service";
 
 /**
- * §35 — ADMIN → QR & SECURE LINKS.
+ * ADMIN → CUSTOMER SECURE LINK (one per job).
  *
- * super_admin + ops_manager (the QC desk mints approval links on pass). Table of every token with Type / Job / Purpose / Created /
- * Expires / Status / Last Used / Actions. Actions:
- *   [SHOW QR]   → PNG data URL of the short URL (only until revealed)
- *   [COPY LINK] → the raw link, revealed once on demand (never stored raw)
- *   [SHARE]     → WhatsApp share URL for the link
- *   [DOWNLOAD]  → QR PNG at 1024px for print
- *   [REGENERATE]→ revoke old + mint fresh (old stops working instantly)
- *   [REVOKE]    → kill switch (§5)
+ * GET                → every job's link state for the desk table.
+ * POST get           → the job's single link; mints it on first use.
+ * POST regen         → replace: new link, old dies instantly.
+ * POST revoke        → kill switch.
+ * POST qr / qr-dl    → QR image of the SAME link (no rotation).
+ * POST purge-job     → revoke the job's link (compromise response).
  */
 
 export async function GET() {
@@ -65,7 +63,6 @@ export async function GET() {
               : null,
           };
         }),
-        purposes: QR_PURPOSES.map((p) => ({ value: p, label: PURPOSE_LABEL[p] })),
       },
     });
   } catch (err) {
@@ -73,94 +70,84 @@ export async function GET() {
   }
 }
 
-const MintSchema = z.object({
-  action: z.literal("mint"),
-  jobId: z.string().min(1).max(64),
-  purpose: z.enum(["CUSTOMER_JOB", "CUSTOMER_VERIFICATION", "CUSTOMER_APPROVAL", "MANAGER_JOB", "QC_INSPECTION", "REWORK", "REINSPECTION"]),
-});
-
+const GetSchema = z.object({ action: z.literal("get"), jobId: z.string().min(1).max(64) });
+const RegenSchema = z.object({ action: z.literal("regen"), jobId: z.string().min(1).max(64) });
+const PurgeSchema = z.object({ action: z.literal("purge-job"), jobId: z.string().min(1).max(64) });
 const TokenActionSchema = z.object({
-  action: z.enum(["reveal", "qr", "qr-download", "share", "revoke"]),
+  action: z.enum(["reveal", "qr", "qr-download", "revoke"]),
   tokenId: z.string().min(1).max(64),
   reason: z.string().max(300).optional(),
 });
 
-const PurgeSchema = z.object({
-  action: z.literal("purge-job"),
-  jobId: z.string().min(1).max(64),
-});
-
 export async function POST(request: Request) {
   try {
-    const { user } = await requireRole(["super_admin"]);
+    const { user } = await requireRole(["super_admin", "ops_manager"]);
     const body = await request.json().catch(() => null);
     const action = typeof body?.action === "string" ? body.action : "";
 
-    if (action === "mint") {
-      const parsed = MintSchema.safeParse(body);
-      if (!parsed.success) return NextResponse.json({ success: false, error: "Invalid mint payload." }, { status: 400 });
-      const res = await mintQrToken(parsed.data.jobId, parsed.data.purpose as QrPurpose, {
-        id: user.id,
-        name: user.name,
-      });
+    if (action === "get" || action === "regen") {
+      const parsed = (action === "get" ? GetSchema : RegenSchema).safeParse(body);
+      if (!parsed.success) return NextResponse.json({ success: false, error: "Invalid payload." }, { status: 400 });
+      const res =
+        action === "get"
+          ? await ensureCustomerLink(parsed.data.jobId, { id: user.id, name: user.name })
+          : await mintCustomerLink(parsed.data.jobId, { id: user.id, name: user.name });
       if (!res.success) {
-        const status = res.failure.kind === "not_found" ? 404 : res.failure.kind === "cooldown" ? 429 : 429;
+        const status = res.failure.kind === "not_found" ? 404 : 429;
         return NextResponse.json({ success: false, error: res.failure.message }, { status });
       }
-      // Raw token is only present in this response — share/store it now.
+      // Raw token appears only in this response — share/store it now.
       return NextResponse.json(
         {
           success: true,
           data: {
             ...res.data,
-            reveal: res.data.linkUrl, // one-time reveal in the mint response
-            shareUrl: `https://wa.me/?text=${encodeURIComponent(`${res.data.linkUrl}`)}`,
+            reveal: res.data.linkUrl,
+            created: "created" in res ? res.created : true,
+            shareUrl: `https://wa.me/?text=${encodeURIComponent(res.data.linkUrl)}`,
           },
         },
-        { status: 201 }
+        { status: action === "regen" ? 201 : 200 }
       );
     }
 
-    if (action === "reveal" || action === "qr" || action === "qr-download" || action === "share") {
+    if (action === "reveal" || action === "qr" || action === "qr-download") {
       const parsed = TokenActionSchema.safeParse(body);
       if (!parsed.success) return NextResponse.json({ success: false, error: "Invalid payload." }, { status: 400 });
 
       const row = await prisma.qrToken.findUnique({ where: { id: parsed.data.tokenId } });
       if (!row) return NextResponse.json({ success: false, error: "Token not found." }, { status: 404 });
-
-      // The raw token is not stored — it can only be revealed from the token
-      // VALUE side. To make [COPY LINK]/[SHOW QR] possible after minting, the
-      // service mints fresh tokens on reveal ONLY when the original is dead.
-      // For live tokens we rebuild the link from a fresh mint of the same
-      // purpose (cooldown-free path below) so the admin can always re-share.
       if (row.revokedAt) {
         return NextResponse.json(
-          { success: false, error: "This token is revoked — REGENERATE to issue a fresh link." },
+          { success: false, error: "This link is revoked — REGENERATE to issue a fresh one." },
+          { status: 409 }
+        );
+      }
+      if (row.expiresAt && row.expiresAt.getTime() < Date.now()) {
+        return NextResponse.json(
+          { success: false, error: "This link has expired — REGENERATE to issue a fresh one." },
+          { status: 409 }
+        );
+      }
+      const raw = rawTokenOfRow(row);
+      if (!raw) {
+        return NextResponse.json(
+          { success: false, error: "This legacy link cannot be re-shown — REGENERATE to issue a fresh one." },
           { status: 409 }
         );
       }
 
-      // §35 reveal-by-remint: mint a NEW token of the same purpose for the
-      // same job and present its link/QR. The old token stays live until
-      // revoked (or use purge-job). This keeps raw tokens out of the DB
-      // entirely while making re-sharing possible at any time.
-      if (action === "reveal" || action === "share") {
-        const minted = await mintQrToken(row.jobId, row.purpose as QrPurpose, { id: user.id, name: user.name });
-        if (!minted.success) {
-          return NextResponse.json({ success: false, error: minted.failure.message }, { status: 429 });
-        }
+      const linkUrl = buildLinkUrl(raw);
+      const shortUrl = buildShortUrl(raw);
+
+      if (action === "reveal") {
         return NextResponse.json({
           success: true,
-          data: { linkUrl: minted.data.linkUrl, shortUrl: minted.data.shortUrl, expiresAt: minted.data.expiresAt },
+          data: { linkUrl, shortUrl, expiresAt: row.expiresAt?.toISOString() ?? null },
         });
       }
 
-      // QR image for the (freshly re-minted) same-purpose token.
-      const minted = await mintQrToken(row.jobId, row.purpose as QrPurpose, { id: user.id, name: user.name });
-      if (!minted.success) {
-        return NextResponse.json({ success: false, error: minted.failure.message }, { status: 429 });
-      }
-      const urlForQr = action === "qr-download" ? minted.data.linkUrl : minted.data.shortUrl;
+      const urlForQr = action === "qr-download" ? linkUrl : shortUrl;
       const size = action === "qr-download" ? 1024 : 320;
       const dataUrl = await QRCode.toDataURL(urlForQr, {
         width: size,
@@ -168,21 +155,22 @@ export async function POST(request: Request) {
         color: { dark: "#0f172a", light: "#ffffff" },
         errorCorrectionLevel: "M",
       });
-      return NextResponse.json({ success: true, data: { qrDataUrl: dataUrl, linkUrl: minted.data.linkUrl, token: urlForQr.split("/").pop() } });
+      return NextResponse.json({ success: true, data: { qrDataUrl: dataUrl, linkUrl, token: urlForQr.split("/").pop() } });
     }
 
     if (action === "revoke") {
       const parsed = TokenActionSchema.safeParse(body);
       if (!parsed.success) return NextResponse.json({ success: false, error: "Invalid payload." }, { status: 400 });
       const ok = await revokeQrToken(parsed.data.tokenId, { id: user.id, name: user.name }, parsed.data.reason);
-      if (!ok) return NextResponse.json({ success: false, error: "Token already revoked or not found." }, { status: 409 });
+      if (!ok) return NextResponse.json({ success: false, error: "Link already revoked or not found." }, { status: 409 });
       return NextResponse.json({ success: true, data: { revoked: true } });
     }
 
     if (action === "purge-job") {
       const parsed = PurgeSchema.safeParse(body);
       if (!parsed.success) return NextResponse.json({ success: false, error: "Invalid payload." }, { status: 400 });
-      const count = await revokeAllForJob(parsed.data.jobId, undefined, "Compromise response — all tokens revoked");
+      const { revokeAllForJob } = await import("@/lib/server/qr-service");
+      const count = await revokeAllForJob(parsed.data.jobId, "Compromise response — link revoked");
       logger.warn("qr.purged_job_tokens", { jobId: parsed.data.jobId, count, by: user.id });
       return NextResponse.json({ success: true, data: { revokedCount: count } });
     }

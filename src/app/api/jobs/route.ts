@@ -306,6 +306,17 @@ export async function POST(request: Request) {
     // calendar outage can never fail a booking.
     void syncJobEvent(result.job.id).catch(() => {});
 
+    // The customer's ONE secure link: minted the moment the job exists so the
+    // desk can share it immediately. Fire-and-forget — never fails a booking.
+    void (async () => {
+      try {
+        const { ensureCustomerLink } = await import("@/lib/server/qr-service");
+        await ensureCustomerLink(result.job.id, { id: user.id, name: user.name });
+      } catch (e) {
+        logger.warn("jobs.customer_link_ensure_failed", { jobId: result.job.id, error: e instanceof Error ? e.message : String(e) });
+      }
+    })();
+
     // Re-fetch with relations for the hydrated client shape. The invoice is
     // financial data: only returned to super_admins (ops/staff never see it).
     const full = await prisma.job.findUnique({

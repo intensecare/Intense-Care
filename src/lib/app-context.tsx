@@ -140,15 +140,6 @@ interface AppContextType {
     category: Complaint["category"]
   ) => Promise<{ success: boolean; message: string }>;
 
-  submitCustomerFeedback: (
-    jobId: string,
-    rating: number,
-    tags: string[],
-    comment?: string,
-    clickedGoogleReview?: boolean,
-    portalToken?: string
-  ) => Promise<{ success: boolean; message: string }>;
-
   updateChecklistItem: (
     itemId: string,
     status: "pending" | "completed" | "skipped" | "issue",
@@ -768,29 +759,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Attention requested. Operations is notified." };
   };
 
-  const submitCustomerFeedback = async (
-    jobId: string,
-    rating: number,
-    tags: string[],
-    comment?: string,
-    clickedGoogleReview: boolean = false,
-    portalToken?: string
-  ): Promise<{ success: boolean; message: string }> => {
-    const r = await api("/api/feedback", {
-      method: "POST",
-      body: JSON.stringify({
-        token: portalToken,
-        rating,
-        tags,
-        comment: comment || undefined,
-        googleReviewClicked: clickedGoogleReview,
-      }),
-    });
-    if (!r.ok) return { success: false, message: r.error || "Could not record feedback." };
-    await logAudit("customer", jobId, "FEEDBACK_SUBMITTED", `Rating: ${rating}/5. ${comment || ""}`);
-    return { success: true, message: "Feedback recorded." };
-  };
-
   // --- Checklist ---------------------------------------------------------------
   const updateChecklistItem = async (
     itemId: string,
@@ -824,21 +792,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // --- Completion link ----------------------------------------------------------
   const sendCompletionLink = async (
-    jobId: string
+    jobId: string,
+    opts?: { regenerate?: boolean }
   ): Promise<{ success: boolean; message: string; linkPath?: string; linkUrl?: string }> => {
-    // The unified QR workflow owns the customer-approval token now: mint (or
-    // cooldown-reuse) the CUSTOMER_APPROVAL secure link server-side.
+    // The customer has ONE secure link for the whole journey. "get" returns the
+    // existing link (minting it on first use); "regen" replaces it (old dies).
     const r = await api<{ reveal?: string; linkUrl?: string }>("/api/qr-links", {
       method: "POST",
-      body: JSON.stringify({ action: "mint", jobId, purpose: "CUSTOMER_APPROVAL" }),
+      body: JSON.stringify({ action: opts?.regenerate ? "regen" : "get", jobId }),
     });
     if (!r.ok) return { success: false, message: r.error || "Link generation failed." };
     const linkUrl = r.data?.reveal || r.data?.linkUrl || "";
     const linkPath = linkUrl ? linkUrl.replace(/^https?:\/\/[^/]+/, "") : undefined;
-    await logAudit("customer", jobId, "COMPLETION_LINK_GENERATED", "Secure handover link generated.");
+    await logAudit("customer", jobId, opts?.regenerate ? "CUSTOMER_LINK_REGENERATED" : "CUSTOMER_LINK_SHARED", "Customer secure link provided to the desk.");
     return {
       success: true,
-      message: "Secure link generated. Copy and share it with the customer.",
+      message: opts?.regenerate ? "New link generated — the old link is dead." : "Customer link ready. Copy and share it.",
       linkPath,
       linkUrl: linkUrl || undefined,
     };
@@ -1496,7 +1465,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         reinspectAndPassQC,
         customerApproveJob,
         customerRequestAttention,
-        submitCustomerFeedback,
         createJob,
         createCustomer,
         updateCustomer,

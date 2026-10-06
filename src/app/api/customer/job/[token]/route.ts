@@ -1,21 +1,34 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import crypto from "crypto";
 import { prisma } from "@/lib/server/prisma";
 import { resolveQrToken, clientIp, rateLimit } from "@/lib/server/qr-service";
 import { recordActivity } from "@/lib/server/activity";
 import { logger } from "@/lib/server/logger";
+import { notifyReworkAssigned } from "@/lib/server/notify";
 
 /**
- * /customer/job/{token} API — §7, §8, §9, §22, §23, §27, §30.
+ * /customer/job/{token} API — THE customer journey, one link.
  *
- * Purpose scopes: CUSTOMER_JOB (view), CUSTOMER_VERIFICATION (view + confirm),
- * CUSTOMER_APPROVAL (view + approve). Every action:
- *   token validation chain → role/purpose check → idempotent write → audit.
+ * The single customer link drives the whole service:
+ *   GET    → the journey payload (status, checklist, photos, QC, approval).
+ *   confirm    → customer confirms the team arrived (idempotent).
+ *   approve    → final sign-off after QC pass (idempotent; name + checkbox).
+ *   complaint  → report an issue (creates a complaint for ops).
+ *   feedback   → rating 1-5 + Google review click (post-approval).
+ *
+ * Every action: token chain → stage gate → idempotent write → audit.
  * The customer NEVER sees internal notes, finance internals, or other jobs.
  */
 
 function fail(error: string, status: number, kind?: string) {
   return NextResponse.json({ success: false, error, ...(kind ? { kind } : {}) }, { status });
+}
+
+function hashIp(ip: string | null): string | undefined {
+  if (!ip) return undefined;
+  const salt = process.env.ERP_SESSION_SECRET || "portal-sign-ip";
+  return crypto.createHash("sha256").update(`${salt}:${ip}`).digest("hex").slice(0, 32);
 }
 
 async function loadTeamNames(jobId: string): Promise<string[]> {
@@ -25,49 +38,47 @@ async function loadTeamNames(jobId: string): Promise<string[]> {
   return users.map((u) => u.name).filter(Boolean);
 }
 
-/** GET — minimum-info customer payload (§9). */
+/** GET — minimum-info journey payload. */
 export async function GET(request: Request, { params }: { params: { token: string } }) {
   try {
     const rl = rateLimit(`cjob:${clientIp(request)}`, 60, 60 * 1000);
     if (!rl.ok) return fail("Too many requests. Please slow down.", 429);
 
-    // §28 RBAC: only the two customer purposes may open this workflow — the
-    // resolver 403s foreign tokens BEFORE any job-status probing.
-    const resolved = await resolveQrToken(params.token, ["CUSTOMER_JOB", "CUSTOMER_VERIFICATION"]);
+    const resolved = await resolveQrToken(params.token);
     if (!resolved.ok) {
-      const status = resolved.failure.kind === "not_found" ? 404 : resolved.failure.kind === "forbidden" ? 403 : resolved.failure.kind === "wrong_status" ? 409 : 410;
+      const status =
+        resolved.failure.kind === "not_found" ? 404 : resolved.failure.kind === "wrong_status" ? 409 : 410;
       return fail(resolved.failure.message, status, resolved.failure.kind);
     }
-    const { tokenRow, job } = resolved.data;
-    const purpose = tokenRow.purpose;
+    const { job } = resolved.data;
 
-    const [checklist, photos, qc, team] = await Promise.all([
+    const [checklist, photos, qc, team, complaintCount, jobRow] = await Promise.all([
       prisma.jobChecklistItem.findMany({ where: { jobId: job.id }, orderBy: { id: "asc" } }),
       prisma.jobPhoto.findMany({ where: { jobId: job.id }, orderBy: { uploadedAt: "asc" } }),
       prisma.qualityCheck.findFirst({ where: { jobId: job.id }, orderBy: { createdAt: "desc" } }),
       loadTeamNames(job.id),
+      prisma.complaint.count({ where: { jobId: job.id } }),
+      prisma.job.findUnique({
+        where: { id: job.id },
+        select: {
+          arrivedAt: true,
+          completedAt: true,
+          customerConfirmedAt: true,
+          approvedAt: true,
+          approvedBy: true,
+          approvalMethod: true,
+          arrivalVerification: true,
+          customerFeedbackRating: true,
+          customerFeedbackAt: true,
+          googleReviewClicked: true,
+        },
+      }),
     ]);
-
-    const jobRow = await prisma.job.findUnique({
-      where: { id: job.id },
-      select: {
-        arrivedAt: true,
-        completedAt: true,
-        customerConfirmedAt: true,
-        approvedAt: true,
-        approvedBy: true,
-        approvalMethod: true,
-        arrivalVerification: true,
-      },
-    });
 
     // §9 minimum info only — no notes, no amounts, no other customers.
     return NextResponse.json({
       success: true,
       data: {
-        purpose,
-        canConfirm: ["CUSTOMER_VERIFICATION", "CUSTOMER_JOB"].includes(purpose),
-        canApprove: purpose === "CUSTOMER_APPROVAL",
         job: {
           id: job.id,
           status: job.status,
@@ -96,6 +107,18 @@ export async function GET(request: Request, { params }: { params: { token: strin
         approval: jobRow?.approvedAt
           ? { approvedAt: jobRow.approvedAt.toISOString(), approvedBy: jobRow.approvedBy, method: jobRow.approvalMethod }
           : null,
+        feedback: jobRow?.customerFeedbackRating
+          ? {
+              rating: jobRow.customerFeedbackRating,
+              feedbackAt: jobRow.customerFeedbackAt?.toISOString() ?? null,
+              googleReviewClicked: jobRow.googleReviewClicked,
+            }
+          : null,
+        complaintCount,
+        company: {
+          name: process.env.APP_COMPANY_NAME || "Intense Care",
+          googleReviewUrl: process.env.GOOGLE_BUSINESS_REVIEW_URL || "",
+        },
       },
     });
   } catch (err) {
@@ -105,8 +128,25 @@ export async function GET(request: Request, { params }: { params: { token: strin
 }
 
 const ConfirmSchema = z.object({ action: z.literal("confirm") });
+const ApproveSchema = z.object({
+  action: z.literal("approve"),
+  signatoryName: z.string().min(2).max(120),
+  confirmChecked: z.boolean(),
+});
+const ComplaintSchema = z.object({
+  action: z.literal("complaint"),
+  category: z.enum(["missed_area", "quality", "damage", "staff_behavior", "other"]),
+  description: z.string().min(5).max(2000),
+  signatoryName: z.string().max(120).optional(),
+});
+const FeedbackSchema = z.object({
+  action: z.literal("feedback"),
+  rating: z.number().int().min(1).max(5),
+  comment: z.string().max(2000).optional(),
+  googleReviewClicked: z.boolean().default(false),
+});
 
-/** POST — idempotent customer actions. */
+/** POST — idempotent customer actions on the ONE link. */
 export async function POST(request: Request, { params }: { params: { token: string } }) {
   try {
     const rl = rateLimit(`cjob-post:${clientIp(request)}`, 20, 60 * 1000);
@@ -117,23 +157,21 @@ export async function POST(request: Request, { params }: { params: { token: stri
 
     const resolved = await resolveQrToken(params.token);
     if (!resolved.ok) {
-      const status = resolved.failure.kind === "not_found" ? 404 : resolved.failure.kind === "forbidden" ? 403 : resolved.failure.kind === "wrong_status" ? 409 : 410;
+      const status =
+        resolved.failure.kind === "not_found" ? 404 : resolved.failure.kind === "wrong_status" ? 409 : 410;
       return fail(resolved.failure.message, status, resolved.failure.kind);
     }
     const { tokenRow, job } = resolved.data;
     const customerName = job.customerName || "Customer";
 
-    /* ---------------- §7 CONFIRM & START (idempotent) ---------------- */
+    /* ---------------- CONFIRM ARRIVAL (idempotent) ---------------- */
     if (action === "confirm") {
       const parsed = ConfirmSchema.safeParse(body);
       if (!parsed.success) return fail("Invalid payload.", 400);
-      if (!["CUSTOMER_VERIFICATION", "CUSTOMER_JOB"].includes(tokenRow.purpose)) {
-        return fail("This link cannot confirm a service start.", 403);
-      }
       const jobRow = await prisma.job.findUnique({ where: { id: job.id }, select: { status: true, customerConfirmedAt: true } });
       if (!jobRow) return fail("Job not found.", 404);
 
-      // §30 idempotency — already verified: return the same success state.
+      // Idempotency — already verified: same success state.
       if (["CUSTOMER_VERIFIED", "IN_PROGRESS", "WORK_COMPLETED"].includes(jobRow.status) || jobRow.customerConfirmedAt) {
         return NextResponse.json({ success: true, data: { alreadyConfirmed: true, status: jobRow.status } });
       }
@@ -152,8 +190,137 @@ export async function POST(request: Request, { params }: { params: { token: stri
         message: `Customer confirmed team arrival via secure link${customerName ? ` — ${customerName}` : ""}`,
         actor: { name: customerName, role: "customer" },
       });
-      logger.info("customer.confirmed", { jobId: job.id, purpose: tokenRow.purpose });
+      logger.info("customer.confirmed", { jobId: job.id, tokenId: tokenRow.id });
       return NextResponse.json({ success: true, data: { alreadyConfirmed: false, status: "CUSTOMER_VERIFIED" } });
+    }
+
+    /* ---------------- FINAL APPROVAL (idempotent) ---------------- */
+    if (action === "approve") {
+      const parsed = ApproveSchema.safeParse(body);
+      if (!parsed.success) return fail("Please enter your name and tick the confirmation checkbox.", 400);
+      if (!parsed.data.confirmChecked) return fail("Please tick the confirmation checkbox to approve.", 400);
+
+      const jobRow = await prisma.job.findUnique({
+        where: { id: job.id },
+        select: { status: true, approvedAt: true },
+      });
+      if (!jobRow) return fail("Job not found.", 404);
+
+      // Idempotency — already approved: same success, no duplicate record.
+      if (jobRow.approvedAt) {
+        return NextResponse.json({
+          success: true,
+          data: { alreadyApproved: true, approvedAt: jobRow.approvedAt.toISOString(), status: jobRow.status },
+        });
+      }
+      if (!["PASS", "CUSTOMER_APPROVAL"].includes(jobRow.status)) {
+        return fail(`Approval is open only after QC passes (current: ${jobRow.status}).`, 409);
+      }
+
+      const now = new Date();
+      await prisma.job.update({
+        where: { id: job.id },
+        data: {
+          status: "COMPLETED",
+          approvedAt: now,
+          approvedBy: `${tokenRow.id}:${parsed.data.signatoryName}`,
+          approvalMethod: "secure_link",
+          completedAt: jobRow.status === "PASS" ? now : undefined,
+          updatedAt: now,
+        },
+      });
+
+      await recordActivity({
+        jobId: job.id,
+        type: "CUSTOMER_SIGNED",
+        message: `Customer approved completion via secure link — ${parsed.data.signatoryName}`,
+        actor: { name: parsed.data.signatoryName, role: "customer" },
+      });
+      logger.info("approval.granted", { jobId: job.id, tokenId: tokenRow.id });
+
+      return NextResponse.json({
+        success: true,
+        data: { alreadyApproved: false, approvedAt: now.toISOString(), status: "COMPLETED" },
+      });
+    }
+
+    /* ---------------- REPORT AN ISSUE ---------------- */
+    if (action === "complaint") {
+      const parsed = ComplaintSchema.safeParse(body);
+      if (!parsed.success) return fail("Please describe the issue (at least 5 characters).", 400);
+
+      const jobRow = await prisma.job.findUnique({ where: { id: job.id }, select: { status: true, customerId: true } });
+      if (!jobRow) return fail("Job not found.", 404);
+
+      const opsManager = await prisma.user.findFirst({
+        where: { role: "ops_manager", active: true },
+        orderBy: { createdAt: "asc" },
+      });
+
+      const complaint = await prisma.complaint.create({
+        data: {
+          jobId: job.id,
+          customerId: jobRow.customerId,
+          category: parsed.data.category,
+          severity: "high",
+          description: parsed.data.description,
+          assignedOwnerId: opsManager?.id ?? null,
+          assignedOwnerName: opsManager?.name ?? "Operations",
+        },
+      });
+
+      await recordActivity({
+        jobId: job.id,
+        type: "ATTENTION_REQUESTED",
+        message: `Customer reported an issue via secure link (${parsed.data.category.replace("_", " ")}): ${parsed.data.description}`,
+        actor: { name: parsed.data.signatoryName || customerName, role: "customer" },
+      });
+      void notifyReworkAssigned(job.id).catch(() => {});
+      logger.info("approval.complaint_created", { jobId: job.id, complaintId: complaint.id });
+
+      return NextResponse.json({ success: true, data: { complaintId: complaint.id, status: "open" } }, { status: 201 });
+    }
+
+    /* ---------------- FEEDBACK (rating + Google review) ---------------- */
+    if (action === "feedback") {
+      const parsed = FeedbackSchema.safeParse(body);
+      if (!parsed.success) return fail("A rating (1-5) is required.", 400);
+
+      const jobRow = await prisma.job.findUnique({
+        where: { id: job.id },
+        select: { approvedAt: true, customerFeedbackAt: true },
+      });
+      if (!jobRow) return fail("Job not found.", 404);
+      if (!jobRow.approvedAt) {
+        return fail("Feedback opens after you approve the completed service.", 409);
+      }
+
+      const updated = await prisma.job.update({
+        where: { id: job.id },
+        data: {
+          customerFeedbackRating: parsed.data.rating,
+          googleReviewClicked: parsed.data.googleReviewClicked,
+          customerFeedbackAt: jobRow.customerFeedbackAt ?? new Date(),
+        },
+      });
+
+      logger.info("feedback.recorded", { jobId: job.id, rating: parsed.data.rating });
+      await recordActivity({
+        jobId: job.id,
+        type: "FEEDBACK_RECORDED",
+        message: `Customer rated the service ${parsed.data.rating}/5${parsed.data.comment ? ` — “${parsed.data.comment}”` : ""}`,
+        actor: { name: customerName, role: "customer" },
+      });
+      if (parsed.data.googleReviewClicked) {
+        await recordActivity({
+          jobId: job.id,
+          type: "GOOGLE_REVIEW_CLICKED",
+          message: "Customer clicked through to Google Business review",
+          actor: { name: customerName, role: "customer" },
+        });
+      }
+
+      return NextResponse.json({ success: true, data: { feedbackAt: updated.customerFeedbackAt?.toISOString() ?? null } });
     }
 
     return fail("Unknown action.", 400);

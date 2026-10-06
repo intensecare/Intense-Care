@@ -20,7 +20,6 @@ import {
   Smartphone,
   CheckCircle2,
   Receipt,
-  QrCode as QrCodeIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
@@ -96,7 +95,6 @@ export function Sidebar() {
           },
           { label: "Calendar", href: "/calendar", icon: Calendar },
           { label: "AMC Contracts", href: "/amc", icon: ShieldCheck },
-          { label: "QR & Secure Links", href: "/qr-links", icon: QrCodeIcon },
           { label: "Customers", href: "/customers", icon: Users },
           { label: "Properties", href: "/properties", icon: Building2 },
           { label: "Services & Rubrics", href: "/services", icon: Sparkles },

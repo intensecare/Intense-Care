@@ -264,6 +264,17 @@ export async function POST(request: Request) {
         return { job: createdJob, invoice: createdInvoice };
       });
 
+      // The customer's ONE secure link: minted the moment the quotation
+      // becomes a job. Fire-and-forget — never fails a conversion.
+      void (async () => {
+        try {
+          const { ensureCustomerLink } = await import("@/lib/server/qr-service");
+          await ensureCustomerLink(job.id, { id: user.id, name: user.name });
+        } catch (e) {
+          logger.warn("finance.customer_link_ensure_failed", { jobId: job.id, error: e instanceof Error ? e.message : String(e) });
+        }
+      })();
+
       return ok({ invoice: serializeInvoice(invoice), jobId: job.id }, 201);
     }
 

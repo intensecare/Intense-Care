@@ -2,22 +2,20 @@
 
 import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { Loader2, ShieldCheck, MapPin, Users, AlertTriangle, CheckCircle2, Star, Calendar, Sparkles } from "lucide-react";
+import { Loader2, ShieldCheck, MapPin, Users, AlertTriangle, CheckCircle2, Star, Calendar, Sparkles, MessageSquareWarning, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * /customer/job/[token] — §7, §9, §34, §40.
- *
- * Customer mobile web (no app). One primary action per screen:
- *   CONFIRM & START SERVICE → while the team is on site
- *   (approval lives on /approval/{token}; complaint always available).
- * Extremely simple: service, property, team, status, [CONFIRM & START SERVICE].
+ * /customer/job/[token] — THE customer journey on ONE secure link (no app,
+ * no login, no OTP). One primary action per stage:
+ *   1. CONFIRM & START SERVICE — while the team is on site,
+ *   2. live progress (checklist + photos) while work runs,
+ *   3. APPROVE / report an issue after QC pass,
+ *   4. rating + Google review after approval.
+ * The same link the customer first opened carries them to the very end.
  */
 
 interface CustomerPayload {
-  purpose: string;
-  canConfirm: boolean;
-  canApprove: boolean;
   job: {
     id: string;
     status: string;
@@ -36,6 +34,9 @@ interface CustomerPayload {
   photos: { id: string; area: string; photoType: string; url: string; thumbnailUrl: string | null; uploadedAt: string }[];
   qualityCheck: { score: number; decision: string; passed: boolean } | null;
   approval: { approvedAt: string; approvedBy: string; method: string } | null;
+  feedback: { rating: number; feedbackAt: string | null; googleReviewClicked: boolean } | null;
+  complaintCount: number;
+  company: { name: string; googleReviewUrl: string };
 }
 
 export default function CustomerJobPage() {
@@ -46,13 +47,19 @@ export default function CustomerJobPage() {
   const [error, setError] = useState<string | null>(null);
   const [kind, setKind] = useState<string>("");
   const [confirming, setConfirming] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
   const [alreadyConfirmed, setAlreadyConfirmed] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [signatoryName, setSignatoryName] = useState("");
+  const [confirmChecked, setConfirmChecked] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [approvedAt, setApprovedAt] = useState<string | null>(null);
   const [showComplaint, setShowComplaint] = useState(false);
   const [complaintCategory, setComplaintCategory] = useState("missed_area");
   const [complaintText, setComplaintText] = useState("");
   const [complaintSent, setComplaintSent] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [ratingSent, setRatingSent] = useState(false);
+  const [reviewClicked, setReviewClicked] = useState(false);
 
   const load = async () => {
     try {
@@ -62,6 +69,12 @@ export default function CustomerJobPage() {
         setData(json.data);
         if (json.data.job.customerConfirmedAt || ["CUSTOMER_VERIFIED", "IN_PROGRESS"].includes(json.data.job.status)) {
           setAlreadyConfirmed(true);
+        }
+        if (json.data.approval) setApprovedAt(json.data.approval.approvedAt);
+        if (json.data.feedback) {
+          setRatingSent(true);
+          setRating(json.data.feedback.rating);
+          setReviewClicked(json.data.feedback.googleReviewClicked);
         }
       } else {
         setKind(json?.kind || "not_found");
@@ -79,44 +92,64 @@ export default function CustomerJobPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  const post = async (body: Record<string, unknown>) => {
+    const res = await fetch(`/api/customer/job/${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { ok: res.ok, json: await res.json().catch(() => null) };
+  };
+
   const handleConfirm = async () => {
     setConfirming(true);
     setActionError(null);
-    try {
-      const res = await fetch(`/api/customer/job/${encodeURIComponent(token)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "confirm" }),
-      });
-      const json = await res.json();
-      if (res.ok && json?.success) {
-        setConfirmed(true);
-        setAlreadyConfirmed(true);
-      } else {
-        setActionError(json?.error || "Confirmation failed. Please retry.");
-      }
-    } catch {
-      setActionError("Network error. Please retry.");
-    } finally {
-      setConfirming(false);
+    const { ok, json } = await post({ action: "confirm" });
+    if (ok && json?.success) {
+      setAlreadyConfirmed(true);
+      void load();
+    } else {
+      setActionError(json?.error || "Confirmation failed. Please retry.");
     }
+    setConfirming(false);
+  };
+
+  const handleApprove = async () => {
+    setApproving(true);
+    setActionError(null);
+    const { ok, json } = await post({ action: "approve", signatoryName: signatoryName.trim(), confirmChecked });
+    if (ok && json?.success) {
+      setApprovedAt(json.data.approvedAt);
+      void load();
+    } else {
+      setActionError(json?.error || "Approval failed. Please retry.");
+    }
+    setApproving(false);
   };
 
   const handleComplaintSubmit = async () => {
     if (complaintText.trim().length < 5) return;
-    try {
-      const res = await fetch(`/api/approval/${encodeURIComponent(token)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "complaint", category: complaintCategory, description: complaintText.trim() }),
-      });
-      if (res.ok) {
-        setShowComplaint(false);
-        setComplaintSent(true);
-      }
-    } catch {
-      // non-fatal
+    const { ok } = await post({ action: "complaint", category: complaintCategory, description: complaintText.trim() });
+    if (ok) {
+      setShowComplaint(false);
+      setComplaintSent(true);
     }
+  };
+
+  const handleRating = async (stars: number) => {
+    setRating(stars);
+    const { ok, json } = await post({ action: "feedback", rating: stars, googleReviewClicked: reviewClicked });
+    if (ok && json?.success) {
+      setRatingSent(true);
+      void load();
+    } else {
+      setActionError(json?.error || "Could not save your rating.");
+    }
+  };
+
+  const handleGoogleReviewClick = async () => {
+    setReviewClicked(true);
+    void post({ action: "feedback", rating: rating || 5, googleReviewClicked: true });
   };
 
   if (loading) {
@@ -144,28 +177,19 @@ export default function CustomerJobPage() {
     );
   }
 
-  const { job, property, team, checklist } = data;
-  const stageIndex = ["ASSIGNED", "ARRIVED", "CUSTOMER_VERIFIED", "IN_PROGRESS", "WORK_COMPLETED", "QUALITY_CHECK", "PASS", "COMPLETED"].indexOf(
-    ["ARRIVED", "CUSTOMER_VERIFIED", "IN_PROGRESS", "WORK_COMPLETED", "QUALITY_CHECK", "PASS", "REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS", "REWORK_COMPLETED", "REINSPECTION"].includes(job.status)
-      ? job.status === "REWORK_ASSIGNED" || job.status === "REWORK_IN_PROGRESS" || job.status === "REWORK_REQUIRED" || job.status === "REWORK_COMPLETED"
-        ? "QUALITY_CHECK"
-        : job.status === "REINSPECTION"
-        ? "QUALITY_CHECK"
-        : job.status
-      : job.status === "COMPLETED"
-      ? "COMPLETED"
-      : job.status
-  );
+  const { job, property, team, checklist, company } = data;
   const journey = [
     { label: "Booked", done: true },
     { label: "Team Arrived", done: !!job.arrivedAt },
     { label: "You Confirmed", done: alreadyConfirmed || !!job.customerConfirmedAt },
     { label: "Service Underway", done: ["IN_PROGRESS", "WORK_COMPLETED", "QUALITY_CHECK", "PASS", "COMPLETED"].includes(job.status) },
     { label: "Quality Checked", done: !!data.qualityCheck?.passed },
-    { label: "Completed", done: job.status === "COMPLETED" },
+    { label: "Completed", done: job.status === "COMPLETED" || !!approvedAt },
   ];
-  const canConfirmNow = data.canConfirm && !alreadyConfirmed && ["ASSIGNED", "ARRIVED"].includes(job.status);
+  const canConfirmNow = !alreadyConfirmed && ["ASSIGNED", "ARRIVED"].includes(job.status);
+  const canApproveNow = !approvedAt && ["PASS", "CUSTOMER_APPROVAL"].includes(job.status);
   const doneCount = checklist.filter((c) => c.completed).length;
+  const approved = !!approvedAt || !!data.approval;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-40">
@@ -187,7 +211,7 @@ export default function CustomerJobPage() {
       </header>
 
       <main className="max-w-lg mx-auto p-4 space-y-4">
-        {/* WHERE AM I — journey strip */}
+        {/* Journey strip */}
         <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-900">Service Journey</h2>
@@ -243,8 +267,8 @@ export default function CustomerJobPage() {
           </div>
         </div>
 
-        {/* Primary state card — WHAT HAPPENS NEXT + ONE ACTION */}
-        <div className="bg-white rounded-2xl border-2 border-rose-200 p-5 shadow-sm space-y-3 text-center">
+        {/* Primary state card — ONE action per stage */}
+        <div className="bg-white rounded-2xl border-2 border-rose-200 p-5 shadow-sm space-y-4 text-center">
           {canConfirmNow ? (
             <>
               <div className="h-12 w-12 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto">
@@ -253,22 +277,86 @@ export default function CustomerJobPage() {
               <h3 className="text-base font-semibold text-slate-900">Your service team has arrived</h3>
               <p className="text-xs text-slate-500">Confirm to let the team begin the service.</p>
               {actionError && <p className="text-xs text-red-600 font-medium">{actionError}</p>}
+              <button
+                onClick={handleConfirm}
+                disabled={confirming}
+                className="w-full h-14 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white text-base font-bold shadow-lg shadow-rose-200 disabled:opacity-60 transition-colors"
+              >
+                {confirming ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : "CONFIRM & START SERVICE"}
+              </button>
             </>
-          ) : confirmed || alreadyConfirmed ? (
+          ) : approved ? (
+            <>
+              <div className="h-12 w-12 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+              </div>
+              <h3 className="text-base font-semibold text-slate-900">Service approved ✓ Thank you!</h3>
+              <p className="text-xs text-slate-500">
+                {data.feedback?.rating ? `You rated this service ${data.feedback.rating}/5.` : "How did we do? Your rating helps us improve."}
+              </p>
+              {/* Rating + Google review */}
+              {!ratingSent ? (
+                <div className="pt-1">
+                  <div className="flex items-center justify-center gap-1.5">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button key={n} onClick={() => handleRating(n)} className="p-1" aria-label={`Rate ${n} star${n === 1 ? "" : "s"}`}>
+                        <Star className={cn("h-8 w-8 transition-colors", n <= rating ? "text-amber-400 fill-amber-400" : "text-slate-300 hover:text-amber-200")} />
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">Tap a star to rate</p>
+                </div>
+              ) : (
+                <p className="text-xs font-semibold text-emerald-700">Thanks for rating us {data.feedback?.rating ?? rating}/5! ⭐</p>
+              )}
+              {company.googleReviewUrl && (
+                <a
+                  href={company.googleReviewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={handleGoogleReviewClick}
+                  className="block w-full h-12 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold leading-[3rem] transition-colors"
+                >
+                  <ExternalLink className="h-4 w-4 inline mr-2 -mt-0.5" />
+                  {reviewClicked ? "Review us on Google again" : "Leave a Google review"}
+                </a>
+              )}
+            </>
+          ) : canApproveNow ? (
+            <>
+              <div className="h-12 w-12 rounded-2xl bg-teal-50 border border-teal-200 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="h-6 w-6 text-teal-600" />
+              </div>
+              <h3 className="text-base font-semibold text-slate-900">Service completed & quality checked</h3>
+              {data.qualityCheck && <p className="text-xs text-slate-500">Quality score: {data.qualityCheck.score}%</p>}
+              {actionError && <p className="text-xs text-red-600 font-medium">{actionError}</p>}
+              <div className="text-left space-y-2 pt-1">
+                <input
+                  value={signatoryName}
+                  onChange={(e) => setSignatoryName(e.target.value)}
+                  placeholder="Your full name"
+                  className="w-full h-11 rounded-xl border border-slate-200 px-3 text-sm focus:ring-1 focus:ring-rose-400"
+                />
+                <label className="flex items-start gap-2 text-[11px] text-slate-600">
+                  <input type="checkbox" checked={confirmChecked} onChange={(e) => setConfirmChecked(e.target.checked)} className="mt-0.5" />
+                  <span>I confirm the service is completed to my satisfaction and approve this job record.</span>
+                </label>
+                <button
+                  onClick={handleApprove}
+                  disabled={approving || signatoryName.trim().length < 2 || !confirmChecked}
+                  className="w-full h-13 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-base font-bold shadow-lg shadow-emerald-200 disabled:opacity-50 transition-colors"
+                >
+                  {approving ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : "APPROVE COMPLETION"}
+                </button>
+              </div>
+            </>
+          ) : alreadyConfirmed ? (
             <>
               <div className="h-12 w-12 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto">
                 <CheckCircle2 className="h-6 w-6 text-emerald-600" />
               </div>
               <h3 className="text-base font-semibold text-slate-900">CUSTOMER VERIFIED ✓ JOB STARTED ✓</h3>
               <p className="text-xs text-slate-500">Thank you for confirming. Track progress below — it updates live.</p>
-            </>
-          ) : job.status === "COMPLETED" ? (
-            <>
-              <div className="h-12 w-12 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto">
-                <Star className="h-6 w-6 text-emerald-600" />
-              </div>
-              <h3 className="text-base font-semibold text-slate-900">Service completed</h3>
-              <p className="text-xs text-slate-500">Thank you for choosing Intense Care.</p>
             </>
           ) : (
             <>
@@ -280,7 +368,7 @@ export default function CustomerJobPage() {
           )}
         </div>
 
-        {/* Live progress: checklist + photos (read-only) */}
+        {/* Live progress: checklist + photos */}
         {checklist.length > 0 && (
           <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-2">
             <div className="flex items-center justify-between">
@@ -328,33 +416,28 @@ export default function CustomerJobPage() {
         )}
       </main>
 
-      {/* Sticky bottom CTA — ONE primary action (§34) */}
-      <div className="fixed bottom-0 inset-x-0 z-40 p-4 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent">
-        <div className="max-w-lg mx-auto space-y-2">
-          {canConfirmNow && (
+      {/* Sticky bottom — report an issue (always available) */}
+      {!approved && (
+        <div className="fixed bottom-0 inset-x-0 z-40 p-4 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent">
+          <div className="max-w-lg mx-auto">
             <button
-              onClick={handleConfirm}
-              disabled={confirming}
-              className="w-full h-14 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white text-base font-bold shadow-lg shadow-rose-200 disabled:opacity-60 transition-colors"
+              onClick={() => setShowComplaint(true)}
+              className="w-full h-11 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors"
             >
-              {confirming ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : "CONFIRM & START SERVICE"}
+              <AlertTriangle className="h-4 w-4 inline mr-1.5 -mt-0.5" />
+              Report an issue
             </button>
-          )}
-          <button
-            onClick={() => setShowComplaint(true)}
-            className="w-full h-11 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors"
-          >
-            <AlertTriangle className="h-4 w-4 inline mr-1.5 -mt-0.5" />
-            Report an issue
-          </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Complaint modal (§23) */}
+      {/* Complaint modal */}
       {showComplaint && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl max-w-lg w-full p-5 space-y-4">
-            <h3 className="text-sm font-semibold text-slate-900">Report an issue</h3>
+            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <MessageSquareWarning className="h-4 w-4 text-amber-600" /> Report an issue
+            </h3>
             <select
               value={complaintCategory}
               onChange={(e) => setComplaintCategory(e.target.value)}

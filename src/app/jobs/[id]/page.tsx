@@ -63,7 +63,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { compressImageForUpload } from "@/lib/image-compress";
-import { QrLinkPanel } from "@/components/common/QrLinkPanel";
+import { CustomerLinkCard } from "@/components/common/CustomerLinkCard";
 
 /**
  * Pipeline stage → the display section that matters at that stage (PDF §4).
@@ -253,8 +253,8 @@ export default function JobDetailPage() {
     };
   }, [jobId]);
 
-  const handleGenerateHandoverLink = async () => {
-    if (!job) return;
+  const handleGenerateHandoverLink = async (): Promise<string | null> => {
+    if (!job) return null;
     setLinkBusy(true);
     setLinkError(null);
     const res = await sendCompletionLink(job.id);
@@ -263,11 +263,13 @@ export default function JobDetailPage() {
       // Prefer the server-resolved absolute URL (APP_BASE_URL / forwarded host):
       // it stays correct even when the desk mints the link from a different
       // environment than the one customers will open it from.
-      setHandoverLink(res.linkUrl || `${window.location.origin}${res.linkPath}`);
+      const url = res.linkUrl || `${window.location.origin}${res.linkPath}`;
+      setHandoverLink(url);
       setLinkCopied(false);
-    } else {
-      setLinkError(res.message);
+      return url;
     }
+    setLinkError(res.message);
+    return null;
   };
 
   const handleCopyHandoverLink = async () => {
@@ -441,6 +443,31 @@ export default function JobDetailPage() {
   const property = properties.find((p) => p.id === job.propertyId);
   const service = services.find((s) => s.id === job.serviceId);
 
+  // Auto-load the job's ONE customer link for managers (silent — no audit spam).
+  React.useEffect(() => {
+    if (!canManage) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/qr-links", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get", jobId: job.id }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!cancelled && res.ok && json?.success && json.data?.linkUrl) {
+          setHandoverLink(json.data.linkUrl);
+        }
+      } catch {
+        // Non-fatal — the card loads its own copy too.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage, job?.id]);
+
   // One-tap WhatsApp share of the handover link (wa.me deep link with the
   // message prefilled; the desk just hits send).
   const handoverWhatsAppUrl = handoverLink
@@ -450,17 +477,6 @@ export default function JobDetailPage() {
       )
     : null;
 
-  // §6 Handover lifecycle: Not Opened → Opened → Approval Pending → Approved / Issue Raised
-  const handoverStage = !handoverLink
-    ? 0
-    : signOff?.signStatus === "APPROVED"
-    ? 3
-    : signOff?.signStatus === "ATTENTION_REQUESTED"
-    ? 4
-    : signOff
-    ? 2
-    : 1;
-  const HANDOVER_STAGES = ["Not Opened", "Opened", "Approval Pending", "Approved", "Issue Raised"] as const;
   const assignedWorkers = (job.assignedStaffIds || []).map((id, idx) => {
     const viaStore = users.find((u) => u.id === id);
     // Staff viewers cannot read the user directory — fall back to the
@@ -554,7 +570,7 @@ export default function JobDetailPage() {
           : null;
       case "PASS":
         return hasTransition("CUSTOMER_APPROVAL")
-          ? { kind: "transition", target: "CUSTOMER_APPROVAL", label: "Send Customer Handover", hint: "Mint & share the secure approval link." }
+          ? { kind: "transition", target: "CUSTOMER_APPROVAL", label: "Send Customer Handover", hint: "Open the handover — the customer's secure link becomes the approval page." }
           : null;
       case "CUSTOMER_APPROVAL":
         return { kind: "open-link", label: "Open Customer Handover", hint: "The customer reviews photos and approves the work." };
@@ -574,7 +590,7 @@ export default function JobDetailPage() {
       void handleExecuteTransition(nextAction.target);
     } else if (nextAction.kind === "wait-confirm") {
       setActionError(
-        "Customer confirmation through the secure link is required — share the Customer Verification link via the QR & Links panel."
+        "Customer confirmation through the secure link is required — share the Customer Secure Link from the panel above."
       );
     } else if (nextAction.kind === "assign") {
       openAssignmentModal();
@@ -584,7 +600,8 @@ export default function JobDetailPage() {
       if (handoverLink) {
         window.open(handoverLink, "_blank");
       } else {
-        void handleGenerateHandoverLink().then(() => {
+        void handleGenerateHandoverLink().then((url) => {
+          if (url) window.open(url, "_blank");
           setActiveTab("approval");
         });
       }
@@ -595,7 +612,7 @@ export default function JobDetailPage() {
     setActionError(null);
     if (targetStatus === "CUSTOMER_VERIFIED" && !job.customerConfirmedAt) {
       setActionError(
-        "Customer confirmation through the secure link is required before this transition — share the Customer Verification link via the QR & Links panel."
+        "Customer confirmation through the secure link is required before this transition — share the Customer Secure Link from the panel above."
       );
       return;
     }
@@ -799,120 +816,13 @@ export default function JobDetailPage() {
         </div>
       )}
 
-      {/* Secure Customer Handover Link (after QC pass) */}
-      {(currentRole === "super_admin" || currentRole === "ops_manager") &&
-        (job.status === "CUSTOMER_APPROVAL" || job.status === "COMPLETED" || job.status === "FEEDBACK_REQUESTED") && (
-          <div className="mb-6 p-4 rounded-lg border border-teal-200 bg-teal-50/60 space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <h3 className="text-sm font-semibold text-teal-950 flex items-center gap-1.5">
-                  <Link2 className="h-4 w-4 text-teal-600" />
-                  Secure Customer Handover Link
-                </h3>
-                <p className="text-[11px] text-teal-800 mt-0.5">
-                  Share this link with the customer (WhatsApp/SMS/call). It opens their handover page — before/after photos, digital sign-off, and the Google review prompt.
-                </p>
-              </div>
-
-              <Button
-                size="sm"
-                onClick={handleGenerateHandoverLink}
-                disabled={linkBusy}
-                className="h-9 text-xs bg-teal-700 hover:bg-teal-800 text-white gap-1.5"
-              >
-                {linkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
-                {handoverLink ? "Generate New Link" : "Generate Secure Link"}
-              </Button>
-            </div>
-
-            {/* §6 lifecycle tracker — where this handover currently sits */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {HANDOVER_STAGES.map((stage, i) => {
-                const isCurrent = handoverStage === i;
-                const isDone = handoverStage > i && handoverStage !== 4;
-                const isIssue = handoverStage === 4 && stage === "Issue Raised";
-                return (
-                  <span
-                    key={stage}
-                    className={cn(
-                      "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border",
-                      isIssue
-                        ? "bg-red-100 text-red-700 border-red-200"
-                        : isCurrent
-                        ? "bg-teal-600 text-white border-teal-600"
-                        : isDone
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        : "bg-white text-slate-400 border-slate-200"
-                    )}
-                  >
-                    {isDone && <Check className="h-2.5 w-2.5" />}
-                    {stage}
-                  </span>
-                );
-              })}
-            </div>
-
-            {linkError && (
-              <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">{linkError}</p>
-            )}
-
-            {handoverLink && (
-              <div className="flex items-center gap-2 bg-white border border-teal-200 rounded-md p-2">
-                <input
-                  readOnly
-                  value={handoverLink}
-                  onFocus={(e) => e.target.select()}
-                  className="flex-1 text-[11px] font-mono text-slate-700 bg-transparent outline-none"
-                />
-                <Button size="sm" variant="outline" onClick={handleCopyHandoverLink} className="h-7 text-[11px] gap-1">
-                  {linkCopied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                  {linkCopied ? "Copied" : "Copy"}
-                </Button>
-                <a href={handoverWhatsAppUrl ?? "#"} target="_blank" rel="noreferrer">
-                  <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1 text-emerald-700 hover:bg-emerald-50">
-                    <MessageCircle className="h-3 w-3" />
-                    WhatsApp
-                  </Button>
-                </a>
-                <a
-                  href={
-                    handoverLink
-                      ? `sms:${customer?.phone || ""}?&body=${encodeURIComponent(
-                          `Intense Care: Your deep cleaning handover is ready. View photos & approve: ${handoverLink}`
-                        )}`
-                      : "#"
-                  }
-                >
-                  <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1">
-                    <Smartphone className="h-3 w-3" />
-                    SMS
-                  </Button>
-                </a>
-                <Link href={handoverLink.replace(window.location.origin, "")} target="_blank">
-                  <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1">
-                    <ExternalLink className="h-3 w-3" />
-                    Open
-                  </Button>
-                </Link>
-              </div>
-            )}
-
-            {handoverLink && (
-              <p className="text-[10px] text-teal-700">
-                Generating a new link keeps the older ones valid until they expire, so the customer can never be locked out mid-review. Links expire automatically after the configured window.
-              </p>
-            )}
-          </div>
-        )}
-
       {/* Visual State Progression Stepper */}
       <div className="mb-6">
         <JobTimeline job={job} />
       </div>
 
-      {/* §35 Unified QR & Secure Links panel — mint per purpose with one tap.
-          Tokens are hashed server-side; links are revealed once on mint. */}
-      {canManage && <QrLinkPanel jobId={job.id} />}
+      {/* The customer's ONE secure link — minted at booking, live through the journey. */}
+      <CustomerLinkCard jobId={job.id} canManage={canManage} />
 
       {/* Tabbed Job Detail Content — the active tab follows the pipeline
           stage; the live dot shows the file auto-syncs while open. */}
@@ -1074,7 +984,7 @@ export default function JobDetailPage() {
                     </span>
                   ) : (
                     <span>
-                      The customer confirms team arrival by opening their secure verification link (QR & Links panel) — no OTP involved.
+                      The customer confirms team arrival by opening their secure link (Customer Secure Link panel) — no OTP involved.
                     </span>
                   )}
                 </div>
@@ -1473,12 +1383,12 @@ export default function JobDetailPage() {
                   )}
 
                   <div className="pt-3 border-t border-slate-100 text-[11px] text-slate-500">
-                    The secure customer sign-off link is generated after QC pass and displayed in the Secure Customer Handover Link panel above. Tokens are never stored in plaintext.
+                    The customer's ONE secure link lives in the Customer Secure Link panel — it confirms arrival, shows live progress, takes the sign-off, rating and Google review.
                   </div>
                 </div>
               ) : (
                 <div className="py-6 text-center text-xs text-slate-400">
-                  Customer approval link generated after QC pass.
+                  The customer's secure link becomes the approval page after QC pass.
                 </div>
               )}
             </div>

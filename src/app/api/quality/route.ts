@@ -162,24 +162,21 @@ export async function POST(request: Request) {
             data: { reworkTaskId: task.id },
           });
         }
-        // §19 unified loop: flag → dispatch (mint REWORK token + notify) so the
-        // job lands in REWORK_ASSIGNED, not a limbo state.
+        // §19 unified loop: flag → dispatch (notify staff — they act in the
+        // field app) so the job lands in REWORK_ASSIGNED, not a limbo state.
         await prisma.job.update({
           where: { id: d.jobId },
           data: { status: "REWORK_ASSIGNED", qualityCheckId: qc.id },
         });
         try {
-          const { mintQrToken } = await import("@/lib/server/qr-service");
           const { notifyReworkAssigned } = await import("@/lib/server/notify");
-          const minted = await mintQrToken(d.jobId, "REWORK", { id: user.id, name: user.name });
-          if (minted.success) void notifyReworkAssigned(d.jobId, minted.data.linkUrl).catch(() => {});
-          else void notifyReworkAssigned(d.jobId).catch(() => {});
+          void notifyReworkAssigned(d.jobId).catch(() => {});
         } catch {
-          // notification/token failure must never fail the QC decision
+          // notification failure must never fail the QC decision
         }
       } else {
-        // §17/§21 unified flow: PASS → customer handover (approval token +
-        // invite + notification) is minted server-side, never by the client.
+        // §17/§21 unified flow: PASS → the customer's ONE link becomes the
+        // handover/approval page; the customer is notified server-side.
         await prisma.job.update({
           where: { id: d.jobId },
           data: { status: "PASS", qualityCheckId: qc.id },
@@ -188,7 +185,7 @@ export async function POST(request: Request) {
           const { onQcPassed } = await import("@/lib/server/workflow-service");
           void onQcPassed(d.jobId, { id: user.id, name: user.name }).catch(() => {});
         } catch {
-          // handover mint failure must never fail the QC decision
+          // handover notification failure must never fail the QC decision
         }
       }
 

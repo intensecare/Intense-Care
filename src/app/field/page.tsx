@@ -166,8 +166,7 @@ export default function FieldStaffPage() {
     }
     showToast("Arrival confirmed!");
     if (isLeadForJob) {
-      // The desk/manager mints the customer-verification link on arrival;
-      // the crew waits for the customer to confirm on that secure link.
+      // The crew waits for the customer to confirm on the job's single secure link.
       await refreshJobs();
     }
   };
