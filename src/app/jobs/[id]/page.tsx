@@ -121,7 +121,7 @@ const ACTIVITY_ICON: Record<string, { icon: React.ReactNode; tint: string }> = {
  * backend semantics are untouched. Staff never hunt through tabs.
  * ------------------------------------------------------------------------ */
 type NextAction = {
-  kind: "transition" | "otp" | "assign" | "tab" | "open-link";
+  kind: "transition" | "wait-confirm" | "assign" | "tab" | "open-link";
   target?: string;
   label: string;
   hint: string;
@@ -525,7 +525,7 @@ export default function JobDetailPage() {
           : null;
       case "ARRIVED":
         return customerNotConfirmed
-          ? { kind: "otp", label: "Await Customer Confirmation", hint: "The customer confirms team arrival on their secure link.", tone: "amber" }
+          ? { kind: "wait-confirm", label: "Await Customer Confirmation", hint: "The customer confirms team arrival on their secure link.", tone: "amber" }
           : null;
       case "CUSTOMER_VERIFIED":
         return hasTransition("IN_PROGRESS")
@@ -572,7 +572,7 @@ export default function JobDetailPage() {
     if (!nextAction) return;
     if (nextAction.kind === "transition" && nextAction.target) {
       void handleExecuteTransition(nextAction.target);
-    } else if (nextAction.kind === "otp") {
+    } else if (nextAction.kind === "wait-confirm") {
       setActionError(
         "Customer confirmation through the secure link is required — share the Customer Verification link via the QR & Links panel."
       );
@@ -718,7 +718,7 @@ export default function JobDetailPage() {
 
           {/* What's Next — the ONE primary action for this state */}
           <div className="flex items-center gap-2 flex-wrap lg:justify-end">
-            {nextAction && (nextAction.kind !== "otp" || canManage) && (
+            {nextAction && (nextAction.kind !== "wait-confirm" || canManage) && (
               <div className="w-full lg:w-auto mb-1 lg:mb-0">
                 <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide lg:text-right">
                   What's Next
@@ -731,7 +731,7 @@ export default function JobDetailPage() {
               <Button
                 size="lg"
                 onClick={runNextAction}
-                disabled={isTransitioning || (nextAction.kind === "otp" && !canManage)}
+                disabled={isTransitioning || (nextAction.kind === "wait-confirm" && !canManage)}
                 className={cn(
                   "font-semibold gap-1.5 h-10 text-sm shadow-sm",
                   nextAction.tone === "amber"
