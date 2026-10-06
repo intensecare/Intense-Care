@@ -246,12 +246,18 @@ export async function POST(request: Request) {
 
       // Pipeline sync: when the LAST open rework task on the job closes,
       // move the job to REWORK_COMPLETED so the QC queue and the state
-      // machine stay truthful (previously the job stayed REWORK_REQUIRED).
+      // machine stay truthful. Covers every dispatch-era status the loop can
+      // be in (REWORK_REQUIRED pre-dispatch, REWORK_ASSIGNED after the QC
+      // submit dispatches, REWORK_IN_PROGRESS if that edge is used).
       const remaining = await prisma.reworkTask.count({
         where: { jobId: task.jobId, status: { not: "completed" } },
       });
       const job = await prisma.job.findUnique({ where: { id: task.jobId }, select: { status: true } });
-      if (remaining === 0 && job && ["REWORK_REQUIRED", "REWORK_COMPLETED"].includes(job.status)) {
+      if (
+        remaining === 0 &&
+        job &&
+        ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS", "REWORK_COMPLETED"].includes(job.status)
+      ) {
         await prisma.job.update({
           where: { id: task.jobId },
           data: { status: "REWORK_COMPLETED", updatedAt: new Date() },
@@ -265,7 +271,7 @@ export async function POST(request: Request) {
         actor: { id: user.id, name: user.name, role: user.role },
       });
 
-      return ok({ id: d.taskId, status: "completed", jobStatus: remaining === 0 ? "REWORK_COMPLETED" : job?.status });
+      return ok({ id: d.taskId, status: "completed", jobId: task.jobId, jobStatus: remaining === 0 ? "REWORK_COMPLETED" : job?.status });
     }
 
     if (action === "reinspect-pass") {

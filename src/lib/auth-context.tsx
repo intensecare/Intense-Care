@@ -47,6 +47,8 @@ export const ROLE_ROUTE_PERMISSIONS: Record<UserRole, string[]> = {
     "/properties",
     "/services",
     "/quality",
+    "/quotations", // dashboard pre-sale cards deep-link here
+    "/amc", // dashboard AMC cards deep-link here
     "/reports",
     "/notifications",
     "/users", // Field Staff Directory (read-only for ops_manager)

@@ -186,6 +186,39 @@ export async function POST(request: Request) {
     if (!service) return fail("Service package not found. Create it on the Services page first.", 404);
     if (!service.active) return fail("This service package is inactive.", 409);
 
+    // --- Double-booking guard on CREATE (mirrors PATCH /api/jobs/[id]) ------
+    // A booking that ships with a pre-assigned crew cannot land a worker on
+    // two non-terminal jobs with the same date + time slot.
+    if (d.assignedStaffIds.length > 0 && d.scheduledDate && d.scheduledTimeSlot) {
+      const staffRows = await prisma.user.findMany({
+        where: { id: { in: d.assignedStaffIds }, role: "staff", active: true },
+        select: { id: true },
+      });
+      const valid = new Set(staffRows.map((s) => s.id));
+      const invalid = d.assignedStaffIds.filter((x) => !valid.has(x));
+      if (invalid.length > 0) {
+        return fail("One or more selected workers are not active staff accounts.", 400);
+      }
+      const terminal = ["COMPLETED", "CANCELLED", "CLOSED"];
+      const sameSlot = await prisma.job.findMany({
+        where: {
+          scheduledDate: d.scheduledDate,
+          scheduledTimeSlot: d.scheduledTimeSlot,
+          status: { notIn: terminal },
+          OR: d.assignedStaffIds.map((sid) => ({ assignedStaffIds: { has: sid } })),
+        },
+        select: { id: true, assignedStaffIds: true },
+      });
+      const busy = new Set(sameSlot.flatMap((j) => j.assignedStaffIds));
+      const clash = d.assignedStaffIds.filter((sid) => busy.has(sid));
+      if (clash.length > 0) {
+        return fail(
+          "Worker already booked on another job in this date & time slot (double-booking is not allowed).",
+          409
+        );
+      }
+    }
+
     // --- Customer (inline creation supported) --------------------------------
     let customerId = d.customerId;
     if (!customerId) {

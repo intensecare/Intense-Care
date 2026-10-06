@@ -669,11 +669,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setReworkTasks(qr.data.reworkTasks);
       setComplaints(qr.data.complaints);
     }
-    // Mirror the job status change the server made.
+    // Mirror the job status change the server made (server truth: PASS →
+    // CUSTOMER_APPROVAL handover; rework → REWORK_ASSIGNED after dispatch).
     setJobs((prev) =>
       prev.map((j) =>
         j.id === jobId
-          ? { ...j, status: decision === "PASS" ? "CUSTOMER_APPROVAL" : "REWORK_REQUIRED", qualityCheckId: r.data?.id }
+          ? { ...j, status: decision === "PASS" ? "CUSTOMER_APPROVAL" : "REWORK_ASSIGNED", qualityCheckId: r.data?.id }
           : j
       )
     );
@@ -692,7 +693,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     taskId: string,
     notes: string
   ): Promise<{ success: boolean; message: string }> => {
-    const r = await api("/api/quality", {
+    const r = await api<{ jobStatus?: string; jobId?: string }>("/api/quality", {
       method: "POST",
       body: JSON.stringify({ action: "complete-rework", taskId, notes }),
     });
@@ -707,6 +708,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setQualityIssues((prev) =>
       prev.map((i) => (i.reworkTaskId === taskId ? { ...i, status: "resolved", resolvedAt: new Date().toISOString() } : i))
     );
+    // Mirror the server-side pipeline advance (last open task closed →
+    // REWORK_COMPLETED) so the next-action engine sees it immediately.
+    if (r.data?.jobStatus && r.data.jobId) {
+      setJobs((prev) => prev.map((j) => (j.id === r.data!.jobId ? { ...j, status: r.data!.jobStatus as Job["status"] } : j)));
+    }
     await logAudit("rework", taskId, "REWORK_TASK_COMPLETED", notes);
     return { success: true, message: "Rework task completed." };
   };

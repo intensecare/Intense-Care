@@ -93,9 +93,13 @@ export function buildLinkUrl(token: string): string {
   return `${baseUrl()}${buildLinkPath(token)}`;
 }
 
-/** Short alias scanned from the physical QR — redirects to the customer page. */
+/**
+ * URL encoded in the physical QR — resolves straight to the customer journey
+ * page (the /q alias route was removed with the single-link simplification;
+ * encoding a dead alias made printed QR codes 404).
+ */
 export function buildShortUrl(token: string): string {
-  return `${baseUrl()}/q/${token}`;
+  return `${baseUrl()}/customer/job/${token}`;
 }
 
 export interface MintFailure {
@@ -130,10 +134,24 @@ export async function ensureCustomerLink(
     return { success: false, failure: { kind: "not_found", message: "Job not found." } };
   }
 
-  const live = await prisma.qrToken.findFirst({
+  const liveRows = await prisma.qrToken.findMany({
     where: { jobId, purpose: "CUSTOMER_JOB", revokedAt: null },
     orderBy: { createdAt: "desc" },
   });
+
+  // Self-heal the one-live-link invariant: jobs from the multi-mint era may
+  // carry several stacked live rows. Keep the newest readable one, revoke the
+  // rest so the desk and the customer always see exactly ONE link.
+  let live = liveRows[0];
+  if (liveRows.length > 1) {
+    const stale = liveRows.slice(1);
+    await prisma.qrToken.updateMany({
+      where: { id: { in: stale.map((r) => r.id) } },
+      data: { revokedAt: new Date(), revokedReason: "Superseded — one live link per job enforced" },
+    });
+    logger.warn("qr.stale_live_tokens_revoked", { jobId, count: stale.length, kept: live.id });
+  }
+
   if (live) {
     const raw = rawTokenOfRow(live);
     if (raw) {

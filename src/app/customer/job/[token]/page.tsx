@@ -57,6 +57,7 @@ export default function CustomerJobPage() {
   const [complaintCategory, setComplaintCategory] = useState("missed_area");
   const [complaintText, setComplaintText] = useState("");
   const [complaintSent, setComplaintSent] = useState(false);
+  const [complaintReopened, setComplaintReopened] = useState(false);
   const [rating, setRating] = useState(0);
   const [ratingSent, setRatingSent] = useState(false);
   const [reviewClicked, setReviewClicked] = useState(false);
@@ -129,10 +130,12 @@ export default function CustomerJobPage() {
 
   const handleComplaintSubmit = async () => {
     if (complaintText.trim().length < 5) return;
-    const { ok } = await post({ action: "complaint", category: complaintCategory, description: complaintText.trim() });
+    const { ok, json } = await post({ action: "complaint", category: complaintCategory, description: complaintText.trim() });
     if (ok) {
       setShowComplaint(false);
       setComplaintSent(true);
+      setComplaintReopened(json?.data?.reopened === true);
+      void load(); // re-pull the journey so the card mirrors the re-opened pipeline
     }
   };
 
@@ -358,6 +361,18 @@ export default function CustomerJobPage() {
               <h3 className="text-base font-semibold text-slate-900">CUSTOMER VERIFIED ✓ JOB STARTED ✓</h3>
               <p className="text-xs text-slate-500">Thank you for confirming. Track progress below — it updates live.</p>
             </>
+          ) : job.status.startsWith("REWORK") ? (
+            <>
+              <div className="h-12 w-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto">
+                <AlertTriangle className="h-6 w-6 text-amber-600" />
+              </div>
+              <h3 className="text-base font-semibold text-slate-900">Correction in progress</h3>
+              <p className="text-xs text-slate-500">
+                {complaintSent
+                  ? "Our team is fixing the issue you reported. This page will update — you'll approve the corrected service here."
+                  : "Our quality desk flagged areas to re-do. The team is on it — you'll be able to approve once it's corrected."}
+              </p>
+            </>
           ) : (
             <>
               <h3 className="text-base font-semibold text-slate-900">
@@ -411,7 +426,9 @@ export default function CustomerJobPage() {
 
         {complaintSent && (
           <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-xs font-medium">
-            Your report has been sent to our operations supervisor. We will contact you shortly.
+            {complaintReopened
+              ? "Your report has been sent to our team and the job is re-opened for correction. We will fix the reported areas and update this page — you approve again here once it's done."
+              : "Your report has been sent to our operations supervisor. We will contact you shortly."}
           </div>
         )}
       </main>

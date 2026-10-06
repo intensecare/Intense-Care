@@ -330,6 +330,23 @@ export async function PATCH(
       }
     }
 
+    // Arrival side-effect: the customer gets the ONE secure link by SMS so
+    // they can confirm the team on site (provider-gated; audited in SmsLog).
+    if (status === "ARRIVED" && existing.status !== "ARRIVED") {
+      try {
+        const [{ ensureCustomerLink }, { notifyCustomerArrived }] = await Promise.all([
+          import("@/lib/server/qr-service"),
+          import("@/lib/server/notify"),
+        ]);
+        void (async () => {
+          const link = await ensureCustomerLink(id, { id: user.id, name: user.name });
+          if (link.success) await notifyCustomerArrived(id, link.data.linkUrl);
+        })().catch(() => {});
+      } catch {
+        // notification failure must never fail the arrival transition
+      }
+    }
+
     // Server-authoritative commission settlement: when a referred job
     // completes, create the commission entry (idempotent) and update the
     // partner aggregates. Never left to a client-side call that may not fire.

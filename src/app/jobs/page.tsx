@@ -10,6 +10,7 @@ import { useApp } from "@/lib/app-context";
 import { formatCurrency, formatDate, toLocalDateOffset, formatTimeSlot } from "@/lib/utils";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import { JobStatus } from "@/lib/types";
+import { onDutyWorkerIds } from "@/lib/staff-availability";
 import {
   Search,
   Filter,
@@ -145,6 +146,22 @@ function JobsPageInner() {
   const [timeTo, setTimeTo] = useState("13:30");
   const composedTimeSlot = `${timeFrom} - ${timeTo}`;
   const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
+
+  // Availability preview for the booking form: workers on ANY non-terminal job
+  // right now are "on duty"; those on another job with THIS date+slot are
+  // "already assigned" (the server would 409 the booking). The create call
+  // re-validates server-side either way.
+  const onDutyIds = useMemo(() => onDutyWorkerIds(jobs), [jobs]);
+  const slotConflictIds = useMemo(() => {
+    const busy = new Set<string>();
+    for (const j of jobs) {
+      if (j.scheduledDate !== scheduledDate) continue;
+      if (j.scheduledTimeSlot !== composedTimeSlot) continue;
+      if (j.status === "COMPLETED" || j.status === "CANCELLED" || j.status === "CLOSED") continue;
+      for (const id of j.assignedStaffIds || []) busy.add(id);
+    }
+    return busy;
+  }, [jobs, scheduledDate, composedTimeSlot]);
   const [referralPartnerId, setReferralPartnerId] = useState("");
   const [jobNotes, setJobNotes] = useState("");
 
@@ -713,6 +730,8 @@ function JobsPageInner() {
                 <div className="flex flex-wrap gap-1.5">
                   {fieldWorkers.map((w) => {
                     const isSelected = assignedStaffIds.includes(w.id);
+                    const slotConflict = slotConflictIds.has(w.id);
+                    const onDuty = onDutyIds.has(w.id);
                     return (
                       <button
                         key={w.id}
@@ -724,18 +743,40 @@ function JobsPageInner() {
                               : [...prev, w.id]
                           )
                         }
-                        className={`px-2.5 py-1 rounded text-xs font-semibold border transition-all ${
+                        className={`px-2.5 py-1 rounded text-xs font-semibold border transition-all inline-flex items-center gap-1.5 ${
                           isSelected
                             ? "bg-slate-900 text-white border-slate-900 shadow-xs"
                             : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                         }`}
                       >
+                        <span
+                          className={`h-2 w-2 rounded-full shrink-0 ${
+                            slotConflict
+                              ? "bg-red-500"
+                              : onDuty
+                              ? "bg-amber-500"
+                              : "bg-emerald-500"
+                          } ${isSelected ? "ring-1 ring-white/70" : ""}`}
+                        />
                         {w.name}
                         {isSelected && assignedStaffIds[0] === w.id && " • Lead"}
+                        {!isSelected && slotConflict && (
+                          <span className="text-[9px] font-bold text-red-600 uppercase">already assigned</span>
+                        )}
+                        {!isSelected && !slotConflict && onDuty && (
+                          <span className="text-[9px] font-bold text-amber-600 uppercase">on duty</span>
+                        )}
                       </button>
                     );
                   })}
                 </div>
+                <p className="text-[11px] text-slate-400">
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> available</span>
+                  <span className="mx-1.5">·</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> on duty (another job)</span>
+                  <span className="mx-1.5">·</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> already assigned for this date &amp; window</span>
+                </p>
                 {assignedStaffIds.length === 0 && (
                   <p className="text-[11px] text-slate-400">
                     Leave unassigned to keep the job in the dispatcher pool. Workers see only jobs assigned to them; the first-assigned worker is the lead.

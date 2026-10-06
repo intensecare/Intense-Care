@@ -64,6 +64,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { compressImageForUpload } from "@/lib/image-compress";
 import { CustomerLinkCard } from "@/components/common/CustomerLinkCard";
+import { availabilityFor } from "@/lib/staff-availability";
 
 /**
  * Pipeline stage → the display section that matters at that stage (PDF §4).
@@ -81,6 +82,8 @@ const STAGE_TAB_MAP: Record<string, string> = {
   WORK_COMPLETED: "qc",
   QUALITY_CHECK: "qc",
   REWORK_REQUIRED: "qc",
+  REWORK_ASSIGNED: "qc",
+  REWORK_IN_PROGRESS: "qc",
   REWORK_COMPLETED: "qc",
   REINSPECTION: "qc",
   PASS: "approval",
@@ -563,6 +566,8 @@ export default function JobDetailPage() {
           ? { kind: "transition", target: "REWORK_REQUIRED", label: "Record Rework Required", hint: "Log defects and assign corrective tasks." }
           : null;
       case "REWORK_REQUIRED":
+      case "REWORK_ASSIGNED":
+      case "REWORK_IN_PROGRESS":
         return hasTransition("REWORK_COMPLETED")
           ? { kind: "transition", target: "REWORK_COMPLETED", label: "Mark Rework Completed", hint: "Close out every corrective task first." }
           : { kind: "tab", target: "qc", label: "Review Rework Tasks", hint: "Track the corrective work in Quality." };
@@ -773,8 +778,10 @@ export default function JobDetailPage() {
               </Button>
             )}
 
-            {/* Assign/manage field workers — mirrors the dispatcher's crew picker */}
-            {canManage && ["DRAFT", "SCHEDULED", "ASSIGNED"].includes(job.status) && (
+            {/* Assign/manage field workers — mirrors the dispatcher's crew picker.
+                Hidden when the primary action IS the assignment picker, so the
+                bar never shows two buttons that open the same dialog. */}
+            {canManage && ["DRAFT", "SCHEDULED", "ASSIGNED"].includes(job.status) && nextAction?.kind !== "assign" && (
               <Button
                 size="sm"
                 onClick={openAssignmentModal}
@@ -786,9 +793,14 @@ export default function JobDetailPage() {
               </Button>
             )}
 
-            {/* Every other legal transition stays reachable — quiet secondaries */}
+            {/* Every other legal transition stays reachable — quiet secondaries.
+                Filtered to transitions the CURRENT role may actually execute so
+                the bar never offers a button the backend will reject (e.g. the
+                confirmation-gated CUSTOMER_VERIFIED step, which belongs to the
+                customer's secure link). */}
             {allowedTransitions
               .filter((action) => action.status !== nextAction?.target)
+              .filter((action) => action.status !== "CUSTOMER_VERIFIED" || !!job.customerConfirmedAt)
               .map((action) => (
                 <Button
                   key={action.status}
@@ -1643,8 +1655,33 @@ export default function JobDetailPage() {
               <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
                 {eligibleWorkers.map((w) => {
                   const isSelected = selectedWorkerIds.includes(w.id);
-                  const isBusy = activeWorkerIds.has(w.id) && !isSelected;
+                  // Shared 4-state availability — same rule as the dispatcher,
+                  // the booking form and the users directory.
+                  const availability = availabilityFor(w.id, job, jobs);
+                  const isBusy = availability === "booked_slot";
+                  const onDutyElsewhere = availability === "on_duty";
                   const isLead = isSelected && selectedWorkerIds[0] === w.id;
+                  const stateLabel = isSelected
+                    ? "On this job"
+                    : isBusy
+                    ? "Already assigned (this slot)"
+                    : onDutyElsewhere
+                    ? "On duty (other job)"
+                    : "Available";
+                  const dotClass = isSelected
+                    ? "bg-indigo-500"
+                    : isBusy
+                    ? "bg-red-500"
+                    : onDutyElsewhere
+                    ? "bg-amber-500"
+                    : "bg-emerald-500";
+                  const chipClass = isSelected
+                    ? "bg-indigo-100 text-indigo-800"
+                    : isBusy
+                    ? "bg-red-100 text-red-800"
+                    : onDutyElsewhere
+                    ? "bg-amber-100 text-amber-800"
+                    : "bg-emerald-100 text-emerald-800";
                   return (
                     <button
                       key={w.id}
@@ -1662,11 +1699,7 @@ export default function JobDetailPage() {
                       }`}
                     >
                       <span className="flex items-center gap-2 font-semibold">
-                        <span
-                          className={`h-2 w-2 rounded-full shrink-0 ${
-                            isBusy ? "bg-amber-500" : isSelected ? "bg-indigo-500" : "bg-emerald-500"
-                          }`}
-                        />
+                        <span className={`h-2 w-2 rounded-full shrink-0 ${dotClass}`} />
                         {w.name}
                         {isLead && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-indigo-100 text-indigo-700 border border-indigo-200">
@@ -1676,14 +1709,8 @@ export default function JobDetailPage() {
                       </span>
                       <span className="flex items-center gap-2 shrink-0">
                         {w.phone && <span className="text-[10px] text-slate-400 font-mono">{w.phone}</span>}
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${
-                            isBusy
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-emerald-100 text-emerald-800"
-                          }`}
-                        >
-                          {isBusy ? "Booked this slot" : "Available"}
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${chipClass}`}>
+                          {stateLabel}
                         </span>
                       </span>
                     </button>
@@ -1698,8 +1725,8 @@ export default function JobDetailPage() {
               </span>
               {activeWorkerIds.size > 0 && (
                 <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-amber-500" />
-                  amber = already on another job in this date &amp; time window
+                  <span className="h-2 w-2 rounded-full bg-red-500" />
+                  red = already assigned in this date &amp; time window (server rejects the save)
                 </span>
               )}
             </div>

@@ -5,6 +5,7 @@ import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useApp } from "@/lib/app-context";
 import { UserRole } from "@/lib/types";
+import { onDutyWorkerIds } from "@/lib/staff-availability";
 import {
   ShieldCheck,
   UserCheck,
@@ -28,11 +29,17 @@ import {
 } from "@/components/common/StaffDirectory";
 
 export default function UsersAndRolesPage() {
-  const { currentRole, users, addUser, updateUser, toggleUserStatus, deleteUser } = useApp();
+  const { currentRole, users, jobs, addUser, updateUser, toggleUserStatus, deleteUser } = useApp();
   // Server-computed field-staff details — powers the ops_manager directory
   // and the click-to-reveal worker file in the admin table below.
   const directory = useStaffDirectory();
   const [detailWorkerId, setDetailWorkerId] = useState<string | null>(null);
+
+  // Duty state for staff rows: a worker on any non-terminal job shows "On duty"
+  // everywhere (same helper as dispatcher / booking form / crew picker). Jobs
+  // arriving from the store's 10s live-sync keep this badge current; the job
+  // completing auto-frees the worker.
+  const onDutyIds = onDutyWorkerIds(jobs);
 
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -235,6 +242,7 @@ export default function UsersAndRolesPage() {
                   <th className="py-2.5 px-3">Role</th>
                   <th className="py-2.5 px-3">Contact</th>
                   <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3">Duty</th>
                   <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -302,6 +310,27 @@ export default function UsersAndRolesPage() {
                           />
                           {u.active ? "Active" : "Disabled"}
                         </span>
+                      </td>
+
+                      <td className="py-3 px-3">
+                        {u.role === "staff" ? (
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold ${
+                              onDutyIds.has(u.id)
+                                ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                : "bg-slate-50 text-slate-500 border border-slate-200"
+                            }`}
+                          >
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                onDutyIds.has(u.id) ? "bg-amber-500" : "bg-emerald-500"
+                              }`}
+                            />
+                            {onDutyIds.has(u.id) ? "On duty" : "Available"}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-300">—</span>
+                        )}
                       </td>
 
                       <td className="py-3 px-3 text-right">

@@ -112,7 +112,7 @@ export default function FieldStaffPage() {
   const service = services.find((s) => s.id === currentJob?.serviceId);
   const currentChecklist = checklistItems.filter((i) => i.jobId === currentJob?.id);
   const currentPhotos = photos.filter((p) => p.jobId === currentJob?.id);
-  const jobIssues = qualityIssues.filter((i) => i.jobId === currentJob?.id && i.status !== "resolved" && i.status !== "reinspected_pass");
+  const jobIssues = qualityIssues.filter((i) => i.jobId === currentJob?.id && i.status !== "reinspected_pass");
   const jobRework = reworkTasks.filter((r) => r.jobId === currentJob?.id && r.status !== "completed");
 
   // Server-rejected transition on the job currently open (e.g. confirmation gate).
@@ -568,8 +568,10 @@ export default function FieldStaffPage() {
             )}
 
             {/* Step 5: REWORK loop — QC's instructions are shown verbatim with
-                a one-tap “done” action; the server advances the pipeline. */}
-            {(currentJob.status === "REWORK_REQUIRED" || currentJob.status === "REWORK_COMPLETED") && (
+                a one-tap “done” action; the server advances the pipeline.
+                Covers every rework-era status so the loop never dead-ends in
+                the app the worker actually uses. */}
+            {["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS", "REWORK_COMPLETED"].includes(currentJob.status) && (
               <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-900 text-xs space-y-2">
                 <div className="font-semibold flex items-center gap-1.5 text-red-700">
                   <AlertTriangle className="h-4 w-4" />
@@ -604,7 +606,12 @@ export default function FieldStaffPage() {
                               </span>
                             )}
                           </div>
-                          <p className="font-medium text-rose-900">{task.instructions}</p>
+                          <p className="font-medium text-rose-900">{linkedIssue?.itemDescription || task.instructions}</p>
+                          {(linkedIssue?.reworkInstructions || linkedIssue?.notes) && (
+                            <p className="text-[11px] text-red-800 bg-red-50/80 border border-red-100 rounded p-1.5">
+                              <strong>QC says:</strong> {linkedIssue.reworkInstructions || linkedIssue.notes}
+                            </p>
+                          )}
                           {canExecuteFieldWork ? (
                             <Button
                               size="sm"
@@ -629,9 +636,14 @@ export default function FieldStaffPage() {
                     })}
                   </div>
                 )}
-                {jobRework.length === 0 && (
+                {jobRework.length === 0 && currentJob.status !== "REWORK_COMPLETED" && (
                   <p className="text-[11px] text-red-800 italic">
                     Syncing rework instructions from the QC desk…
+                  </p>
+                )}
+                {currentJob.status === "REWORK_COMPLETED" && jobRework.length === 0 && (
+                  <p className="text-[11px] text-amber-800 italic">
+                    All corrective work done — awaiting the QC desk’s reinspection.
                   </p>
                 )}
               </div>

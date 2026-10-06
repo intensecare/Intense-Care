@@ -25,6 +25,7 @@ export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
   // Public paths that do not require staff authentication
   const isPublicPath =
     pathname.startsWith("/login") ||
+    pathname.startsWith("/customer") || // customer secure-link journey — ALWAYS non-login
     pathname.startsWith("/portal") ||
     pathname.startsWith("/partner-portal");
 

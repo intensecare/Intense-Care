@@ -249,8 +249,17 @@ export async function POST(request: Request, { params }: { params: { token: stri
       const parsed = ComplaintSchema.safeParse(body);
       if (!parsed.success) return fail("Please describe the issue (at least 5 characters).", 400);
 
-      const jobRow = await prisma.job.findUnique({ where: { id: job.id }, select: { status: true, customerId: true } });
+      const jobRow = await prisma.job.findUnique({ where: { id: job.id }, select: { status: true, customerId: true, assignedStaffIds: true } });
       if (!jobRow) return fail("Job not found.", 404);
+
+      // Gate: an issue can be raised at any point BEFORE final approval —
+      // the customer must always have a say before signing off. After the
+      // approval the complaint is still recorded for ops, but it no longer
+      // re-opens the (already accepted, commission-settled) pipeline.
+      const preApproval = !["COMPLETED", "CLOSED", "CANCELLED"].includes(jobRow.status);
+      if (jobRow.status === "CANCELLED" || jobRow.status === "CLOSED") {
+        return fail("This job is closed — please contact support to raise an issue.", 409);
+      }
 
       const opsManager = await prisma.user.findFirst({
         where: { role: "ops_manager", active: true },
@@ -269,16 +278,52 @@ export async function POST(request: Request, { params }: { params: { token: stri
         },
       });
 
+      let reopened = false;
+      if (preApproval && !jobRow.status.startsWith("REWORK")) {
+        // The customer's issue BECOMES a rework task on the lead worker and
+        // re-drives the full loop: REWORK_REQUIRED → (field app fixes it) →
+        // REWORK_COMPLETED → reinspection → PASS → approval on this same link.
+        const leadWorker = jobRow.assignedStaffIds[0] ?? "";
+        const attentionIssue = await prisma.qualityIssue.create({
+          data: {
+            qualityCheckId: null,
+            jobId: job.id,
+            area: parsed.data.category.replace("_", " ").toUpperCase(),
+            itemDescription: parsed.data.description,
+            severity: "critical",
+            notes: `Customer reported via secure link: ${parsed.data.description}`,
+            assignedStaffId: leadWorker,
+            reworkInstructions: parsed.data.description,
+          },
+        });
+        await prisma.reworkTask.create({
+          data: {
+            qualityIssueId: attentionIssue.id,
+            jobId: job.id,
+            assignedStaffId: leadWorker,
+            instructions: `Customer reported: ${parsed.data.description}`,
+          },
+        });
+        await prisma.job.update({
+          where: { id: job.id },
+          data: { status: "REWORK_REQUIRED", updatedAt: new Date() },
+        });
+        reopened = true;
+      }
+
       await recordActivity({
         jobId: job.id,
         type: "ATTENTION_REQUESTED",
-        message: `Customer reported an issue via secure link (${parsed.data.category.replace("_", " ")}): ${parsed.data.description}`,
+        message: `Customer reported an issue via secure link (${parsed.data.category.replace("_", " ")}): ${parsed.data.description}${reopened ? " — job re-opened for rework" : ""}`,
         actor: { name: parsed.data.signatoryName || customerName, role: "customer" },
       });
       void notifyReworkAssigned(job.id).catch(() => {});
-      logger.info("approval.complaint_created", { jobId: job.id, complaintId: complaint.id });
+      logger.info("approval.complaint_created", { jobId: job.id, complaintId: complaint.id, reopened });
 
-      return NextResponse.json({ success: true, data: { complaintId: complaint.id, status: "open" } }, { status: 201 });
+      return NextResponse.json(
+        { success: true, data: { complaintId: complaint.id, status: "open", reopened } },
+        { status: 201 }
+      );
     }
 
     /* ---------------- FEEDBACK (rating + Google review) ---------------- */
