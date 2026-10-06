@@ -392,6 +392,32 @@ export default function JobDetailPage() {
 
   // Ops Managers cannot open jobs outside their dispatch visibility window
   // (past + today + tomorrow after the cutoff). Direct URL access to a future
+
+  // Auto-load the job's ONE customer link for managers (silent — no audit spam).
+  React.useEffect(() => {
+    if (!canManage || !job?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/qr-links", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get", jobId: job.id }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!cancelled && res.ok && json?.success && json.data?.linkUrl) {
+          setHandoverLink(json.data.linkUrl);
+        }
+      } catch {
+        // Non-fatal — the card loads its own copy too.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage, job?.id]);
+
   // job renders as not-found, mirroring the API's 403.
   const opsWindowBlocked =
     currentRole === "ops_manager" &&
@@ -443,30 +469,6 @@ export default function JobDetailPage() {
   const property = properties.find((p) => p.id === job.propertyId);
   const service = services.find((s) => s.id === job.serviceId);
 
-  // Auto-load the job's ONE customer link for managers (silent — no audit spam).
-  React.useEffect(() => {
-    if (!canManage) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/qr-links", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "get", jobId: job.id }),
-        });
-        const json = await res.json().catch(() => null);
-        if (!cancelled && res.ok && json?.success && json.data?.linkUrl) {
-          setHandoverLink(json.data.linkUrl);
-        }
-      } catch {
-        // Non-fatal — the card loads its own copy too.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canManage, job?.id]);
 
   // One-tap WhatsApp share of the handover link (wa.me deep link with the
   // message prefilled; the desk just hits send).
