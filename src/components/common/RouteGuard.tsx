@@ -1,18 +1,19 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useAuth, ROLE_ROUTE_PERMISSIONS, getRoleDefaultPath } from "@/lib/auth-context";
-import { UserRole } from "@/lib/types";
+import { useAuth } from "@/lib/auth-context";
 import { usePathname, useRouter } from "next/navigation";
 import { ShieldAlert, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { routeAllowed, isPublicPath, homePathFor, ROLE_LABELS } from "@/lib/rbac";
 
-interface RouteGuardProps {
-  children: React.ReactNode;
-  allowedRoles?: UserRole[];
-}
-
-export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
+/**
+ * Route guard — every path is checked against the role's workspace table
+ * (src/lib/rbac/workspaces.ts). A role that may not open a path is sent to
+ * its ONE home. Public paths (login, customer secure link, partner code
+ * portal) never require a session. This is a UX guard; APIs re-check.
+ */
+export function RouteGuard({ children }: { children: React.ReactNode }) {
   const { currentUser, isAuthenticated, isLoading, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
@@ -22,134 +23,74 @@ export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
     setMounted(true);
   }, []);
 
-  // Public paths that do not require staff authentication
-  const isPublicPath =
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/customer") || // customer secure-link journey — ALWAYS non-login
-    pathname.startsWith("/portal") ||
-    pathname.startsWith("/partner-portal");
-
-  // Compute the redirect target (if any) BEFORE rendering, then perform it in an
-  // effect. Calling router.push during render caused React warnings ("Cannot
-  // update a component while rendering a different component") because it
-  // triggers a state update in the router during the render phase.
-  //
-  // While the server session is still being resolved (isLoading), auth state is
-  // UNKNOWN — never treat it as logged-out, otherwise a page refresh bounces
-  // the user to /login before the session check completes.
+  const publicPath = isPublicPath(pathname);
   let redirectTarget: string | null = null;
 
-  if (mounted && !isLoading && !isPublicPath && (!isAuthenticated || !currentUser)) {
+  if (mounted && !isLoading && !publicPath && (!isAuthenticated || !currentUser)) {
     redirectTarget = "/login";
   }
 
-  if (mounted && !isPublicPath && isAuthenticated && currentUser) {
-    const userRole = currentUser.role;
-
-    // Auto-redirect non-admin roles from root "/" to their primary workspace
-    if (pathname === "/") {
-      const defaultPath = getRoleDefaultPath(userRole);
-      if (defaultPath !== "/") {
-        redirectTarget = defaultPath;
-      }
-    }
-
-    if (!redirectTarget) {
-      const isSuperAdmin = userRole === "super_admin";
-      let isAllowed = isSuperAdmin;
-
-      if (!isAllowed) {
-        if (allowedRoles) {
-          isAllowed = allowedRoles.includes(userRole);
-        } else {
-          // Check default permissions for this path
-          const allowedPaths = ROLE_ROUTE_PERMISSIONS[userRole] || [];
-          isAllowed = allowedPaths.some(
-            (p) => p === pathname || (p !== "/" && pathname.startsWith(p))
-          );
-        }
-      }
-
-      // Unauthorized: bounce to the role's designated workspace instead of rendering
-      if (!isAllowed) {
-        const defaultPath = getRoleDefaultPath(userRole);
-        if (defaultPath !== pathname) {
-          redirectTarget = defaultPath;
-        }
-      }
+  if (mounted && !publicPath && isAuthenticated && currentUser) {
+    const home = homePathFor(currentUser.role);
+    if (pathname === "/" && home !== "/") {
+      redirectTarget = home;
+    } else if (!routeAllowed(currentUser.role, pathname) && pathname !== home) {
+      redirectTarget = home;
     }
   }
 
-  // Perform redirects after render (React-safe)
+  // A signed-in user opening /login goes straight to their workspace.
+  if (mounted && !isLoading && pathname.startsWith("/login") && isAuthenticated && currentUser) {
+    redirectTarget = homePathFor(currentUser.role);
+  }
+
   useEffect(() => {
-    if (redirectTarget) {
-      router.replace(redirectTarget);
-    }
+    if (redirectTarget) router.replace(redirectTarget);
   }, [redirectTarget, router]);
 
   if (!mounted || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-xs text-slate-400 font-mono">Verifying authentication session...</div>
+        <div className="text-xs text-slate-400 font-mono">Verifying your session…</div>
       </div>
     );
   }
 
-  if (isPublicPath) {
+  if (publicPath && !redirectTarget) {
     return <>{children}</>;
   }
 
-  // Render a neutral loading shell while a redirect is in flight
   if (redirectTarget) {
-    // Special case: user is authenticated but genuinely has no workspace for this
-    // path and their default path IS this path — show a proper access-restricted card.
-    const userRole = currentUser?.role;
-    const defaultPath = userRole ? getRoleDefaultPath(userRole) : "/login";
-
-    if (isAuthenticated && currentUser && defaultPath === pathname) {
+    const home = currentUser ? homePathFor(currentUser.role) : "/login";
+    if (isAuthenticated && currentUser && home === pathname) {
       return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
           <div className="max-w-md w-full bg-white rounded-lg border border-slate-200 p-6 shadow-sm text-center space-y-4">
             <div className="h-12 w-12 rounded-full bg-red-50 text-red-600 border border-red-200 flex items-center justify-center mx-auto">
               <ShieldAlert className="h-6 w-6" />
             </div>
-
             <div className="space-y-1">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Access Restricted
-              </h2>
+              <h2 className="text-lg font-semibold text-slate-900">Access Restricted</h2>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Your account is signed in as <strong className="text-slate-800">{currentUser.name}</strong> with role{" "}
-                <span className="font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded">
-                  {currentUser.role.replace("_", " ")}
-                </span>
-                . You do not have permission to access this page under your current user role.
+                You are signed in as <strong className="text-slate-800">{currentUser.name}</strong> (
+                {ROLE_LABELS[currentUser.role]}). This page is not part of your workspace.
               </p>
             </div>
-
             <div className="pt-2 flex flex-col gap-2">
-              <Button
-                className="w-full bg-rose-500 text-white text-xs h-9"
-                onClick={() => router.push(defaultPath)}
-              >
-                Go to Workspace ({defaultPath})
+              <Button className="w-full text-white text-xs h-9" onClick={() => router.push(home)}>
+                Go to my workspace
               </Button>
-              <Button
-                variant="outline"
-                className="w-full text-xs h-9 text-slate-600"
-                onClick={logout}
-              >
-                Sign Out & Switch Account
+              <Button variant="outline" className="w-full text-xs h-9 text-slate-600" onClick={logout}>
+                <LogOut className="h-3.5 w-3.5 mr-1.5" /> Sign out
               </Button>
             </div>
           </div>
         </div>
       );
     }
-
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-xs text-slate-400 font-mono">Redirecting to your workspace...</div>
+        <div className="text-xs text-slate-400 font-mono">Opening your workspace…</div>
       </div>
     );
   }

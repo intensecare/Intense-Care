@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import QRCode from "qrcode";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission, authorizeJob } from "@/lib/server/authz";
+import { recordAudit } from "@/lib/server/audit";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import {
@@ -28,7 +29,7 @@ import {
 
 export async function GET() {
   try {
-    await requireRole(["super_admin", "ops_manager"]);
+    await requirePermission("links.manage");
     const rows = await prisma.qrToken.findMany({ orderBy: { createdAt: "desc" }, take: 500 });
     const jobIds = Array.from(new Set(rows.map((r) => r.jobId)));
     const jobs = await prisma.job.findMany({
@@ -81,9 +82,15 @@ const TokenActionSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const { user } = await requireRole(["super_admin", "ops_manager"]);
+    const { user } = await requirePermission("links.manage");
     const body = await request.json().catch(() => null);
     const action = typeof body?.action === "string" ? body.action : "";
+    // Record-level scope: the job must be inside the caller's jobs.view scope.
+    if (typeof body?.jobId === "string") await authorizeJob(body.jobId, "jobs.view");
+    if (typeof body?.tokenId === "string") {
+      const row = await prisma.qrToken.findUnique({ where: { id: body.tokenId }, select: { jobId: true } });
+      if (row) await authorizeJob(row.jobId, "jobs.view");
+    }
 
     if (action === "get" || action === "regen") {
       const parsed = (action === "get" ? GetSchema : RegenSchema).safeParse(body);
@@ -163,6 +170,7 @@ export async function POST(request: Request) {
       if (!parsed.success) return NextResponse.json({ success: false, error: "Invalid payload." }, { status: 400 });
       const ok = await revokeQrToken(parsed.data.tokenId, { id: user.id, name: user.name }, parsed.data.reason);
       if (!ok) return NextResponse.json({ success: false, error: "Link already revoked or not found." }, { status: 409 });
+      void recordAudit({ actor: user, action: "CUSTOMER_LINK_REVOKED", entityType: "qr_token", entityId: parsed.data.tokenId, reason: parsed.data.reason, request });
       return NextResponse.json({ success: true, data: { revoked: true } });
     }
 

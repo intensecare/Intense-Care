@@ -5,6 +5,8 @@ import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useApp } from "@/lib/app-context";
 import { UserRole } from "@/lib/types";
+import { useAuth } from "@/lib/auth-context";
+import { ROLES, ROLE_LABELS, ROLE_DESCRIPTIONS, ROLE_PERMISSIONS, ASSIGNABLE_ROLES, workspaceFor, type Role } from "@/lib/rbac";
 import { onDutyWorkerIds } from "@/lib/staff-availability";
 import {
   ShieldCheck,
@@ -29,7 +31,8 @@ import {
 } from "@/components/common/StaffDirectory";
 
 export default function UsersAndRolesPage() {
-  const { currentRole, users, jobs, addUser, updateUser, toggleUserStatus, deleteUser } = useApp();
+  const { users, jobs, customers, partners, addUser, updateUser, toggleUserStatus, deleteUser } = useApp();
+  const { can } = useAuth();
   // Server-computed field-staff details — powers the ops_manager directory
   // and the click-to-reveal worker file in the admin table below.
   const directory = useStaffDirectory();
@@ -49,70 +52,60 @@ export default function UsersAndRolesPage() {
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [userPhone, setUserPhone] = useState("");
-  const [userRole, setUserRole] = useState<UserRole>("staff");
+  const [userRole, setUserRole] = useState<UserRole>("field_staff");
+  const [userTeamId, setUserTeamId] = useState("");
+  const [userCustomerId, setUserCustomerId] = useState("");
+  const [userPartnerId, setUserPartnerId] = useState("");
   const [userPassword, setUserPassword] = useState("");
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const ROLE_DEFINITIONS: {
-    role: UserRole;
-    title: string;
-    description: string;
-    icon: React.ElementType;
-    badgeColor: string;
-    permissions: string[];
-  }[] = [
-    {
-      role: "super_admin",
-      title: "Super Admin",
-      description: "Full platform control: user management, customers, properties, job scheduling, finance, expenses, revenue analytics, settings, audit logs.",
-      icon: ShieldCheck,
-      badgeColor: "bg-slate-900 text-white",
+  // Role reference cards are generated from the central matrix so this page
+  // can never drift from what the server enforces.
+  const ROLE_ICON: Record<Role, React.ElementType> = {
+    super_admin: ShieldCheck,
+    ops_manager: UserCheck,
+    scheduler: UserCheck,
+    field_manager: Smartphone,
+    field_staff: Smartphone,
+    qc_inspector: ShieldCheck,
+    accounts: Users,
+    referral_partner: Users,
+    customer: Users,
+  };
+  const ROLE_BADGE: Record<Role, string> = {
+    super_admin: "bg-slate-900 text-white",
+    ops_manager: "bg-blue-600 text-white",
+    scheduler: "bg-sky-600 text-white",
+    field_manager: "bg-emerald-600 text-white",
+    field_staff: "bg-emerald-500 text-white",
+    qc_inspector: "bg-violet-600 text-white",
+    accounts: "bg-amber-600 text-white",
+    referral_partner: "bg-pink-600 text-white",
+    customer: "bg-slate-500 text-white",
+  };
+  const ROLE_DEFINITIONS = ROLES.map((role) => {
+    const grants = Object.entries(ROLE_PERMISSIONS[role]).filter(([, scope]) => scope !== "NONE");
+    const modules = Array.from(new Set(grants.map(([p]) => p.split(".")[0])));
+    const scopeSummary = Array.from(new Set(grants.map(([, scope]) => scope))).join(" / ");
+    return {
+      role,
+      title: ROLE_LABELS[role],
+      description: ROLE_DESCRIPTIONS[role],
+      icon: ROLE_ICON[role],
+      badgeColor: ROLE_BADGE[role],
+      home: workspaceFor(role).title,
       permissions: [
-        "Create, edit & delete jobs",
-        "Manage customers & properties",
-        "Override state machine transitions",
-        "Manage platform settings & security policies",
-        "Manage finance (Quotes, Invoices, Payments, Expenses)",
-        "View immutable audit logs",
-        "Manage user permissions & credentials",
+        `Workspace: ${workspaceFor(role).title} (${workspaceFor(role).home})`,
+        `Record scope: ${scopeSummary || "none"}`,
+        `${grants.length} permissions across ${modules.length} modules: ${modules.join(", ")}`,
       ],
-    },
-    {
-      role: "ops_manager",
-      title: "Operations Manager (Ops & QA)",
-      description: "Next-day job dispatch queue (8 PM default), direct field-worker assignment, live execution monitoring, QA inspections (PASS/REWORK), and reinspections.",
-      icon: UserCheck,
-      badgeColor: "bg-blue-600 text-white",
-      permissions: [
-        "View next-day dispatch queue (from configured dispatch time)",
-        "Assign field staff to scheduled jobs",
-        "Monitor live job progress & field-worker status",
-        "Perform room-by-room quality inspections & score audits",
-        "Issue rework tasks & conduct final reinspections",
-        "Handle customer attention tickets",
-      ],
-    },
-    {
-      role: "staff",
-      title: "Staff / Field Worker",
-      description: "Field execution role: view assigned jobs, property navigation, secure customer confirmation gate, checklists, before/after evidence photos, rework execution.",
-      icon: Smartphone,
-      badgeColor: "bg-emerald-600 text-white",
-      permissions: [
-        "View assigned jobs only",
-        "Record property arrival",
-        "Wait for customer confirmation via secure link",
-        "Execute room-wise cleaning checklists & upload photo evidence",
-        "Mark work completed for QA review",
-        "Execute assigned rework tasks",
-      ],
-    },
-  ];
+    };
+  });
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userName.trim() || !userEmail.trim() || userPassword.length < 6) return;
+    if (!userName.trim() || !userEmail.trim() || userPassword.length < 8) return;
 
     setFormBusy(true);
     setFormError(null);
@@ -122,6 +115,9 @@ export default function UsersAndRolesPage() {
       phone: userPhone,
       role: userRole,
       password: userPassword,
+      teamId: userTeamId || null,
+      customerId: userRole === "customer" ? userCustomerId || null : null,
+      referralPartnerId: userRole === "referral_partner" ? userPartnerId || null : null,
     });
     setFormBusy(false);
 
@@ -131,7 +127,10 @@ export default function UsersAndRolesPage() {
       setUserEmail("");
       setUserPhone("");
       setUserPassword("");
-      setUserRole("staff");
+      setUserRole("field_staff");
+      setUserTeamId("");
+      setUserCustomerId("");
+      setUserPartnerId("");
     } else {
       setFormError(res.message);
     }
@@ -147,6 +146,9 @@ export default function UsersAndRolesPage() {
       name: userName,
       phone: userPhone,
       role: userRole,
+      teamId: userTeamId || null,
+      customerId: userRole === "customer" ? userCustomerId || null : null,
+      referralPartnerId: userRole === "referral_partner" ? userPartnerId || null : null,
       ...(userPassword ? { password: userPassword } : {}),
     });
     setFormBusy(false);
@@ -165,12 +167,15 @@ export default function UsersAndRolesPage() {
     setUserEmail(u.email);
     setUserPhone(u.phone);
     setUserRole(u.role);
+    setUserTeamId(u.teamId || "");
+    setUserCustomerId(u.customerId || "");
+    setUserPartnerId(u.referralPartnerId || "");
   };
 
   // ops_manager lands here from the sidebar's "Staff Directory" link and gets
   // the read-only roster with click-to-reveal worker files. Account CRUD below
   // stays super_admin-only.
-  if (currentRole === "ops_manager") {
+  if (!can("users.manage")) {
     return (
       <AdminLayout>
         <PageHeader
@@ -201,13 +206,13 @@ export default function UsersAndRolesPage() {
           { label: "Users & Roles" },
         ]}
         actions={
-          currentRole === "super_admin" && (
+          can("users.manage") && (
             <Button
               onClick={() => {
                 setUserName("");
                 setUserEmail("");
                 setUserPhone("");
-                setUserRole("staff");
+                setUserRole("field_staff");
                 setIsAddUserOpen(true);
               }}
               size="sm"
@@ -229,7 +234,7 @@ export default function UsersAndRolesPage() {
                 Active Staff & User Accounts ({users.length})
               </h3>
               <p className="text-xs text-slate-500">
-                Registered platform credentials across Super Admin, Operations Manager, and Field Staff roles.
+                Registered accounts across the nine platform roles. Every permission is resolved from the central RBAC matrix.
               </p>
             </div>
           </div>
@@ -259,7 +264,7 @@ export default function UsersAndRolesPage() {
                             {u.name.substring(0, 2).toUpperCase()}
                           </div>
                           <div>
-                            {u.role === "staff" ? (
+                            {ASSIGNABLE_ROLES.includes(u.role) ? (
                               <button
                                 type="button"
                                 onClick={() => setDetailWorkerId(u.id)}
@@ -278,13 +283,7 @@ export default function UsersAndRolesPage() {
 
                       <td className="py-3 px-3">
                         <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold ${
-                            u.role === "super_admin"
-                              ? "bg-slate-900 text-white"
-                              : u.role === "ops_manager"
-                              ? "bg-blue-600 text-white"
-                              : "bg-emerald-600 text-white"
-                          }`}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold ${ROLE_BADGE[u.role] ?? "bg-slate-500 text-white"}`}
                         >
                           <Icon className="h-3 w-3" />
                           {roleDef?.title || u.role}
@@ -313,7 +312,7 @@ export default function UsersAndRolesPage() {
                       </td>
 
                       <td className="py-3 px-3">
-                        {u.role === "staff" ? (
+                        {ASSIGNABLE_ROLES.includes(u.role) ? (
                           <span
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold ${
                               onDutyIds.has(u.id)
@@ -335,7 +334,7 @@ export default function UsersAndRolesPage() {
 
                       <td className="py-3 px-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {currentRole === "super_admin" && (
+                          {can("users.manage") && (
                             <>
                               <Button
                                 size="sm"
@@ -464,13 +463,13 @@ export default function UsersAndRolesPage() {
 
               <div className="space-y-1">
                 <label className="font-semibold text-slate-700">
-                  Initial Password (min 6 characters)
+                  Initial Password (min 8 characters)
                 </label>
                 <Input
                   type="password"
                   value={userPassword}
                   onChange={(e) => setUserPassword(e.target.value)}
-                  minLength={6}
+                  minLength={8}
                   required
                   className="font-mono"
                 />
@@ -486,11 +485,59 @@ export default function UsersAndRolesPage() {
                   onChange={(e) => setUserRole(e.target.value as UserRole)}
                   className="w-full h-9 rounded-md border border-slate-200 px-3 text-xs"
                 >
-                  <option value="staff">Staff / Field Worker</option>
-                  <option value="ops_manager">Operations Manager</option>
-                  <option value="super_admin">Super Admin</option>
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {ROLE_LABELS[r]}
+                    </option>
+                  ))}
                 </select>
+                <p className="text-[10px] text-slate-400">{ROLE_DESCRIPTIONS[userRole]}</p>
               </div>
+
+              {ASSIGNABLE_ROLES.includes(userRole) && (
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">Team (optional)</label>
+                  <Input value={userTeamId} onChange={(e) => setUserTeamId(e.target.value)} placeholder="e.g. team-a" />
+                  <p className="text-[10px] text-slate-400">Used for TEAM-scoped visibility.</p>
+                </div>
+              )}
+              {userRole === "customer" && (
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">Customer record</label>
+                  <select
+                    value={userCustomerId}
+                    onChange={(e) => setUserCustomerId(e.target.value)}
+                    required
+                    className="w-full h-9 rounded-md border border-slate-200 px-3 text-xs"
+                  >
+                    <option value="">Select the customer this login belongs to…</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} · {c.phone}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-400">The portal shows only this customer&apos;s services. AMC / NRI features follow the customer&apos;s contracts.</p>
+                </div>
+              )}
+              {userRole === "referral_partner" && (
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">Referral partner</label>
+                  <select
+                    value={userPartnerId}
+                    onChange={(e) => setUserPartnerId(e.target.value)}
+                    required
+                    className="w-full h-9 rounded-md border border-slate-200 px-3 text-xs"
+                  >
+                    <option value="">Select the partner this login belongs to…</option>
+                    {partners.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setIsAddUserOpen(false)}>
@@ -537,7 +584,7 @@ export default function UsersAndRolesPage() {
                   type="password"
                   value={userPassword}
                   onChange={(e) => setUserPassword(e.target.value)}
-                  minLength={6}
+                  minLength={8}
                   placeholder="Leave blank to keep current password"
                   className="font-mono"
                 />
@@ -550,11 +597,59 @@ export default function UsersAndRolesPage() {
                   onChange={(e) => setUserRole(e.target.value as UserRole)}
                   className="w-full h-9 rounded-md border border-slate-200 px-3 text-xs"
                 >
-                  <option value="staff">Staff / Field Worker</option>
-                  <option value="ops_manager">Operations Manager</option>
-                  <option value="super_admin">Super Admin</option>
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {ROLE_LABELS[r]}
+                    </option>
+                  ))}
                 </select>
+                <p className="text-[10px] text-slate-400">{ROLE_DESCRIPTIONS[userRole]}</p>
               </div>
+
+              {ASSIGNABLE_ROLES.includes(userRole) && (
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">Team (optional)</label>
+                  <Input value={userTeamId} onChange={(e) => setUserTeamId(e.target.value)} placeholder="e.g. team-a" />
+                  <p className="text-[10px] text-slate-400">Used for TEAM-scoped visibility.</p>
+                </div>
+              )}
+              {userRole === "customer" && (
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">Customer record</label>
+                  <select
+                    value={userCustomerId}
+                    onChange={(e) => setUserCustomerId(e.target.value)}
+                    required
+                    className="w-full h-9 rounded-md border border-slate-200 px-3 text-xs"
+                  >
+                    <option value="">Select the customer this login belongs to…</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} · {c.phone}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-400">The portal shows only this customer&apos;s services. AMC / NRI features follow the customer&apos;s contracts.</p>
+                </div>
+              )}
+              {userRole === "referral_partner" && (
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">Referral partner</label>
+                  <select
+                    value={userPartnerId}
+                    onChange={(e) => setUserPartnerId(e.target.value)}
+                    required
+                    className="w-full h-9 rounded-md border border-slate-200 px-3 text-xs"
+                  >
+                    <option value="">Select the partner this login belongs to…</option>
+                    {partners.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setEditingUserId(null)}>

@@ -1,24 +1,33 @@
-import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole, requireUser } from "@/lib/server/authz";
+import { requirePermission, visibleJobIds } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
-import {
-  serializeCommissionEntry,
-  serializeAuditLog,
-  ok,
-  fail,
-  readJson,
-} from "@/lib/server/serialize";
+import { serializeCommissionEntry, serializeAuditLog, ok, fail, readJson } from "@/lib/server/serialize";
 import { settleCommissionForJob } from "@/lib/server/commission";
-import { logger } from "@/lib/server/logger";
+import { recordAudit } from "@/lib/server/audit";
 
 /**
- * GET /api/audit — recent audit trail (super_admin ONLY), newest first.
+ * GET /api/audit?jobId=&limit= — the audit trail (§27), newest first.
+ * audit.view holders see the company trail; a jobId narrows it to one job and
+ * is additionally checked against the caller's job scope. There is NO delete
+ * handler on purpose: audit history cannot be removed through the app.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await requireRole(["super_admin"]);
-    const rows = await prisma.auditLog.findMany({ orderBy: { timestamp: "desc" }, take: 300 });
+    const { user } = await requirePermission("audit.view");
+    const { searchParams } = new URL(request.url);
+    const jobId = searchParams.get("jobId") || undefined;
+    const limitParam = parseInt(searchParams.get("limit") || "300", 10);
+    const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 300, 1), 1000);
+
+    if (jobId) {
+      const ids = await visibleJobIds(user, "jobs.view");
+      if (ids !== "ALL" && !ids.includes(jobId)) return ok([]);
+    }
+    const rows = await prisma.auditLog.findMany({
+      where: jobId ? { OR: [{ jobId }, { entityType: "job", entityId: jobId }] } : undefined,
+      orderBy: { timestamp: "desc" },
+      take: limit,
+    });
     return ok(rows.map(serializeAuditLog));
   } catch (err) {
     return errorResponse(err, "audit.get.route_error");
@@ -26,41 +35,37 @@ export async function GET() {
 }
 
 /**
- * POST /api/audit — operational write-through actions that don't fit other
- * resources. Currently: settle-commission (called when a job COMPLETES with
- * referral attribution) and status-audit (records arbitrary state changes).
+ * POST /api/audit — client-originated audit events:
+ *   status-audit       any signed-in user records an event about their own action
+ *   settle-commission  commission.manage — settles a completed referred job (idempotent)
  */
 export async function POST(request: Request) {
   try {
     const body = await readJson(request);
     const action = typeof body?.action === "string" ? body.action : "";
 
-    // Staff may record operational audit entries for their own actions
-    // (status transitions, notification events) but never touch commission settlement.
     if (action === "status-audit") {
-      const { user } = await requireUser();
+      const { user } = await requirePermission("dashboard.view");
       const entityType = typeof body?.entityType === "string" ? body.entityType.slice(0, 40) : "job";
-      const entityId = typeof body?.entityId === "string" ? body.entityId.slice(0, 64) : "";
-      const detail = typeof body?.details === "string" ? body.details.slice(0, 500) : "";
-      const evt = await prisma.auditLog.create({
-        data: {
-          entityType,
-          entityId: entityId || "n/a",
-          action: typeof body?.auditAction === "string" ? body.auditAction.slice(0, 80) : "EVENT",
-          performedBy: `${user.id}:${user.name}`,
-          details: detail,
-        },
+      const entityId = typeof body?.entityId === "string" ? body.entityId.slice(0, 64) : "n/a";
+      await recordAudit({
+        actor: user,
+        action: typeof body?.auditAction === "string" ? body.auditAction.slice(0, 80) : "EVENT",
+        entityType,
+        entityId,
+        jobId: entityType === "job" ? entityId : undefined,
+        details: typeof body?.details === "string" ? body.details.slice(0, 500) : undefined,
+        request,
       });
-      return ok(serializeAuditLog(evt), 201);
+      return ok({ recorded: true }, 201);
     }
 
-    const { user } = await requireRole(["super_admin", "ops_manager"]);
-
     if (action === "settle-commission") {
+      const { user } = await requirePermission("commission.manage");
       const jobId = typeof body?.jobId === "string" ? body.jobId : "";
       if (!jobId) return fail("jobId is required.", 400);
-
       const entry = await settleCommissionForJob(jobId);
+      void recordAudit({ actor: user, action: "COMMISSION_SETTLED", entityType: "commission", entityId: entry.id, jobId, request });
       return ok(serializeCommissionEntry(entry), 201);
     }
 

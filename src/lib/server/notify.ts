@@ -1,14 +1,16 @@
 import { prisma } from "./prisma";
 import { logger, maskPhone } from "./logger";
+import { deepLinkFor, ROLES, scopeOf, type Permission } from "@/lib/rbac";
 
 /**
- * §26 — outbound customer/staff notifications with SECURE LINKS.
+ * §24/§26 — outbound notifications with ROLE-SPECIFIC DEEP LINKS.
  *
- * Delivery is env-gated like every external channel: the message body and its
- * deep link are always composed and audited (SmsLog), but the actual SMS/
- * WhatsApp dispatch only happens when a provider is configured. The link —
- * never phone numbers, amounts, or internal data — is the only sensitive-ish
- * payload, and it is a hashed, revocable, expiring token.
+ * Every message carries the one link that opens the right action page for
+ * the recipient's role (field app job, QC inspect screen, customer secure
+ * link, finance payment) — never a generic dashboard. Delivery is env-gated
+ * like every external channel: the body is always composed and audited
+ * (SmsLog); the actual SMS/WhatsApp dispatch happens only when a provider is
+ * configured.
  */
 
 export interface NotifyResult {
@@ -27,15 +29,20 @@ function appBaseUrl(): string {
   return "http://localhost:3000";
 }
 
-async function auditAndMaybeSend(params: {
-  jobId: string;
-  phone: string;
-  purpose: string;
-  body: string;
-}): Promise<NotifyResult> {
+function absolute(path: string): string {
+  return /^https?:\/\//.test(path) ? path : `${appBaseUrl()}${path}`;
+}
+
+function company(): string {
+  return process.env.APP_COMPANY_NAME || "Intense Care";
+}
+
+async function auditAndMaybeSend(params: { jobId: string; phone: string; purpose: string; body: string }): Promise<NotifyResult> {
   const providerConfigured = Boolean(process.env.TWOFACTOR_API_KEY);
   const waConfigured = Boolean(process.env.WHATSAPP_API_URL);
   const provider = waConfigured ? "whatsapp" : providerConfigured ? "2factor" : "none";
+
+  if (!params.phone) return { queued: false, provider: "none", reason: "no_phone" };
 
   const log = await prisma.smsLog.create({
     data: {
@@ -55,8 +62,6 @@ async function auditAndMaybeSend(params: {
   }
 
   try {
-    // Transactional dispatch is env-gated: WHATSAPP_API_URL (future WhatsApp
-    // BSP webhook) takes priority, else 2Factor DLT transactional route.
     if (waConfigured) {
       await fetch(process.env.WHATSAPP_API_URL as string, {
         method: "POST",
@@ -67,8 +72,6 @@ async function auditAndMaybeSend(params: {
         body: JSON.stringify({ to: params.phone, body: params.body, jobId: params.jobId, purpose: params.purpose }),
       });
     } else if (providerConfigured) {
-      // 2Factor transactional fallback: dedicated route replaced by their
-      // DLT SMS API. Errors are logged, never thrown into the job flow.
       const url = `https://2factor.in/API/V1/${process.env.TWOFACTOR_API_KEY}/ADDON_SERVICES/SEND/TSMS`;
       await fetch(url, {
         method: "POST",
@@ -99,47 +102,107 @@ async function recentlySent(jobId: string, purpose: string, withinMs = 5 * 60 * 
   return Boolean(row);
 }
 
+/** Active users whose role holds the permission (resolved from the matrix, not role names). */
+async function usersWith(permission: Permission): Promise<{ id: string; name: string; phone: string; role: string }[]> {
+  const roles = ROLES.filter((r) => scopeOf(r, permission) !== "NONE" && r !== "super_admin");
+  const rows = await prisma.user.findMany({
+    where: { role: { in: roles }, active: true },
+    select: { id: true, name: true, phone: true, role: true },
+    orderBy: { createdAt: "asc" },
+  });
+  if (rows.length > 0) return rows;
+  // Fall back to the first super admin so the message is never lost.
+  return prisma.user.findMany({ where: { role: "super_admin", active: true }, select: { id: true, name: true, phone: true, role: true }, take: 1 });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Customer                                                                   */
+/* -------------------------------------------------------------------------- */
+
 export async function notifyCustomerArrived(jobId: string, link: string): Promise<NotifyResult> {
   const job = await prisma.job.findUnique({ where: { id: jobId }, include: { customer: true } });
   if (!job?.customer) return { queued: false, provider: "none", reason: "no_customer" };
   if (await recentlySent(jobId, "CUSTOMER_ARRIVED")) return { queued: false, provider: "deduped" };
-  const company = process.env.APP_COMPANY_NAME || "Intense Care";
-  const body = `${company}: Your service team has arrived at ${job.propertyId ? "your property" : "the property"}. Review and confirm: ${link}`;
+  const dl = deepLinkFor("customer", "team_arrived", { jobId, customerLink: link });
+  const body = `${company()}: ${dl.message} ${dl.cta}: ${dl.path}`;
   return auditAndMaybeSend({ jobId, phone: job.customer.phone, purpose: "CUSTOMER_ARRIVED", body });
-}
-
-export async function notifyQcReady(jobId: string, link?: string): Promise<NotifyResult> {
-  // QC notification goes to ops managers (staff with QC role). We audit the
-  // dispatch; the QC desk also sees a live badge. The QC link is minted for
-  // the inspector by the admin panel when needed — the notification carries
-  // the job reference, not a blanket public link, unless a link was provided.
-  const ops = await prisma.user.findFirst({ where: { role: "ops_manager", active: true }, orderBy: { createdAt: "asc" } });
-  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
-  if (!ops || !job) return { queued: false, provider: "none", reason: "no_ops_manager" };
-  if (await recentlySent(jobId, "QC_READY")) return { queued: false, provider: "deduped" };
-  const company = process.env.APP_COMPANY_NAME || "Intense Care";
-  const body = `${company}: New quality check ready for job ${job.id}.${link ? ` Open QC: ${link}` : ""}`;
-  return auditAndMaybeSend({ jobId, phone: ops.phone, purpose: "QC_READY", body });
-}
-
-export async function notifyReworkAssigned(jobId: string, link?: string): Promise<NotifyResult> {
-  const job = await prisma.job.findUnique({ where: { id: jobId } });
-  if (!job) return { queued: false, provider: "none", reason: "no_job" };
-  const lead = job.assignedStaffIds[0];
-  if (!lead) return { queued: false, provider: "none", reason: "no_lead" };
-  const staff = await prisma.user.findUnique({ where: { id: lead } });
-  if (!staff) return { queued: false, provider: "none", reason: "no_staff" };
-  if (await recentlySent(jobId, "REWORK_ASSIGNED")) return { queued: false, provider: "deduped" };
-  const company = process.env.APP_COMPANY_NAME || "Intense Care";
-  const body = `${company}: Rework assigned on job ${job.id}.${link ? ` Open rework: ${link}` : " Check the field app."}`;
-  return auditAndMaybeSend({ jobId, phone: staff.phone, purpose: "REWORK_ASSIGNED", body });
 }
 
 export async function notifyCustomerCompleted(jobId: string, link: string): Promise<NotifyResult> {
   const job = await prisma.job.findUnique({ where: { id: jobId }, include: { customer: true } });
   if (!job?.customer) return { queued: false, provider: "none", reason: "no_customer" };
   if (await recentlySent(jobId, "CUSTOMER_COMPLETED")) return { queued: false, provider: "deduped" };
-  const company = process.env.APP_COMPANY_NAME || "Intense Care";
-  const body = `${company}: Your service has been completed and quality checked. Review & approve: ${link}`;
+  const dl = deepLinkFor("customer", "qc_passed", { jobId, customerLink: link });
+  const body = `${company()}: ${dl.message} ${dl.cta}: ${dl.path}`;
   return auditAndMaybeSend({ jobId, phone: job.customer.phone, purpose: "CUSTOMER_COMPLETED", body });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Field roles                                                                */
+/* -------------------------------------------------------------------------- */
+
+export async function notifyJobAssigned(jobId: string): Promise<NotifyResult> {
+  const job = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!job) return { queued: false, provider: "none", reason: "no_job" };
+  if (await recentlySent(jobId, "JOB_ASSIGNED")) return { queued: false, provider: "deduped" };
+  const crewIds = Array.from(new Set([...(job.assignedManagerId ? [job.assignedManagerId] : []), ...job.assignedStaffIds]));
+  if (crewIds.length === 0) return { queued: false, provider: "none", reason: "no_crew" };
+  const crew = await prisma.user.findMany({ where: { id: { in: crewIds }, active: true }, select: { id: true, phone: true, role: true } });
+  let last: NotifyResult = { queued: false, provider: "none", reason: "no_crew" };
+  for (const member of crew) {
+    const dl = deepLinkFor(member.role, "job_assigned", { jobId });
+    const body = `${company()}: ${dl.message} ${job.scheduledDate} ${job.scheduledTimeSlot}. ${dl.cta}: ${absolute(dl.path)}`;
+    last = await auditAndMaybeSend({ jobId, phone: member.phone, purpose: "JOB_ASSIGNED", body });
+  }
+  return last;
+}
+
+export async function notifyReworkAssigned(jobId: string, link?: string): Promise<NotifyResult> {
+  const job = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!job) return { queued: false, provider: "none", reason: "no_job" };
+  const lead = job.assignedManagerId ?? job.assignedStaffIds[0];
+  if (!lead) return { queued: false, provider: "none", reason: "no_lead" };
+  const staff = await prisma.user.findUnique({ where: { id: lead } });
+  if (!staff) return { queued: false, provider: "none", reason: "no_staff" };
+  if (await recentlySent(jobId, "REWORK_ASSIGNED")) return { queued: false, provider: "deduped" };
+  const dl = deepLinkFor(staff.role, "rework_assigned", { jobId });
+  const body = `${company()}: ${dl.message} ${dl.cta}: ${link ?? absolute(dl.path)}`;
+  return auditAndMaybeSend({ jobId, phone: staff.phone, purpose: "REWORK_ASSIGNED", body });
+}
+
+/* -------------------------------------------------------------------------- */
+/* QC                                                                         */
+/* -------------------------------------------------------------------------- */
+
+export async function notifyQcReady(jobId: string, link?: string, mode: "inspection" | "reinspection" = "inspection"): Promise<NotifyResult> {
+  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
+  if (!job) return { queued: false, provider: "none", reason: "no_job" };
+  const purpose = mode === "reinspection" ? "QC_REINSPECT" : "QC_READY";
+  if (await recentlySent(jobId, purpose)) return { queued: false, provider: "deduped" };
+  const inspectors = await usersWith("qc.inspect");
+  if (inspectors.length === 0) return { queued: false, provider: "none", reason: "no_inspector" };
+  let last: NotifyResult = { queued: false, provider: "none" };
+  for (const inspector of inspectors) {
+    const dl = deepLinkFor(inspector.role, "qc_ready", { jobId });
+    const body = `${company()}: ${mode === "reinspection" ? "Rework completed — ready for reinspection." : dl.message} ${dl.cta}: ${link ?? absolute(dl.path)}`;
+    last = await auditAndMaybeSend({ jobId, phone: inspector.phone, purpose, body });
+  }
+  return last;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Accounts                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export async function notifyAccountsBillable(jobId: string): Promise<NotifyResult> {
+  const invoice = await prisma.invoice.findFirst({ where: { jobId }, select: { id: true } });
+  if (await recentlySent(jobId, "BILLABLE")) return { queued: false, provider: "deduped" };
+  const accounts = await usersWith("invoice.finalize");
+  let last: NotifyResult = { queued: false, provider: "none", reason: "no_accounts" };
+  for (const a of accounts) {
+    const dl = deepLinkFor(a.role, "customer_approved", { jobId, invoiceId: invoice?.id });
+    const body = `${company()}: ${dl.message} ${dl.cta}: ${absolute(dl.path)}`;
+    last = await auditAndMaybeSend({ jobId, phone: a.phone, purpose: "BILLABLE", body });
+  }
+  return last;
 }

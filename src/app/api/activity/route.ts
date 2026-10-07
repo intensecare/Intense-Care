@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireUser } from "@/lib/server/authz";
+import { requirePermission, visibleJobIds } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { serializeActivityEvent } from "@/lib/server/activity";
 
@@ -17,7 +17,7 @@ import { serializeActivityEvent } from "@/lib/server/activity";
  */
 export async function GET(request: Request) {
   try {
-    const { user } = await requireUser();
+    const { user } = await requirePermission("jobs.view");
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get("jobId") || undefined;
     const limitParam = parseInt(searchParams.get("limit") || "60", 10);
@@ -25,20 +25,14 @@ export async function GET(request: Request) {
 
     const where: Record<string, unknown> = jobId ? { jobId } : {};
 
-    // Staff see only the activity of jobs they are assigned to (their own
-    // work log and the QC feedback on it) — never the whole company feed.
-    if (user.role === "staff") {
-      const assigned = await prisma.job.findMany({
-        where: {
-          OR: [{ assignedManagerId: user.id }, { assignedStaffIds: { has: user.id } }],
-        },
-        select: { id: true },
-      });
-      const allowedIds = assigned.map((j) => j.id);
-      if (jobId && !allowedIds.includes(jobId)) {
+    // The feed is scoped to the jobs the caller may see — a field worker gets
+    // their own work log and the QC feedback on it, never the company feed.
+    const ids = await visibleJobIds(user, "jobs.view");
+    if (ids !== "ALL") {
+      if (jobId && !ids.includes(jobId)) {
         return NextResponse.json({ success: true, data: [] });
       }
-      where.jobId = jobId ?? { in: allowedIds };
+      where.jobId = jobId ?? { in: ids };
     }
 
     const events = await prisma.jobActivityEvent.findMany({

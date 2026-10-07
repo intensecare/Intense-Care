@@ -1,81 +1,87 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { User, UserRole } from "./types";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
+import {
+  can as rbacCan,
+  scopeOf,
+  homePathFor,
+  workspaceFor,
+  navFor,
+  normalizeRole,
+  type Permission,
+  type Scope,
+  type NavItem,
+  type WorkspaceLayout,
+} from "./rbac";
+
+/**
+ * Auth context — the signed-in identity plus the permission helpers every
+ * page uses to decide what to SHOW. The server re-checks every action, so a
+ * decision here is a rendering hint, never the guard.
+ */
+
+export interface SessionWorkspace {
+  title: string;
+  home: string;
+  queue: string;
+  layout: WorkspaceLayout;
+  nav: NavItem[];
+}
 
 interface AuthContextType {
   currentUser: User | null;
   isAuthenticated: boolean;
-  /** True while the server session is being resolved (page load / refresh).
-   *  Guards must NOT redirect to /login until this settles. */
+  /** True while the server session is being resolved (page load / refresh). */
   isLoading: boolean;
-  /** Verifies credentials against the database via POST /api/auth/login. */
+  /** Human-readable role label from the central role table. */
+  roleLabel: string;
+  workspace: SessionWorkspace;
   login: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
+  /** Does the signed-in role hold the permission with any scope? */
+  can: (permission: Permission) => boolean;
+  /** Effective scope of the permission for the signed-in role. */
+  scope: (permission: Permission) => Scope;
+  /** @deprecated use `can` — kept for existing call sites. */
   hasPermission: (allowedRoles: UserRole[]) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Routes allowed for each role
-export const ROLE_ROUTE_PERMISSIONS: Record<UserRole, string[]> = {
-  super_admin: [
-    "/",
-    "/jobs",
-    "/quotations",
-    "/dispatcher",
-    "/calendar",
-    "/customers",
-    "/properties",
-    "/services",
-    "/quality",
-    "/finance",
-    "/referrals",
-    "/reports",
-    "/notifications",
-    "/users",
-    "/settings",
-    "/field",
-  ],
-  ops_manager: [
-    "/",
-    "/jobs",
-    "/dispatcher",
-    "/calendar",
-    "/customers",
-    "/properties",
-    "/services",
-    "/quality",
-    "/quotations", // dashboard pre-sale cards deep-link here
-    "/amc", // dashboard AMC cards deep-link here
-    "/reports",
-    "/notifications",
-    "/users", // Field Staff Directory (read-only for ops_manager)
-    "/field",
-  ],
-  staff: ["/field"],
-};
+/** Primary entry path for each role (ONE home per role). */
+export function getRoleDefaultPath(role: UserRole | string): string {
+  return homePathFor(role);
+}
 
-// Primary entry path for each role
-export function getRoleDefaultPath(role: UserRole): string {
-  switch (role) {
-    case "staff":
-      return "/field";
-    case "ops_manager":
-    case "super_admin":
-    default:
-      return "/";
-  }
+function toUser(u: Record<string, unknown>): User {
+  return {
+    id: String(u.id),
+    name: String(u.name ?? ""),
+    email: String(u.email ?? ""),
+    phone: "",
+    role: normalizeRole(typeof u.role === "string" ? u.role : undefined),
+    active: true,
+    teamId: (u.teamId as string | null) ?? null,
+    branchId: (u.branchId as string | null) ?? null,
+    customerId: (u.customerId as string | null) ?? null,
+    referralPartnerId: (u.referralPartnerId as string | null) ?? null,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function workspaceOf(role: UserRole | string): SessionWorkspace {
+  const ws = workspaceFor(role);
+  return { title: ws.title, home: ws.home, queue: ws.queue, layout: ws.layout, nav: navFor(role) };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [roleLabel, setRoleLabel] = useState("");
   const [isLoaded, setIsLoaded] = useState(false);
   const router = useRouter();
-  const pathname = usePathname();
 
-  // Resolve the signed-in user from the server session (httpOnly cookie).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -84,21 +90,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const json = await res.json().catch(() => null);
         if (!cancelled) {
           if (res.ok && json?.success && json.data) {
-            const u = json.data;
-            setCurrentUser({
-              id: u.id,
-              name: u.name,
-              email: u.email,
-              phone: "",
-              role: u.role as UserRole,
-              active: true,
-              createdAt: new Date().toISOString(),
-            });
+            setCurrentUser(toUser(json.data));
+            setRoleLabel(String(json.data.roleLabel ?? ""));
           } else {
             setCurrentUser(null);
           }
         }
-      } catch (e) {
+      } catch {
         if (!cancelled) setCurrentUser(null);
       } finally {
         if (!cancelled) setIsLoaded(true);
@@ -109,10 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const login = async (
-    email: string,
-    password: string
-  ): Promise<{ success: boolean; message?: string }> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; message?: string }> => {
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
@@ -120,42 +115,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ email, password }),
       });
       const json = await res.json().catch(() => null);
-
       if (!res.ok || !json?.success) {
         return { success: false, message: json?.error || "Sign-in failed. Please retry." };
       }
-
-      const u = json.data;
-      setCurrentUser({
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        phone: "",
-        role: u.role as UserRole,
-        active: true,
-        createdAt: new Date().toISOString(),
-      });
-
-      // Route user to their primary role page
-      router.push(getRoleDefaultPath(u.role as UserRole));
+      const u = toUser(json.data);
+      setCurrentUser(u);
+      setRoleLabel(String(json.data.roleLabel ?? ""));
+      // ONE home per role — never a generic dashboard.
+      router.push(homePathFor(u.role));
       return { success: true };
-    } catch (err) {
+    } catch {
       return { success: false, message: "Network error during sign-in. Please retry." };
     }
   };
 
   const logout = () => {
     setCurrentUser(null);
-    // Clear the server session cookie as well.
     fetch("/api/auth/session", { method: "DELETE" }).catch(() => {});
     router.push("/login");
   };
 
-  const hasPermission = (allowedRoles: UserRole[]): boolean => {
-    if (!currentUser) return false;
-    if (currentUser.role === "super_admin") return true;
-    return allowedRoles.includes(currentUser.role);
-  };
+  const role = currentUser?.role;
+  const can = useCallback((permission: Permission) => (role ? rbacCan({ role }, permission) : false), [role]);
+  const scope = useCallback((permission: Permission): Scope => (role ? scopeOf(role, permission) : "NONE"), [role]);
+  const hasPermission = useCallback(
+    (allowedRoles: UserRole[]) => (role ? role === "super_admin" || allowedRoles.includes(role) : false),
+    [role]
+  );
+  const workspace = useMemo(() => workspaceOf(role ?? "customer"), [role]);
 
   return (
     <AuthContext.Provider
@@ -163,8 +150,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         currentUser,
         isAuthenticated: !!currentUser,
         isLoading: !isLoaded,
+        roleLabel,
+        workspace,
         login,
         logout,
+        can,
+        scope,
         hasPermission,
       }}
     >
@@ -179,4 +170,9 @@ export function useAuth() {
     throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
+}
+
+/** Shorthand for pages: `const can = usePermission(); can("jobs.assign")`. */
+export function usePermission() {
+  return useAuth().can;
 }

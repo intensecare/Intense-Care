@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireUser, isManagerRole } from "@/lib/server/authz";
+import { requirePermission } from "@/lib/server/authz";
+import { recordAudit } from "@/lib/server/audit";
+import { authorize } from "@/lib/rbac";
 import { deleteJobPhoto } from "@/lib/server/cloudinary";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
@@ -16,7 +18,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { user } = await requireUser();
+    const { user } = await requirePermission("photos.delete");
     const { id } = params;
 
     const photo = await prisma.jobPhoto.findUnique({ where: { id } });
@@ -27,19 +29,10 @@ export async function DELETE(
       );
     }
 
-    const isUploader = photo.uploadedByUserId === user.id;
-    const manager = isManagerRole(user.role);
-    let assignedToJob = false;
-    if (!isUploader && !manager) {
-      const job = await prisma.job.findUnique({ where: { id: photo.jobId } });
-      assignedToJob = Boolean(
-        job &&
-          (job.assignedManagerId === user.id ||
-            (Array.isArray(job.assignedStaffIds) && job.assignedStaffIds.includes(user.id)))
-      );
-    }
-
-    if (!isUploader && !manager && !assignedToJob) {
+    // Scope: ALL deletes anything, ASSIGNED deletes on assigned jobs, OWN only own uploads.
+    const job = await prisma.job.findUnique({ where: { id: photo.jobId }, select: { assignedManagerId: true, assignedStaffIds: true, customerId: true } });
+    const decision = authorize(user, "photos.delete", { ...job, createdByUserId: photo.uploadedByUserId });
+    if (!decision.allowed) {
       logger.warn("photo.delete_denied", { photoId: id, by: user.id });
       return NextResponse.json(
         { success: false, error: "You are not authorized to delete this photo." },
@@ -52,6 +45,7 @@ export async function DELETE(
     const assetDeleted = await deleteJobPhoto(photo.cloudinaryPublicId);
 
     await prisma.jobPhoto.delete({ where: { id } });
+    void recordAudit({ actor: user, action: "PHOTO_DELETED", entityType: "photo", entityId: id, jobId: photo.jobId, details: `${photo.photoType} ${photo.area}`, request: _request });
 
     logger.info("photo.deleted", {
       photoId: id,

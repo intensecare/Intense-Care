@@ -15,6 +15,7 @@ import { QuoteFormDialog } from "@/components/common/QuoteFormDialog";
 import { QuotePreviewModal } from "@/components/common/QuotePreviewModal";
 import { ConvertQuoteDialog } from "@/components/common/ConvertQuoteDialog";
 import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
 import { formatCurrency, formatDate, formatDateTime, cn } from "@/lib/utils";
 import type { CustomerDetailSnapshot, Invoice, Property, Quote } from "@/lib/types";
 import {
@@ -74,10 +75,11 @@ export default function CustomerDetailPage() {
     systemSettings,
     services,
   } = useApp();
+  const { can } = useAuth();
 
-  const canEdit = currentRole === "super_admin" || currentRole === "ops_manager";
-  const canDelete = currentRole === "super_admin";
-  const isSuper = currentRole === "super_admin";
+  const canEdit = can("customers.update");
+  const canDelete = can("customers.delete");
+  const isSuper = can("finance.view");
 
   const [snapshot, setSnapshot] = useState<CustomerDetailSnapshot | null>(null);
   const [loading, setLoading] = useState(true);

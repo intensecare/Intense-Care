@@ -17,12 +17,15 @@ Every entity lives in PostgreSQL — there are **no hardcoded catalogs, demo dat
 
 - **Server-authoritative APIs** under `src/app/api/*` with role-based authorization (`src/lib/server/authz.ts`). All lifecycle gates (state machine, OTP verification, assignment scope, dispatch window) are enforced on the server, not just in the UI.
 - **Database is the single source of truth.** The client store (`src/lib/app-context.tsx`) hydrates every collection from the APIs on sign-in and writes through on every action; optimistic updates roll back on server rejection.
-- **Three internal roles:**
-  - `super_admin` — full control including finance (invoices, payments, expenses, commissions, referral ledger, audit log, user management).
-  - `ops_manager` — dispatch and quality: job register within the dispatch window, staff assignment, QC audits, rework. **All financial payloads are redacted or 403'd server-side.**
-  - `staff` (field worker) — only jobs directly assigned to them; mobile-first flow: Arrive → customer OTP (lead worker only) → Start → checklist → photos → Complete.
-- **Customer** — no login; tokenized handover links (`/portal/[token]`) for sign-off, feedback, and Google review.
-- **Referral partner** — public code-scoped dashboard (`/partner-portal/[code]`), no login.
+- **Nine RBAC roles, one permission matrix.** Authorization is `permission + scope + resource + action + approval authority` (`src/lib/rbac/`, documented in [docs/RBAC.md](docs/RBAC.md)). No route or page branches on a role name: the server resolves `requirePermission("jobs.assign")` / `authorizeJob(id, "jobs.start")` through the central matrix, and the UI asks the same engine (`can("…")`) to decide what to show.
+  - `super_admin` → **Business Overview** · `ops_manager` → **Operations** · `scheduler` → **Schedule** · `field_manager` → **My Jobs** (mobile) · `field_staff` → **My Tasks** (mobile) · `qc_inspector` → **Quality Queue** · `accounts` → **Finance** · `referral_partner` → **My Referrals** (portal) · `customer` → **My Services** (portal).
+  - Scopes `ALL | BRANCH | TEAM | ASSIGNED | OWN | NONE` decide which records a permission reaches; the server turns them into database filters.
+  - Approval authority: refunds above the configured limit and high-value discounts need an Operations Manager or Super Admin; user deletion and critical configuration are Super Admin only; audit history can never be deleted.
+  - AMC / NRI is a **customer-profile capability**, not a role.
+- **Contextual next action.** `getNextAction(role, jobState)` yields ONE primary action per role per state and the same table (`TRANSITION_PERMISSION`) gates status changes on the server.
+- **Customer** — the customer portal (`/my-services`, customer login) and the ONE tokenized secure link per job (`/customer/job/[token]`) for confirm → progress → approve → feedback. No other QR codes exist.
+- **Referral partner** — `/my-referrals` (partner login) plus the public lead link `/refer/[code]` and the code-scoped `/partner-portal/[code]`.
+- **Audit log** records user, role, action, resource, job, previous/new state, reason and device metadata for every important action.
 
 ## Job Lifecycle (strict state machine)
 
@@ -93,7 +96,7 @@ npm run start        # serve the production build
 
 1. Sign in as the seeded super admin.
 2. **Services & Rubrics** — create your service packages; add checklist rubric items (they instantiate onto every booking).
-3. **Users & Roles** — create `ops_manager` and `staff` accounts.
+3. **Users & Roles** — create accounts for the other roles (operations manager, scheduler, field managers, field staff, QC inspector, accounts). Customer and referral-partner logins are linked to their customer / partner record.
 4. **Settings** — configure GST rate/label, GSTIN, SAC code, dispatch cutoff, and Google review URL.
 5. Optionally **Referrals & Partners** — create commission rules and partners before book referral-attributed jobs.
 
@@ -105,16 +108,23 @@ Prisma 7 runs non-interactively here (config: `prisma7.config.ts`). Migration hi
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST /api/auth/login`, `GET /api/auth/session` (httpOnly signed cookie) |
+| Auth | `POST /api/auth/login`, `GET /api/auth/session` (httpOnly signed cookie; returns grants + workspace) |
+| Role home | `GET /api/me/workspace` (counts, attention list, queue with next actions), `GET /api/me/customer`, `GET /api/me/partner` |
 | Jobs | `GET/POST /api/jobs`, `GET/PATCH /api/jobs/[id]`, `POST /api/jobs/[id]/completion-link` |
 | OTP | `POST /api/otp/send` / `verify` / `resend` (lead-worker gated, rate-limited) |
-| Directory | `GET/POST/PATCH/DELETE /api/users` (super_admin), `PUT /api/users` staff directory (ops) |
+| Directory | `GET/POST/PATCH/DELETE /api/users` (`users.manage`), `PUT /api/users` assignable roster (`users.view`) |
 | Catalog | `GET/POST/PATCH/PUT/DELETE /api/services` (rubric builder), `GET/POST /api/customers`, `/api/properties` |
 | Quality | `GET/POST/PATCH /api/quality`, `GET /api/checklist` |
-| Finance (super_admin) | `GET/POST /api/finance`, `GET/POST /api/referrals`, `GET /api/audit` |
+| Finance (`finance.view` / `invoice.view` OWN) | `GET/POST /api/finance` (payments, finalize/update invoice, refunds with approval), `GET/POST /api/referrals`, `GET /api/audit` (`audit.view`) |
 | Photos | `GET/POST /api/photos`, `DELETE /api/photos/[id]` (Cloudinary) |
-| Public tokenized | `GET /api/portal/[token]`, `POST /api/portal/[token]/sign`, `POST /api/feedback`, `GET /api/partner-portal/[code]` |
-| Settings | `GET /api/settings` (all roles), `PATCH /api/settings` (super_admin) |
+| Public tokenized | `GET/POST /api/customer/job/[token]` (the ONE customer link), `GET /api/partner-portal/[code]`, `GET/POST /api/refer/[code]` (referral leads) |
+| Settings | `GET /api/settings` (all roles), `PATCH /api/settings` (`settings.manage`) |
+
+## Tests
+
+```bash
+npm test          # RBAC matrix / scope / next-action / workspace tests + dispatch-window tests
+```
 
 ## Security notes
 
@@ -122,5 +132,3 @@ Prisma 7 runs non-interactively here (config: `prisma7.config.ts`). Migration hi
 - OTP policy (expiry, max attempts, resend cooldown, per-job/per-phone hourly caps) is enforced server-side from environment variables; challenge state is database-tracked and single-use.
 - Customer phone numbers are normalized to the 10-digit subscriber form for 2Factor; only masked numbers are ever returned to clients.
 - The 2Factor API key, session secret, and all credentials are read exclusively from environment variables and never logged.
-# Intense-Care
-# Intense-Care

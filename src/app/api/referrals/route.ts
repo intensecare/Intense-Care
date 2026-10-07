@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission, requireAnyPermission } from "@/lib/server/authz";
+import { recordAudit } from "@/lib/server/audit";
+import { can } from "@/lib/rbac";
 import { errorResponse } from "@/lib/server/http";
 import {
   serializePartner,
@@ -21,12 +23,17 @@ import { logger } from "@/lib/server/logger";
  */
 export async function GET() {
   try {
-    await requireRole(["super_admin"]);
+    const { user, scope } = await requirePermission("referrals.view");
+    // OWN scope = a partner login: only their own partner row, ledger and payouts.
+    const partnerFilter = scope === "OWN" ? { partnerId: user.referralPartnerId ?? "__none__" } : {};
     const [partners, rules, entries, payouts] = await Promise.all([
-      prisma.referralPartner.findMany({ orderBy: { createdAt: "desc" } }),
-      prisma.commissionRule.findMany({ orderBy: { createdAt: "asc" } }),
-      prisma.commissionEntry.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
-      prisma.payout.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
+      prisma.referralPartner.findMany({
+        where: scope === "OWN" ? { id: user.referralPartnerId ?? "__none__" } : undefined,
+        orderBy: { createdAt: "desc" },
+      }),
+      scope === "OWN" ? Promise.resolve([]) : prisma.commissionRule.findMany({ orderBy: { createdAt: "asc" } }),
+      prisma.commissionEntry.findMany({ where: partnerFilter, orderBy: { createdAt: "desc" }, take: 500 }),
+      prisma.payout.findMany({ where: partnerFilter, orderBy: { createdAt: "desc" }, take: 500 }),
     ]);
     return ok({
       partners: partners.map(serializePartner),
@@ -114,9 +121,16 @@ const PayoutSchema = z.object({
  */
 export async function POST(request: Request) {
   try {
-    await requireRole(["super_admin"]);
+    const { user } = await requireAnyPermission(["referrals.manage", "commission.manage", "payouts.manage"]);
     const body = await readJson(request);
     const action = typeof body?.action === "string" ? body.action : "";
+
+    // Partner/rule administration needs referrals.manage; approving entries
+    // and paying out are finance actions (commission.manage / payouts.manage).
+    const PARTNER_ADMIN = ["create-partner", "create-rule", "update-rule", "update-partner", "delete-partner", "delete-rule"];
+    if (PARTNER_ADMIN.includes(action) && !can(user, "referrals.manage")) return fail("Not authorized to manage partners.", 403);
+    if (action === "approve-entry" && !can(user, "commission.manage")) return fail("Not authorized to approve commissions.", 403);
+    if (action === "create-payout" && !can(user, "payouts.manage")) return fail("Not authorized to pay out commissions.", 403);
 
     if (action === "create-partner") {
       const parsed = PartnerSchema.safeParse(body);
@@ -140,7 +154,8 @@ export async function POST(request: Request) {
           commissionRuleId: d.commissionRuleId || null,
         },
       });
-      logger.info("referrals.partner_created", { partnerId: created.id });
+      logger.info("referrals.partner_created", { partnerId: created.id, by: user.id });
+      void recordAudit({ actor: user, action: "PARTNER_CREATED", entityType: "referral_partner", entityId: created.id, request });
       return ok(serializePartner(created), 201);
     }
 
@@ -231,6 +246,7 @@ export async function POST(request: Request) {
         where: { id: parsed.data.id },
         data: { status: "APPROVED", approvedAt: new Date() },
       });
+      void recordAudit({ actor: user, action: "COMMISSION_APPROVED", entityType: "commission", entityId: updated.id, jobId: updated.jobId, newState: "APPROVED", request });
       return ok(serializeCommissionEntry(updated));
     }
 
@@ -271,6 +287,7 @@ export async function POST(request: Request) {
         }),
       ]);
 
+      void recordAudit({ actor: user, action: "PAYOUT_CREATED", entityType: "payout", entityId: payout.id, details: `₹${d.amount} to ${partner.name} via ${d.payoutMethod}`, request });
       return ok(serializePayout(payout), 201);
     }
 

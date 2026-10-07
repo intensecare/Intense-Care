@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission } from "@/lib/server/authz";
+import { can } from "@/lib/rbac";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { nextDocNumber } from "@/lib/server/serialize";
@@ -35,9 +36,11 @@ async function auditAmc(
  */
 export async function GET() {
   try {
-    await requireRole(["super_admin", "ops_manager"]);
+    const { user, scope } = await requirePermission("amc.view");
+    const showMoney = can(user, "finance.view");
 
     const contracts = await prisma.amcContract.findMany({
+      where: scope === "OWN" ? { customerId: user.customerId ?? "__none__" } : undefined,
       orderBy: { createdAt: "desc" },
       include: {
         customer: { select: { name: true } },
@@ -69,7 +72,7 @@ export async function GET() {
         localContactPhone: c.localContactPhone,
         startDate: c.startDate,
         endDate: c.endDate,
-        contractValue: c.contractValue,
+        contractValue: showMoney ? c.contractValue : 0,
         includedServices: c.includedServices,
         visitCount: c.visitCount,
         frequency: c.frequency,
@@ -130,7 +133,7 @@ const CreateSchema = z.object({
 /** POST /api/amc — create a contract and auto-generate its visit schedule. */
 export async function POST(request: Request) {
   try {
-    const { user } = await requireRole(["super_admin", "ops_manager"]);
+    const { user } = await requirePermission("amc.manage");
     const parsed = CreateSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json(

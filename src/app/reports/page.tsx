@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useApp } from "@/lib/app-context";
+import { ASSIGNABLE_ROLES } from "@/lib/rbac";
 import { formatCurrency } from "@/lib/utils";
 import {
   BarChart3,
@@ -108,7 +109,7 @@ export default function ReportsPage() {
 
   // Per-Worker Performance (direct assignment model — no squads)
   const workerPerformance = users
-    .filter((u) => u.role === "staff")
+    .filter((u) => ASSIGNABLE_ROLES.includes(u.role))
     .map((w) => {
       const workerJobs = jobs.filter((j) => (j.assignedStaffIds || []).includes(w.id));
       const done = workerJobs.filter((j) => j.status === "COMPLETED" || j.status === "FEEDBACK_REQUESTED").length;

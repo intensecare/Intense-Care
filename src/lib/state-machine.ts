@@ -1,4 +1,7 @@
 import { Job, JobStatus, UserRole } from "./types";
+import { TRANSITION_PERMISSION } from "./rbac/next-action";
+import type { Permission } from "./rbac/permissions";
+import { scopeOf } from "./rbac/engine";
 
 export interface StatusConfig {
   label: string;
@@ -229,7 +232,8 @@ export interface TransitionAction {
   label: string;
   description: string;
   buttonVariant?: "default" | "outline" | "destructive" | "secondary";
-  allowedRoles: UserRole[];
+  /** Permission required to request this transition (MODULE.ACTION). */
+  permission: Permission;
   requirementNotes?: string;
 }
 
@@ -241,14 +245,14 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "SCHEDULED",
           label: "Schedule Job",
           description: "Confirm job date and initial time slot",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.SCHEDULED,
         },
         {
           status: "CANCELLED",
           label: "Cancel Job",
           description: "Void draft booking",
           buttonVariant: "destructive",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.CANCELLED,
         },
       ];
 
@@ -258,14 +262,14 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "ASSIGNED",
           label: "Assign Field Staff",
           description: "Assign field workers to job",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.ASSIGNED,
         },
         {
           status: "CANCELLED",
           label: "Cancel Job",
           description: "Cancel scheduled appointment",
           buttonVariant: "destructive",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.CANCELLED,
         },
       ];
 
@@ -275,14 +279,14 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "ARRIVED",
           label: "Mark Arrived",
           description: "Field worker arrived at property (performed in the Field App)",
-          allowedRoles: ["super_admin", "staff"],
+          permission: TRANSITION_PERMISSION.ARRIVED,
         },
         {
           status: "CANCELLED",
           label: "Cancel Job",
           description: "Cancel assignment before arrival",
           buttonVariant: "destructive",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.CANCELLED,
         },
       ];
 
@@ -292,7 +296,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "CUSTOMER_VERIFIED",
           label: "Confirm via Customer Link",
           description: "Customer confirms arrival through the secure verification link",
-          allowedRoles: ["super_admin", "staff"],
+          permission: TRANSITION_PERMISSION.CUSTOMER_VERIFIED,
           requirementNotes: "Customer confirmation via the secure link required",
         },
         {
@@ -300,7 +304,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           label: "Customer No-Show / Cancel",
           description: "Customer unavailable or entry denied",
           buttonVariant: "destructive",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.CANCELLED,
         },
       ];
 
@@ -310,7 +314,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "IN_PROGRESS",
           label: "Start Job",
           description: "Commence deep cleaning procedures and begin checklist (Field App)",
-          allowedRoles: ["super_admin", "staff"],
+          permission: TRANSITION_PERMISSION.IN_PROGRESS,
         },
       ];
 
@@ -320,7 +324,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "WORK_COMPLETED",
           label: "Mark Work Completed",
           description: "Checklist done, after photos captured, submit for QC (Field App)",
-          allowedRoles: ["super_admin", "staff"],
+          permission: TRANSITION_PERMISSION.WORK_COMPLETED,
         },
       ];
 
@@ -330,7 +334,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "QUALITY_CHECK",
           label: "Start QC Inspection",
           description: "Operations Manager conducts room-by-room quality inspection",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.QUALITY_CHECK,
         },
       ];
 
@@ -341,21 +345,21 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           label: "Pass Quality Check",
           description: "Work meets quality standard",
           buttonVariant: "default",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.PASS,
         },
         {
           status: "REWORK_REQUIRED",
           label: "Mark Rework Required",
           description: "Flag defects and assign rework tasks to field staff",
           buttonVariant: "destructive",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.REWORK_REQUIRED,
         },
         {
           status: "REWORK_ASSIGNED",
           label: "Mark Rework Required & Dispatch",
           description: "Flag defects, notify staff and mint the rework secure link",
           buttonVariant: "destructive",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.REWORK_ASSIGNED,
         },
       ];
 
@@ -365,7 +369,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "CUSTOMER_APPROVAL",
           label: "Send Customer Approval Link",
           description: "Send secure approval link to customer",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.CUSTOMER_APPROVAL,
         },
       ];
 
@@ -378,13 +382,13 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "REWORK_ASSIGNED",
           label: "Dispatch Rework",
           description: "Send rework task + secure link to the assigned staff",
-          allowedRoles: ["super_admin", "ops_manager", "staff"],
+          permission: TRANSITION_PERMISSION.REWORK_ASSIGNED,
         },
         {
           status: "REWORK_COMPLETED",
           label: "Mark Rework Completed",
           description: "Field worker completed corrective rework tasks (Field App)",
-          allowedRoles: ["super_admin", "staff"],
+          permission: TRANSITION_PERMISSION.REWORK_COMPLETED,
         },
       ];
 
@@ -394,13 +398,13 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "REWORK_IN_PROGRESS",
           label: "Start Rework",
           description: "Staff opened the rework link and began corrective work",
-          allowedRoles: ["super_admin", "staff"],
+          permission: TRANSITION_PERMISSION.REWORK_IN_PROGRESS,
         },
         {
           status: "REWORK_COMPLETED",
           label: "Mark Rework Completed",
           description: "Field worker completed corrective rework tasks (Field App)",
-          allowedRoles: ["super_admin", "staff"],
+          permission: TRANSITION_PERMISSION.REWORK_COMPLETED,
         },
       ];
 
@@ -410,7 +414,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "REWORK_COMPLETED",
           label: "Mark Rework Completed",
           description: "Field worker completed corrective rework tasks (Field App)",
-          allowedRoles: ["super_admin", "staff"],
+          permission: TRANSITION_PERMISSION.REWORK_COMPLETED,
         },
       ];
 
@@ -420,7 +424,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "REINSPECTION",
           label: "Start Reinspection",
           description: "Operations Manager reinspects corrected areas",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.REINSPECTION,
         },
       ];
 
@@ -431,14 +435,14 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           label: "Pass Reinspection",
           description: "Corrective work verified and passed",
           buttonVariant: "default",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.PASS,
         },
         {
           status: "REWORK_REQUIRED",
           label: "Require Additional Rework",
           description: "Defects remain uncorrected",
           buttonVariant: "destructive",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.REWORK_REQUIRED,
         },
       ];
 
@@ -449,14 +453,14 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           label: "Approve Service",
           description: "Customer digitally approves completion",
           buttonVariant: "default",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.COMPLETED,
         },
         {
           status: "REWORK_REQUIRED",
           label: "Customer Raised Issue",
           description: "Customer requested rectification of missed areas",
           buttonVariant: "destructive",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.REWORK_REQUIRED,
         },
       ];
 
@@ -466,7 +470,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "FEEDBACK_REQUESTED",
           label: "Send Feedback & Google Review Link",
           description: "Trigger customer review link & Google Business Review notification",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.FEEDBACK_REQUESTED,
         },
       ];
 
@@ -476,7 +480,7 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
           status: "CLOSED",
           label: "Close & Archive Job",
           description: "Job fully closed",
-          allowedRoles: ["super_admin", "ops_manager"],
+          permission: TRANSITION_PERMISSION.CLOSED,
         },
       ];
 
@@ -492,8 +496,8 @@ export function getAllowedTransitions(job: Job): TransitionAction[] {
 export function validateTransition(
   job: Job,
   nextStatus: JobStatus,
-  role: UserRole
-): { allowed: boolean; reason?: string } {
+  role: UserRole | string
+): { allowed: boolean; reason?: string; permission?: Permission } {
   const allowed = getAllowedTransitions(job);
   const match = allowed.find((t) => t.status === nextStatus);
 
@@ -504,21 +508,26 @@ export function validateTransition(
     };
   }
 
-  if (role !== "super_admin" && !match.allowedRoles.includes(role)) {
+  if (scopeOf(role, match.permission) === "NONE") {
     return {
       allowed: false,
-      reason: `Role '${role}' is not authorized to transition job to ${nextStatus}. Authorized: ${match.allowedRoles.join(
-        ", "
-      )}`,
+      permission: match.permission,
+      reason: `Your role cannot perform this step (requires ${match.permission}).`,
     };
   }
 
   if (nextStatus === "IN_PROGRESS" && !job.customerConfirmedAt) {
     return {
       allowed: false,
+      permission: match.permission,
       reason: "Customer confirmation via the secure link is required before starting the job.",
     };
   }
 
-  return { allowed: true };
+  return { allowed: true, permission: match.permission };
+}
+
+/** Transitions the role may request from the job's current state (UI + server share this). */
+export function allowedTransitionsFor(job: Job, role: UserRole | string): TransitionAction[] {
+  return getAllowedTransitions(job).filter((t) => scopeOf(role, t.permission) !== "NONE");
 }

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requireUser, authorizeJobAccess, isManagerRole } from "@/lib/server/authz";
+import { requirePermission, authorizeJob, visibleJobIds } from "@/lib/server/authz";
+import { recordAudit } from "@/lib/server/audit";
 import { uploadJobPhoto, validateImagePayload } from "@/lib/server/cloudinary";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
@@ -24,35 +25,19 @@ const BodySchema = z.object({
  */
 export async function GET(request: Request) {
   try {
-    const { user } = await requireUser();
+    const { user } = await requirePermission("photos.view");
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get("jobId");
 
     if (jobId) {
-      await authorizeJobAccess(jobId);
-      const photos = await prisma.jobPhoto.findMany({
-        where: { jobId },
-        orderBy: { uploadedAt: "desc" },
-      });
+      await authorizeJob(jobId, "photos.view");
+      const photos = await prisma.jobPhoto.findMany({ where: { jobId }, orderBy: { uploadedAt: "desc" } });
       return NextResponse.json({ success: true, data: photos });
     }
 
-    if (isManagerRole(user.role)) {
-      const photos = await prisma.jobPhoto.findMany({
-        orderBy: { uploadedAt: "desc" },
-        take: 500,
-      });
-      return NextResponse.json({ success: true, data: photos });
-    }
-
-    const assignedJobs = await prisma.job.findMany({
-      where: {
-        OR: [{ assignedManagerId: user.id }, { assignedStaffIds: { has: user.id } }],
-      },
-      select: { id: true },
-    });
+    const ids = await visibleJobIds(user, "photos.view");
     const photos = await prisma.jobPhoto.findMany({
-      where: { jobId: { in: assignedJobs.map((j) => j.id) } },
+      where: ids === "ALL" ? undefined : { jobId: { in: ids } },
       orderBy: { uploadedAt: "desc" },
       take: 500,
     });
@@ -89,7 +74,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { user } = await authorizeJobAccess(jobId);
+    const { user } = await authorizeJob(jobId, "photos.upload");
 
     const job = await prisma.job.findUnique({ where: { id: jobId } });
     if (!job) {
@@ -134,6 +119,7 @@ export async function POST(request: Request) {
       by: user.id,
     });
 
+    void recordAudit({ actor: user, action: "PHOTO_UPLOADED", entityType: "photo", entityId: photo.id, jobId, details: `${photoType} ${area.trim()}`, request });
     // Supervisor-visible live feed event (QC sees evidence land in real time).
     await recordActivity({
       jobId,

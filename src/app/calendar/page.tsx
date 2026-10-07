@@ -5,6 +5,7 @@ import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
 import { formatCurrency, formatDate, toLocalDateString, toLocalDateOffset, format24hTo12h, formatTimeSlot } from "@/lib/utils";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import {
@@ -22,6 +23,7 @@ import { Button } from "@/components/ui/button";
 
 export default function CalendarPage() {
   const { jobs, customers, properties, services, users, currentRole, systemSettings } = useApp();
+  const { can } = useAuth();
 
   const isOps = currentRole === "ops_manager";
   const visibility = getOpsDateVisibility(new Date(), {
@@ -161,7 +163,7 @@ export default function CalendarPage() {
                     <span className="font-semibold text-slate-800">
                       Workers: {assignedWorkers.length > 0 ? assignedWorkers.join(", ") : "Unassigned"}
                     </span>
-                    {currentRole === "super_admin" && (
+                    {can("finance.view") && (
                       <span>• Value: <strong>{formatCurrency(job.amount ?? 0)}</strong></span>
                     )}
                   </div>

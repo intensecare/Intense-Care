@@ -1,4 +1,7 @@
-export type UserRole = "super_admin" | "ops_manager" | "staff";
+import type { Role } from "./rbac/roles";
+
+/** The nine RBAC roles (see src/lib/rbac/roles.ts). */
+export type UserRole = Role;
 
 export interface User {
   id: string;
@@ -8,6 +11,11 @@ export interface User {
   role: UserRole;
   avatar?: string;
   active: boolean;
+  /** Scope attributes (TEAM / BRANCH) and external-role links (OWN). */
+  teamId?: string | null;
+  branchId?: string | null;
+  customerId?: string | null;
+  referralPartnerId?: string | null;
   createdAt: string;
 }
 
@@ -64,6 +72,26 @@ export interface SystemSettings {
   sacCode: string;
   /** Seconds a customer must wait between secure-link resend notifications. */
   resendCooldownSeconds: number;
+  /** §17 approval authority: refunds above this amount need Ops Manager / Super Admin approval. */
+  refundApprovalLimit: number;
+  /** §17 approval authority: discounts above this percentage need elevated approval. */
+  discountApprovalLimitPercent: number;
+}
+
+export interface Refund {
+  id: string;
+  invoiceId: string;
+  jobId: string;
+  customerId: string;
+  amount: number;
+  reason: string;
+  method: "original" | "bank_transfer" | "upi" | "cash";
+  status: "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "PROCESSED";
+  requestedBy: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  processedAt?: string;
+  createdAt: string;
 }
 
 export interface Expense {
@@ -603,6 +631,8 @@ export interface Invoice {
   dueDate: string;
   status: PaymentStatus;
   issuedAt: string;
+  finalizedAt?: string;
+  refundedAmount?: number;
 }
 
 export interface Payment {
@@ -653,7 +683,7 @@ export interface SmsGatewayLog {
 
 export interface AuditLog {
   id: string;
-  entityType: "job" | "otp" | "qc" | "commission" | "payment" | "rework" | "customer";
+  entityType: string;
   entityId: string;
   action: string;
   performedBy: {
@@ -661,9 +691,13 @@ export interface AuditLog {
     name: string;
     role: string;
   };
+  jobId?: string;
   oldState?: string;
   newState?: string;
+  reason?: string;
   details?: string;
+  ipAddress?: string;
+  userAgent?: string;
   timestamp: string;
 }
 

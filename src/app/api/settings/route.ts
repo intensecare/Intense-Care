@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole, requireUser } from "@/lib/server/authz";
+import { requirePermission, requireUser } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { ok, readJson } from "@/lib/server/serialize";
 import {
@@ -29,7 +29,8 @@ export async function GET() {
  */
 export async function PATCH(request: Request) {
   try {
-    await requireRole(["super_admin"]);
+    // Critical configuration is Super Admin only (approval authority §17).
+    await requirePermission("settings.manage");
     const body = await readJson(request);
     if (!body) {
       return NextResponse.json({ success: false, error: "Invalid settings payload." }, { status: 400 });
@@ -53,6 +54,8 @@ export async function PATCH(request: Request) {
     const numberFields: (keyof SystemSettings)[] = [
       "taxRatePercent",
       "resendCooldownSeconds",
+      "refundApprovalLimit",
+      "discountApprovalLimitPercent",
     ];
 
     for (const f of stringFields) {

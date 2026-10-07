@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { useApp } from "@/lib/app-context";
 import { formatDate, formatTimeSlot } from "@/lib/utils";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
+import { ASSIGNABLE_ROLES } from "@/lib/rbac";
 import {
   MapPin,
   Clock,
@@ -83,7 +84,7 @@ export default function DispatcherPage() {
 
   // Roster: prefer the assignment-scoped endpoint (ops role), fall back to the
   // full directory for super_admins already hydrated by the store.
-  const staffDirectory = users.filter((u) => u.role === "staff" && u.active);
+  const staffDirectory = users.filter((u) => ASSIGNABLE_ROLES.includes(u.role) && u.active);
 
   // Ops managers cannot read the full /api/users directory; hydrate the
   // assignment-scoped roster (PUT /api/users) so worker names/phones resolve

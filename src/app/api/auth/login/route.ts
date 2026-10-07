@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/server/prisma";
-import { createSession } from "@/lib/server/session";
+import { createSession, toSessionUser } from "@/lib/server/session";
+import { recordAudit } from "@/lib/server/audit";
+import { grantsFor, workspaceFor, navFor, ROLE_LABELS } from "@/lib/rbac";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 
@@ -82,23 +84,27 @@ export async function POST(request: Request) {
       );
     }
 
-    await createSession({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
+    const session = toSessionUser(user);
+    await createSession(session);
+
+    logger.info("auth.login.success", { userId: user.id, role: session.role });
+    void recordAudit({
+      actor: session,
+      action: "LOGIN",
+      entityType: "user",
+      entityId: user.id,
+      request,
     });
 
-    logger.info("auth.login.success", { userId: user.id, role: user.role });
-
+    const ws = workspaceFor(session.role);
     return NextResponse.json({
       success: true,
       data: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
+        ...session,
         avatar: user.avatar,
+        roleLabel: ROLE_LABELS[session.role],
+        grants: grantsFor(session.role),
+        workspace: { title: ws.title, home: ws.home, queue: ws.queue, layout: ws.layout, nav: navFor(session.role) },
       },
     });
   } catch (err) {

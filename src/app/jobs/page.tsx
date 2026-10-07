@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { JobStatusBadge, PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
+import { ASSIGNABLE_ROLES } from "@/lib/rbac";
 import { formatCurrency, formatDate, toLocalDateOffset, formatTimeSlot } from "@/lib/utils";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import { JobStatus } from "@/lib/types";
@@ -56,8 +58,9 @@ function JobsPageInner() {
     currentRole,
     systemSettings,
   } = useApp();
+  const { can } = useAuth();
 
-  const fieldWorkers = users.filter((u) => u.role === "staff" && u.active);
+  const fieldWorkers = users.filter((u) => ASSIGNABLE_ROLES.includes(u.role) && u.active);
 
   const searchParams = useSearchParams();
 
@@ -193,7 +196,7 @@ function JobsPageInner() {
         statusFilter === "ALL" || job.status === statusFilter;
       const matchesPayment =
         paymentFilter === "ALL" ||
-        (currentRole === "super_admin" && job.paymentStatus === paymentFilter);
+        (can("finance.view") && job.paymentStatus === paymentFilter);
       const matchesWorker =
         workerFilter === "ALL" ||
         (workerFilter === "UNASSIGNED"
@@ -202,7 +205,7 @@ function JobsPageInner() {
 
       return matchesSearch && matchesStatus && matchesPayment && matchesWorker;
     });
-  }, [allJobs, currentRole, customers, properties, services, searchQuery, statusFilter, paymentFilter, workerFilter]);
+  }, [allJobs, can, customers, properties, services, searchQuery, statusFilter, paymentFilter, workerFilter]);
 
   const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -315,7 +318,7 @@ function JobsPageInner() {
           { label: "Jobs Register" },
         ]}
         actions={
-          currentRole === "super_admin" ? (
+          can("jobs.create") ? (
             <Button
               onClick={() => {
                 setFormError(null);
@@ -365,7 +368,7 @@ function JobsPageInner() {
           />
 
           {/* Payment Filter (super_admin only — money data is redacted for other roles) */}
-          {currentRole === "super_admin" && (
+          {can("finance.view") && (
             <select
               value={paymentFilter}
               onChange={(e) => setPaymentFilter(e.target.value)}
@@ -524,7 +527,7 @@ function JobsPageInner() {
 
                       {/* Payment (super_admin only — the API redacts money for other roles) */}
                       <td className="py-3 px-4">
-                        {currentRole === "super_admin" ? (
+                        {can("finance.view") ? (
                           <>
                             <div className="font-semibold text-slate-900">
                               {formatCurrency(job.amount ?? 0)}

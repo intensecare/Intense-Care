@@ -2,25 +2,26 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission, jobWhereFor, dispatchWindowApplies } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { syncJobEvent } from "@/lib/server/google-calendar";
 import {
   serializeJob,
-  redactJobForOps,
   serializeInvoice,
   serializeChecklistItem,
   withStaffNames,
-  ok,
   fail,
   readJson,
   nextDocNumber,
 } from "@/lib/server/serialize";
+import { projectJob } from "@/lib/server/projections";
+import { recordAudit } from "@/lib/server/audit";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import { dispatchCutoffTime } from "@/lib/server/policy";
 import { getSystemSettings } from "@/lib/server/settings";
 import { getTaxRate } from "@/lib/tax";
 import { logger } from "@/lib/server/logger";
+import { ASSIGNABLE_ROLES, can } from "@/lib/rbac";
 
 /** Service row including its rubric, used to instantiate the job checklist. */
 const SERVICE_WITH_RUBRIC_INCLUDE = {
@@ -36,81 +37,39 @@ const JOB_LIST_INCLUDE = {
 
 type JobListRow = Prisma.JobGetPayload<{ include: typeof JOB_LIST_INCLUDE }>;
 
-interface JobDisplayContext {
-  /** id → name; ops_manager/staff cannot read the user directory, so names
-   *  are resolved here rather than in the client. */
-  userNameById: Map<string, string>;
-}
-
-/**
- * Batch-resolves worker display names for every dispatch surface.
- */
-async function buildJobDisplayContext(): Promise<JobDisplayContext> {
+/** id → name; roles that cannot read the directory still need crew names. */
+async function userNameMap(): Promise<Map<string, string>> {
   const users = await prisma.user.findMany({ select: { id: true, name: true } });
-  return {
-    userNameById: new Map(users.map((u) => [u.id, u.name])),
-  };
+  return new Map(users.map((u) => [u.id, u.name]));
 }
 
 /**
- * GET /api/jobs — the operational job register hydrated from the database.
- * Staff receive only jobs they are DIRECTLY assigned to (worker or manager);
- * ops_managers receive only jobs within the dispatch visibility window
- * (past + today, plus tomorrow after the configured cutoff) — enforced
- * server-side, not just in the UI; super_admins receive all.
+ * GET /api/jobs — the job register, scoped by the caller's `jobs.view` scope:
+ *   ALL (desk roles)      → every job (ops managers: inside the dispatch window)
+ *   TEAM / ASSIGNED       → only jobs the caller (or their team) is on
+ *   OWN (customer/partner) → only their own bookings, in a safe projection
+ * Financial fields are present only for `finance.view` holders.
  */
 export async function GET() {
   try {
-    const { user } = await requireRole(["super_admin", "ops_manager", "staff"]);
+    const { user } = await requirePermission("jobs.view");
+    const where = await jobWhereFor(user, "jobs.view");
+    if (where === null) return NextResponse.json({ success: true, data: [] });
 
-    let jobs;
-    if (user.role === "super_admin") {
-      jobs = await prisma.job.findMany({
-        orderBy: { updatedAt: "desc" },
-        include: JOB_LIST_INCLUDE,
-      });
-      const ctx = await buildJobDisplayContext();
-      return NextResponse.json({
-        success: true,
-        data: jobs.map((j) =>
-          withStaffNames(serializeJob(j), ctx.userNameById)
-        ),
-      });
+    let jobs: JobListRow[] = await prisma.job.findMany({
+      where,
+      orderBy: { updatedAt: "desc" },
+      include: JOB_LIST_INCLUDE,
+    });
+    if (dispatchWindowApplies(user)) {
+      const visibility = getOpsDateVisibility(new Date(), { nextDayDispatchTime: dispatchCutoffTime() });
+      jobs = filterJobsForOpsManager(jobs, visibility);
     }
 
-    // ops_manager + staff: dispatch data only — amounts and payment status
-    // are redacted at the API boundary (server-enforced, not UI-hidden).
-    if (user.role === "ops_manager") {
-      const all = await prisma.job.findMany({
-        orderBy: { updatedAt: "desc" },
-        include: JOB_LIST_INCLUDE,
-      });
-      const visibility = getOpsDateVisibility(new Date(), {
-        nextDayDispatchTime: dispatchCutoffTime(),
-      });
-      jobs = filterJobsForOpsManager(all, visibility);
-    } else {
-      jobs = await prisma.job.findMany({
-        where: {
-          OR: [
-            { assignedManagerId: user.id },
-            { assignedStaffIds: { has: user.id } },
-          ],
-        },
-        orderBy: { updatedAt: "desc" },
-        include: JOB_LIST_INCLUDE,
-      });
-    }
-
-    const ctx = await buildJobDisplayContext();
+    const names = await userNameMap();
     return NextResponse.json({
       success: true,
-      data: (jobs as JobListRow[]).map((j) =>
-        withStaffNames(
-          redactJobForOps(serializeJob(j)),
-          ctx.userNameById
-        )
-      ),
+      data: jobs.map((j) => projectJob(user, withStaffNames(serializeJob(j), names))),
     });
   } catch (err) {
     return errorResponse(err, "jobs.get.route_error");
@@ -130,27 +89,24 @@ const CreateJobSchema = z.object({
     .string()
     .min(1)
     .max(80)
-    // Free from/to window ("HH:MM - HH:MM", 24h) — any times the ops desk sets.
-    // Legacy "09:00 AM - 01:30 PM" style strings remain valid for compatibility.
     .regex(
       /^\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}$|^\d{1,2}:\d{2}\s*[AP]M\s*[-–]\s*\d{1,2}:\d{2}\s*[AP]M$/i,
       "Time window must be a from → to range, e.g. 09:00 - 13:30"
     ),
   assignedStaffIds: z.array(z.string().max(64)).default([]),
+  assignedManagerId: z.string().max(64).optional(),
   notes: z.string().max(2000).optional(),
   referralPartnerId: z.string().max(64).optional(),
 });
 
 /**
- * POST /api/jobs — creates a REAL booking in the database:
- * customer + property (inline or existing), job, checklist instantiated from
- * the service rubric, and a GST invoice computed from company settings —
- * all in one transaction. This is the source of truth; nothing is stored
- * only in the client.
+ * POST /api/jobs — creates a REAL booking: customer + property (inline or
+ * existing), job, checklist instantiated from the service rubric, and a tax
+ * invoice — all in one transaction. Requires `jobs.create`.
  */
 export async function POST(request: Request) {
   try {
-    const { user } = await requireRole(["super_admin", "ops_manager"]);
+    const { user } = await requirePermission("jobs.create");
     const parsed = CreateJobSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json(
@@ -160,25 +116,14 @@ export async function POST(request: Request) {
     }
     const d = parsed.data;
 
-    // Ops Managers book only inside their dispatch window (past/today, plus
-    // tomorrow after the cutoff) — same rule the GET enforces, so a crafted
-    // POST cannot schedule beyond it. Super admins are unrestricted.
-    if (user.role === "ops_manager") {
-      const visibility = getOpsDateVisibility(new Date(), {
-        nextDayDispatchTime: dispatchCutoffTime(),
-      });
+    // Ops managers book only inside their dispatch window (policy, not scope).
+    if (dispatchWindowApplies(user)) {
+      const visibility = getOpsDateVisibility(new Date(), { nextDayDispatchTime: dispatchCutoffTime() });
       if (!visibility.isDateVisible(d.scheduledDate)) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: `Scheduled date ${d.scheduledDate} is not yet open for dispatch.`,
-          },
-          { status: 409 }
-        );
+        return fail(`Scheduled date ${d.scheduledDate} is not yet open for dispatch.`, 409);
       }
     }
 
-    // --- Service + rubric ---------------------------------------------------
     const service = await prisma.service.findUnique({
       where: { id: d.serviceId },
       include: SERVICE_WITH_RUBRIC_INCLUDE,
@@ -186,18 +131,21 @@ export async function POST(request: Request) {
     if (!service) return fail("Service package not found. Create it on the Services page first.", 404);
     if (!service.active) return fail("This service package is inactive.", 409);
 
-    // --- Double-booking guard on CREATE (mirrors PATCH /api/jobs/[id]) ------
-    // A booking that ships with a pre-assigned crew cannot land a worker on
-    // two non-terminal jobs with the same date + time slot.
-    if (d.assignedStaffIds.length > 0 && d.scheduledDate && d.scheduledTimeSlot) {
-      const staffRows = await prisma.user.findMany({
-        where: { id: { in: d.assignedStaffIds }, role: "staff", active: true },
-        select: { id: true },
+    // Crew validation + double-booking guard (mirrors PATCH /api/jobs/[id]).
+    const crewIds = Array.from(new Set([...(d.assignedManagerId ? [d.assignedManagerId] : []), ...d.assignedStaffIds]));
+    let assignedManagerId: string | null = d.assignedManagerId ?? null;
+    if (crewIds.length > 0) {
+      if (!can(user, "jobs.assign")) return fail("Your role may create bookings but not assign crews.", 403);
+      const rows = await prisma.user.findMany({
+        where: { id: { in: crewIds }, role: { in: ASSIGNABLE_ROLES }, active: true },
+        select: { id: true, role: true },
       });
-      const valid = new Set(staffRows.map((s) => s.id));
-      const invalid = d.assignedStaffIds.filter((x) => !valid.has(x));
-      if (invalid.length > 0) {
-        return fail("One or more selected workers are not active staff accounts.", 400);
+      const valid = new Map(rows.map((r) => [r.id, r.role]));
+      if (crewIds.some((id) => !valid.has(id))) {
+        return fail("One or more selected workers are not active field accounts.", 400);
+      }
+      if (!assignedManagerId) {
+        assignedManagerId = d.assignedStaffIds.find((id) => valid.get(id) === "field_manager") ?? null;
       }
       const terminal = ["COMPLETED", "CANCELLED", "CLOSED"];
       const sameSlot = await prisma.job.findMany({
@@ -205,26 +153,24 @@ export async function POST(request: Request) {
           scheduledDate: d.scheduledDate,
           scheduledTimeSlot: d.scheduledTimeSlot,
           status: { notIn: terminal },
-          OR: d.assignedStaffIds.map((sid) => ({ assignedStaffIds: { has: sid } })),
+          OR: [{ assignedStaffIds: { hasSome: crewIds } }, { assignedManagerId: { in: crewIds } }],
         },
-        select: { id: true, assignedStaffIds: true },
+        select: { id: true },
       });
-      const busy = new Set(sameSlot.flatMap((j) => j.assignedStaffIds));
-      const clash = d.assignedStaffIds.filter((sid) => busy.has(sid));
-      if (clash.length > 0) {
-        return fail(
-          "Worker already booked on another job in this date & time slot (double-booking is not allowed).",
-          409
-        );
+      if (sameSlot.length > 0) {
+        return fail("Worker already booked on another job in this date & time slot (double-booking is not allowed).", 409);
       }
     }
 
-    // --- Customer (inline creation supported) --------------------------------
+    // Customer (inline creation supported).
     let customerId = d.customerId;
     if (!customerId) {
       if (!d.customerName || !d.customerPhone) {
         return fail("Customer name and phone are required for a new customer.", 400);
       }
+      const partner = d.referralPartnerId
+        ? await prisma.referralPartner.findUnique({ where: { id: d.referralPartnerId } })
+        : null;
       const created = await prisma.customer.create({
         data: {
           name: d.customerName,
@@ -233,9 +179,7 @@ export async function POST(request: Request) {
           address: d.propertyAddress || "",
           source: d.referralPartnerId ? "referral" : "direct",
           referralPartnerId: d.referralPartnerId,
-          referralCode: d.referralPartnerId
-            ? (await prisma.referralPartner.findUnique({ where: { id: d.referralPartnerId } }))?.code
-            : undefined,
+          referralCode: partner?.code,
         },
       });
       customerId = created.id;
@@ -244,12 +188,10 @@ export async function POST(request: Request) {
       if (!existing) return fail("Customer not found.", 404);
     }
 
-    // --- Property (inline creation supported) --------------------------------
+    // Property (inline creation supported).
     let propertyId = d.propertyId;
     if (!propertyId) {
-      if (!d.propertyAddress) {
-        return fail("Property address is required.", 400);
-      }
+      if (!d.propertyAddress) return fail("Property address is required.", 400);
       const created = await prisma.property.create({
         data: {
           customerId,
@@ -261,9 +203,9 @@ export async function POST(request: Request) {
     } else {
       const existing = await prisma.property.findUnique({ where: { id: propertyId } });
       if (!existing) return fail("Property not found.", 404);
+      if (existing.customerId !== customerId) return fail("Property does not belong to this customer.", 400);
     }
 
-    // --- Job + checklist + invoice in one transaction ------------------------
     const settings = await getSystemSettings();
     const taxRate = getTaxRate(settings);
     const subtotal = service.basePrice;
@@ -278,14 +220,14 @@ export async function POST(request: Request) {
           scheduledDate: d.scheduledDate,
           scheduledTimeSlot: d.scheduledTimeSlot,
           assignedStaffIds: d.assignedStaffIds,
+          assignedManagerId,
           amount: subtotal,
-          status: d.assignedStaffIds.length > 0 ? "ASSIGNED" : "SCHEDULED",
+          status: crewIds.length > 0 ? "ASSIGNED" : "SCHEDULED",
           notes: d.notes,
           referralPartnerId: d.referralPartnerId,
         },
       });
 
-      // Instantiate the working checklist from the company-authored rubric.
       if (service.checklistTemplate.length > 0) {
         await tx.jobChecklistItem.createMany({
           data: service.checklistTemplate.map((item) => ({
@@ -310,37 +252,29 @@ export async function POST(request: Request) {
         },
       });
 
-      // The booking counts toward the customer's lifetime booking total.
-      await tx.customer.update({
-        where: { id: customerId },
-        data: { totalBookings: { increment: 1 } },
-      });
-
-      // Referred booking: count the referral on the partner immediately.
+      await tx.customer.update({ where: { id: customerId }, data: { totalBookings: { increment: 1 } } });
       if (d.referralPartnerId) {
         await tx.referralPartner.update({
           where: { id: d.referralPartnerId },
           data: { totalReferrals: { increment: 1 } },
         });
       }
-
       return { job, invoice };
     });
 
-    logger.info("jobs.created", {
+    logger.info("jobs.created", { jobId: result.job.id, serviceId: service.id, by: user.id });
+    void recordAudit({
+      actor: user,
+      action: "JOB_CREATED",
+      entityType: "job",
+      entityId: result.job.id,
       jobId: result.job.id,
-      serviceId: service.id,
-      checklistItems: service.checklistTemplate.length,
-      by: "api",
+      newState: result.job.status,
+      details: `${service.name} on ${d.scheduledDate} ${d.scheduledTimeSlot}`,
+      request,
     });
 
-    // §1 Google Calendar: one event per booking (customer, service, time,
-    // address, team, contact, job id). Env-gated and fire-and-forget — a
-    // calendar outage can never fail a booking.
     void syncJobEvent(result.job.id).catch(() => {});
-
-    // The customer's ONE secure link: minted the moment the job exists so the
-    // desk can share it immediately. Fire-and-forget — never fails a booking.
     void (async () => {
       try {
         const { ensureCustomerLink } = await import("@/lib/server/qr-service");
@@ -350,33 +284,14 @@ export async function POST(request: Request) {
       }
     })();
 
-    // Re-fetch with relations for the hydrated client shape. The invoice is
-    // financial data: only returned to super_admins (ops/staff never see it).
-    const full = await prisma.job.findUnique({
-      where: { id: result.job.id },
-      include: {
-        customer: { select: { name: true, phone: true } },
-        property: { select: { title: true, address: true } },
-        service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
-      },
-    });
-
-    const isSuperAdmin = user.role === "super_admin";
-    // Fresh job: resolve names for the store.
-    const createdCtx = await buildJobDisplayContext();
+    const full = await prisma.job.findUnique({ where: { id: result.job.id }, include: JOB_LIST_INCLUDE });
+    const names = await userNameMap();
     return NextResponse.json(
       {
         success: true,
         data: {
-          job: full
-            ? withStaffNames(
-                isSuperAdmin
-                  ? serializeJob(full)
-                  : redactJobForOps(serializeJob(full)),
-                createdCtx.userNameById
-              )
-            : null,
-          invoice: isSuperAdmin ? serializeInvoice(result.invoice) : undefined,
+          job: full ? projectJob(user, withStaffNames(serializeJob(full), names)) : null,
+          invoice: can(user, "finance.view") ? serializeInvoice(result.invoice) : undefined,
           checklist: await prisma.jobChecklistItem
             .findMany({ where: { jobId: result.job.id } })
             .then((rows) => rows.map(serializeChecklistItem)),

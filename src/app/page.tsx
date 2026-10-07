@@ -1,507 +1,128 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
-import { StatCard } from "@/components/common/StatCard";
-import { JobStatusBadge } from "@/components/common/JobStatusBadge";
-import { useApp } from "@/lib/app-context";
-import { formatCurrency, formatDate, timeAgo, toLocalDateString, formatTimeSlot } from "@/lib/utils";
-import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
+import { StatTile, AttentionPanel, NextActionChip } from "@/components/workspace/WorkspaceWidgets";
 import { RevenueTrendChart } from "@/components/common/RevenueTrendChart";
-import {
-  Briefcase,
-  Clock,
-  ShieldCheck,
-  AlertTriangle,
-  CheckCircle2,
-  DollarSign,
-  TrendingUp,
-  Share2,
-  Calendar,
-  Smartphone,
-  ChevronRight,
-  ArrowUpRight,
-  Sparkles,
-  Receipt,
-} from "lucide-react";
-import Link from "next/link";
+import { useWorkspace } from "@/lib/use-workspace";
+import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
+import { formatCurrency, formatDate, formatTimeSlot } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Briefcase, Receipt, ChevronRight } from "lucide-react";
 
 /**
- * Operations dashboard. Two hard rules enforced top to bottom:
- *
- *  1. Dispatch window — ops sees jobs from the past through the dispatch
- *     window (today, plus tomorrow after the cutoff). The same visibility
- *     helper the API enforces server-side filters every list here.
- *  2. No financial data — amounts, payment status, invoices, commissions are
- *     super_admin-only. The server redacts them from every job payload; this
- *     page simply never renders money.
+ * SUPER ADMIN home — "Business Overview" (§5).
+ * Answers "what needs my attention?" in one screen: today's numbers,
+ * the attention list (deep-linked), revenue, and the live queue. The admin
+ * never has to open every module to find out what is going on.
  */
-export default function DashboardPage() {
-  const {
-    jobs,
-    customers,
-    properties,
-    services,
-    users,
-    qualityChecks,
-    complaints,
-    smsGatewayLogs,
-    fetchSmsGatewayLog,
-    fetchStaffDirectory,
-    currentRole,
-    systemSettings,
-  } = useApp();
-
-  const isOps = currentRole === "ops_manager";
-
-  // Same server-enforced visibility window, applied client-side for display.
-  const visibility = getOpsDateVisibility(new Date(), {
-    nextDayDispatchTime: systemSettings?.nextDayDispatchTime || "20:00",
-  });
-  const visibleJobs = isOps ? filterJobsForOpsManager(jobs, visibility) : jobs;
-
-  // Load the server SMS gateway trail once for the activity feed, and resolve
-  // the assignment-scoped staff roster (ops managers cannot read the full user
-  // directory — without this the workload panel and worker cards would be empty).
-  React.useEffect(() => {
-    if (currentRole === "staff") return;
-    void fetchSmsGatewayLog();
-    void fetchStaffDirectory();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const fieldStaff = users.filter((u) => u.role === "staff");
-  const staffWorkload = new Map<string, number>();
-  visibleJobs
-    .filter((j) => j.status !== "COMPLETED" && j.status !== "CANCELLED" && j.status !== "CLOSED")
-    .forEach((j) => {
-      (j.assignedStaffIds || []).forEach((id) => {
-        staffWorkload.set(id, (staffWorkload.get(id) || 0) + 1);
-      });
-    });
-
-  // Calculations for Operations KPIs (local-date aware)
-  const todayDate = toLocalDateString();
-  const todayJobs = visibleJobs.filter((j) => j.scheduledDate === todayDate);
-
-  const inProgressCount = visibleJobs.filter((j) => j.status === "IN_PROGRESS" || j.status === "ARRIVED" || j.status === "CUSTOMER_VERIFIED").length;
-  // Distinct workers currently on an active job (the card title says workers,
-  // so it must count people, not jobs).
-  const activeWorkerCount = new Set(
-    visibleJobs
-      .filter((j) => j.status === "IN_PROGRESS" || j.status === "ARRIVED" || j.status === "CUSTOMER_VERIFIED")
-      .flatMap((j) => j.assignedStaffIds || [])
-  ).size;
-  const qcPendingCount = visibleJobs.filter((j) => j.status === "WORK_COMPLETED" || j.status === "QUALITY_CHECK").length;
-  const reworkCount = visibleJobs.filter((j) => j.status === "REWORK_REQUIRED").length;
-  const approvalCount = visibleJobs.filter((j) => j.status === "CUSTOMER_APPROVAL").length;
-  const completedCount = visibleJobs.filter((j) => j.status === "COMPLETED" || j.status === "FEEDBACK_REQUESTED").length;
-
-  // Quality score average — computed from actual QC data
-  const completedQcScores = qualityChecks.filter((qc) => qc.score > 0).map((qc) => qc.score);
-  const avgQcScore = completedQcScores.length > 0
-    ? Math.round(completedQcScores.reduce((a, b) => a + b, 0) / completedQcScores.length)
-    : 0;
-
-  // Historical pass rate — derived from real QC records
-  const passedQcCount = qualityChecks.filter((qc) => qc.status === "PASS").length;
-  const auditedQcCount = qualityChecks.filter((qc) => qc.status === "PASS" || qc.status === "REWORK_REQUIRED").length;
-  const qcPassRate = auditedQcCount > 0 ? Math.round((passedQcCount / auditedQcCount) * 100) : 100;
+export default function BusinessOverviewPage() {
+  const { data, error, loading } = useWorkspace();
+  const { invoices, payments } = useApp();
+  const { can } = useAuth();
+  const counts = data?.counts;
+  const fin = data?.finance;
+  const queue = (data?.queue ?? []).filter((q) => q.actionable).slice(0, 8);
 
   return (
     <AdminLayout>
       <PageHeader
-        title="Operations Dispatch & Overview"
-        description="Real-time control tower for on-site field workers, secure customer confirmation, and independent QC audits."
+        title="Business Overview"
+        description="What needs your attention today — every number links to the place to act."
         actions={
-          currentRole === "super_admin" ? (
-            <>
+          <>
+            {can("quotes.manage") && (
               <Link href="/quotations?raise=true">
-                <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs border-zinc-200 text-zinc-700 hover:bg-zinc-100">
-                  <Receipt className="h-3.5 w-3.5 text-zinc-400" />
-                  New Quotation
+                <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs">
+                  <Receipt className="h-3.5 w-3.5 text-zinc-400" /> New Quotation
                 </Button>
               </Link>
+            )}
+            {can("jobs.create") && (
               <Link href="/jobs?create=true">
-                <Button size="sm" className="h-9 gap-1.5 text-xs bg-rose-500 text-white hover:bg-rose-600 font-medium shadow-xs">
-                  <Briefcase className="h-3.5 w-3.5" />
-                  Schedule New Job
+                <Button size="sm" className="h-9 gap-1.5 text-xs text-white">
+                  <Briefcase className="h-3.5 w-3.5" /> New Booking
                 </Button>
               </Link>
-            </>
-          ) : undefined
+            )}
+          </>
         }
       />
 
-      {/* Row 1: Operations KPIs (no financial data — ops role) */}
+      {error && <div className="mb-4 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-        <StatCard
-          title="Today's Active Field Workers"
-          value={`${activeWorkerCount} On Job`}
-          subtitle={`${todayJobs.length} jobs dispatched today · ${inProgressCount} in progress`}
-          icon={Clock}
-          change={todayJobs.length > 0 ? "Dispatched" : "No jobs today"}
-          changeType={todayJobs.length > 0 ? "positive" : "neutral"}
-/>
-        <StatCard
-          title="Quality Control Queue"
-          value={`${qcPendingCount} Pending`}
-          subtitle={reworkCount > 0 ? `${reworkCount} requiring rework` : "0 rework required"}
-          icon={ShieldCheck}
-          change={reworkCount > 0 ? `${reworkCount} Alert` : "Clean"}
-          changeType={reworkCount > 0 ? "negative" : "positive"}
-        />
-        <StatCard
-          title="Customer Approvals"
-          value={`${approvalCount} Ready`}
-          subtitle="Awaiting digital sign-off"
-          icon={Sparkles}
-          change={auditedQcCount > 0 ? `${qcPassRate}% QC pass rate` : "No audits yet"}
-          changeType={auditedQcCount > 0 ? "positive" : "neutral"}
-        />
-        <StatCard
-          title="Completed Handover"
-          value={completedCount}
-          subtitle="Closed digital records"
-          icon={CheckCircle2}
-          change={avgQcScore > 0 ? `Avg QC: ${avgQcScore}%` : "0% Avg QC"}
-          changeType={avgQcScore > 0 ? "positive" : "neutral"}
-        />
+        <StatTile label="Today's Jobs" value={counts?.today ?? (loading ? "…" : 0)} href="/operations" />
+        <StatTile label="Jobs In Progress" value={counts?.inProgress ?? 0} href="/operations" tone={counts?.inProgress ? "success" : "neutral"} />
+        <StatTile label="QC Pending" value={counts?.qcPending ?? 0} href="/quality-queue" tone={counts?.qcPending ? "warning" : "neutral"} />
+        <StatTile label="Rework Pending" value={counts?.rework ?? 0} href="/quality" tone={counts?.rework ? "alert" : "neutral"} />
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <StatTile label="Customer Issues" value={data?.attention.find((a) => a.key === "complaints")?.count ?? 0} href="/quality" tone={data?.attention.some((a) => a.key === "complaints") ? "alert" : "neutral"} />
+        <StatTile label="Payments Pending" value={fin ? formatCurrency(fin.pending) : "—"} href="/finance" hint={fin ? `${fin.pendingCount} invoice${fin.pendingCount === 1 ? "" : "s"} · ${fin.overdueCount} overdue` : undefined} tone={fin?.overdueCount ? "warning" : "neutral"} />
+        <StatTile label="AMC Visits Due" value={data?.attention.find((a) => a.key === "amc")?.count ?? 0} href="/amc" hint="next 7 days" />
+        <StatTile label="Revenue (this month)" value={fin ? formatCurrency(fin.revenueMonth) : "—"} href="/reports" tone="success" hint={fin ? `${formatCurrency(fin.collected)} collected all-time` : undefined} />
       </div>
 
-      {/* Row 2: Field status KPIs (financial row is super_admin-only) */}
-      {currentRole === "super_admin" ? (
-        <>
-          <SuperAdminFinanceRow />
-          <SuperAdminRevenueTrend />
-        </>
-      ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-          <StatCard
-            title="Assigned & Ready"
-            value={visibleJobs.filter((j) => j.status === "ASSIGNED" || j.status === "SCHEDULED").length}
-            subtitle="Jobs awaiting field execution"
-            icon={Calendar}
-            change="Dispatch queue"
-            changeType="neutral"
-          />
-          <StatCard
-            title="Open Complaints"
-            value={complaints.filter((c) => c.status !== "closed" && c.status !== "resolved").length}
-            subtitle="Customer attention requests"
-            icon={AlertTriangle}
-            change={complaints.some((c) => c.status !== "closed" && c.status !== "resolved") ? "In review" : "All clear"}
-            changeType={complaints.some((c) => c.status !== "closed" && c.status !== "resolved") ? "negative" : "positive"}
-          />
-          <StatCard
-            title="Field Workers"
-            value={fieldStaff.length}
-            subtitle={`${fieldStaff.filter((w) => (staffWorkload.get(w.id) || 0) > 0).length} currently on job`}
-            icon={Smartphone}
-            change="Active roster"
-            changeType="neutral"
-          />
-        </div>
-      )}
-
-      {/* Main Grid: Live Operations Board & Field Status */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Live Job Dispatch Table */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
-            <div className="p-4 bg-slate-50/75 border-b border-slate-200 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Live Operations Queue
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Real-time status of current deep cleaning bookings
-                </p>
-              </div>
-              <Link
-                href="/jobs"
-                className="text-xs text-slate-600 hover:text-slate-900 font-medium inline-flex items-center gap-1"
-              >
-                View all ({visibleJobs.length}) <ChevronRight className="h-3 w-3" />
+        <div className="lg:col-span-2 space-y-6">
+          <AttentionPanel items={data?.attention ?? []} />
+
+          <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b border-zinc-100 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-zinc-900">Live queue — jobs waiting on someone</h3>
+              <Link href="/operations" className="text-xs text-zinc-600 hover:text-zinc-900 inline-flex items-center gap-1">
+                View operations <ChevronRight className="h-3 w-3" />
               </Link>
             </div>
-
-            {visibleJobs.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50/50">
-                <div className="h-10 w-10 rounded-full bg-white border border-slate-200 text-slate-500 flex items-center justify-center mx-auto mb-2">
-                  <Briefcase className="h-5 w-5" />
-                </div>
-                <h4 className="text-xs font-semibold text-slate-800">Operational Queue Clear</h4>
-                <p className="text-[11px] text-slate-500 max-w-sm mx-auto mt-1 mb-3">
-                  No cleaning jobs to show right now. Jobs appear here as soon as they are scheduled and assigned.
-                </p>
-              </div>
+            {queue.length === 0 ? (
+              <div className="px-4 py-8 text-center text-xs text-zinc-500">Nothing is waiting on the desk right now.</div>
             ) : (
-              <div className="divide-y divide-slate-100">
-                {visibleJobs.slice(0, 6).map((job) => {
-                  const customer = customers.find((c) => c.id === job.customerId);
-                  const property = properties.find((p) => p.id === job.propertyId);
-                  const service = services.find((s) => s.id === job.serviceId);
-                  // Server resolves names for roles that cannot read /api/users.
-                  const assignedWorkers = (
-                    job.assignedStaffNames && job.assignedStaffNames.length > 0
-                      ? job.assignedStaffNames
-                      : (job.assignedStaffIds || [])
-                          .map((id) => users.find((u) => u.id === id)?.name)
-                          .filter(Boolean)
-                  ) as string[];
-
-                  return (
-                    <div
-                      key={job.id}
-                      className="p-4 hover:bg-slate-50/60 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                    >
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Link
-                            href={`/jobs/${job.id}`}
-                            className="font-mono text-xs font-semibold text-slate-900 hover:underline"
-                          >
-                            {job.id}
-                          </Link>
-                          <JobStatusBadge status={job.status} size="sm" />
-                          {job.status === "ARRIVED" && (
-                            <span className="text-[10px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded">
-                              Customer Confirmation Pending
-                            </span>
-                          )}
+              <ul className="divide-y divide-zinc-100">
+                {queue.map((j) => (
+                  <li key={j.id}>
+                    <Link href={`/jobs/${j.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-zinc-50">
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-zinc-900 truncate">
+                          {j.customerName ?? "Customer"} · <span className="font-normal text-zinc-500">{j.serviceName}</span>
                         </div>
-
-                        <div className="text-xs font-medium text-slate-900 truncate">
-                          {customer?.name} • <span className="text-slate-500 font-normal">{property?.title}</span>
-                        </div>
-
-                        <div className="flex items-center gap-3 text-[11px] text-slate-400">
-                          <span>{service?.name}</span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {formatDate(job.scheduledDate)} • {formatTimeSlot(job.scheduledTimeSlot)}
-                          </span>
-                          {assignedWorkers.length > 0 && (
-                            <>
-                              <span>•</span>
-                              <span className="text-slate-600 font-medium">
-                                {assignedWorkers.join(", ")}
-                              </span>
-                            </>
-                          )}
+                        <div className="text-[11px] text-zinc-400">
+                          {formatDate(j.scheduledDate)} · {formatTimeSlot(j.scheduledTimeSlot)} · {j.propertyTitle}
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Link href={`/jobs/${job.id}`}>
-                          <Button variant="outline" size="sm" className="h-8 text-xs px-2.5">
-                            Manage
-                          </Button>
-                        </Link>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                      <NextActionChip action={j.nextAction} />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
-
-          {/* Quick Workflow Navigation — quiet link rows, no icon tiles */}
-          <div className="rounded-lg border border-zinc-200 bg-white divide-y divide-zinc-100">
-            {[
-              {
-                href: "/field",
-                icon: Smartphone,
-                title: "Field Staff Portal",
-                desc: "Mobile view for Arrive, customer confirmation, and checklists",
-              },
-              {
-                href: "/quality",
-                icon: ShieldCheck,
-                title: "Quality Inspector",
-                desc: "Rubric grading, defect flags & rework dispatch",
-              },
-              {
-                href: "/dispatcher",
-                icon: Sparkles,
-                title: "Dispatch Tower",
-                desc: "Tomorrow&apos;s queue and field-worker assignments",
-              },
-            ].map(({ href, icon: Icon, title, desc }) => (
-              <Link
-                key={href}
-                href={href}
-                className="px-4 py-3 flex items-center gap-3 hover:bg-zinc-50 transition-colors group"
-              >
-                <Icon className="h-4 w-4 text-zinc-400 shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-zinc-800 group-hover:text-zinc-950">
-                    {title}
-                  </div>
-                  <p className="text-[11px] text-zinc-400 truncate">{desc}</p>
-                </div>
-                <ArrowUpRight className="h-3.5 w-3.5 text-zinc-300 group-hover:text-zinc-500 shrink-0" />
-              </Link>
-            ))}
-          </div>
         </div>
 
-        {/* Right Col: Field Worker Workload & SMS Feed */}
         <div className="space-y-6">
-          {/* Field Worker Workload */}
-          <div className="rounded-lg border border-zinc-200/80 bg-white p-4 shadow-xs">
-            <h3 className="text-xs font-semibold text-zinc-500 mb-3 font-sans">
-              Field Worker Workload
-            </h3>
-            <div className="space-y-3">
-              {fieldStaff.map((w) => {
-                const load = staffWorkload.get(w.id) || 0;
-                return (
-                  <div
-                    key={w.id}
-                    className="p-2.5 rounded-md border border-slate-100 bg-slate-50/60 text-xs flex items-center justify-between"
-                  >
-                    <div className="space-y-0.5">
-                      <div className="font-medium text-zinc-800 flex items-center gap-1.5">
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            load > 0 ? "bg-emerald-500" : "bg-zinc-300"
-                          }`}
-                        />
-                        {w.name}
-                      </div>
-                      <div className="text-[11px] text-zinc-400">
-                        {load > 0 ? `${load} active job${load === 1 ? "" : "s"} assigned` : "No active assignments"}
-                      </div>
-                    </div>
-                    <span
-                      className={`px-1.5 py-0.5 rounded-md border bg-white text-[10px] font-medium ${
-                        load > 0
-                          ? "border-emerald-200 text-emerald-700"
-                          : "border-zinc-200 text-zinc-500"
-                      }`}
-                    >
-                      {load > 0 ? "On Job" : "Ready"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Gateway Dispatch Feed */}
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-slate-500">
-                SMS Gateway Activity
-              </h3>
-              <span className="text-[10px] text-slate-400">Server Audit Trail</span>
-            </div>
-
-            <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
-              {smsGatewayLogs.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">
-                  No customer notifications recorded yet.
-                </p>
-              ) : (
-                smsGatewayLogs.slice(0, 7).map((log) => (
-                  <div key={log.id} className="text-xs space-y-1 pb-2.5 border-b border-slate-100 last:border-0">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-[10px] text-slate-500 font-semibold">
-                        {log.jobId || "—"}
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        {timeAgo(log.createdAt)}
-                      </span>
-                    </div>
-                    <p className="text-slate-700 text-[11px] leading-tight">
-                      Customer notification to {log.recipientMasked}
-                    </p>
-                    <div className="text-[10px] font-medium">
-                      <span
-                        className={
-                          log.status === "SENT"
-                            ? "text-emerald-700"
-                            : log.status === "FAILED"
-                            ? "text-red-700"
-                            : "text-amber-700"
-                        }
-                      >
-                        {log.status}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+          {can("finance.view") && <RevenueTrendChart invoices={invoices} payments={payments} />}
+          <div className="rounded-lg border border-zinc-200 bg-white divide-y divide-zinc-100">
+            {[
+              { href: "/operations", title: "Operations", desc: "Today's jobs, exceptions and crews" },
+              { href: "/schedule", title: "Schedule", desc: "Calendar + scheduling board" },
+              { href: "/quality-queue", title: "Quality Queue", desc: "Inspect, pass or raise rework" },
+              { href: "/finance", title: "Finance", desc: "Outstanding, payments, refunds" },
+              { href: "/users", title: "Users & Roles", desc: "Accounts across the nine roles" },
+            ].map((l) => (
+              <Link key={l.href} href={l.href} className="px-4 py-3 flex items-center gap-3 hover:bg-zinc-50 group">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium text-zinc-800">{l.title}</div>
+                  <p className="text-[11px] text-zinc-400 truncate">{l.desc}</p>
+                </div>
+                <ChevronRight className="h-3.5 w-3.5 text-zinc-300 group-hover:text-zinc-500" />
+              </Link>
+            ))}
           </div>
         </div>
       </div>
     </AdminLayout>
   );
-}
-
-/**
- * Financial KPI row — super_admin only. Rendered via a child component so the
- * ops/staff render path never even evaluates invoice/commission figures.
- */
-function SuperAdminFinanceRow() {
-  const { invoices, partners, payouts, complaints } = useApp();
-
-  const totalRevenue = invoices.reduce((acc, inv) => acc + inv.amountPaid, 0);
-  const totalReceivables = invoices.reduce((acc, inv) => acc + inv.balanceDue, 0);
-  // Mirror the Referrals module's own "pending" figure (server aggregate over
-  // every unpaid commission state) instead of a hand-picked status subset.
-  const pendingCommissions = partners.reduce((acc, p) => acc + p.totalCommissionPending, 0);
-  const unpaidInvoiceCount = invoices.filter((inv) => inv.balanceDue > 0).length;
-
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-      <StatCard
-        title="Collected Revenue"
-        value={formatCurrency(totalRevenue)}
-        subtitle="All-time collections"
-        icon={DollarSign}
-        change={invoices.length > 0 ? `${invoices.length} invoices` : "No invoices"}
-        changeType="neutral"
-      />
-      <StatCard
-        title="Pending Receivables"
-        value={formatCurrency(totalReceivables)}
-        subtitle="Invoiced pending balance"
-        icon={TrendingUp}
-        change={`${unpaidInvoiceCount} unpaid invoice${unpaidInvoiceCount === 1 ? "" : "s"}`}
-        changeType={unpaidInvoiceCount > 0 ? "negative" : "neutral"}
-      />
-      <StatCard
-        title="Pending Partner Payouts"
-        value={formatCurrency(pendingCommissions)}
-        subtitle="Unsettled commission ledger"
-        icon={Share2}
-        change={`${payouts.length} payout${payouts.length === 1 ? "" : "s"} settled`}
-        changeType={pendingCommissions > 0 ? "negative" : "positive"}
-      />
-      <StatCard
-        title="Active Complaints"
-        value={complaints.filter((c) => c.status !== "closed" && c.status !== "resolved").length}
-        subtitle="Customer attention requests"
-        icon={AlertTriangle}
-        change={complaints.some((c) => c.status !== "closed" && c.status !== "resolved") ? "In review" : "All clear"}
-        changeType={complaints.some((c) => c.status !== "closed" && c.status !== "resolved") ? "negative" : "positive"}
-      />
-    </div>
-  );
-}
-
-/**
- * Business-stats graph — super_admin only. Weekly billed (invoices issued)
- * vs collected (payments received) over the last 8 weeks, dependency-free SVG.
- */
-function SuperAdminRevenueTrend() {
-  const { invoices, payments } = useApp();
-  return <RevenueTrendChart invoices={invoices} payments={payments} />;
 }

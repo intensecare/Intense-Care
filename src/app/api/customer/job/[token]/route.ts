@@ -190,6 +190,18 @@ export async function POST(request: Request, { params }: { params: { token: stri
         message: `Customer confirmed team arrival via secure link${customerName ? ` — ${customerName}` : ""}`,
         actor: { name: customerName, role: "customer" },
       });
+      void import("@/lib/server/audit").then(({ recordAudit }) =>
+        recordAudit({
+          actor: { name: customerName, role: "customer" },
+          action: "CUSTOMER_CONFIRMED_ARRIVAL",
+          entityType: "job",
+          entityId: job.id,
+          jobId: job.id,
+          previousState: jobRow.status,
+          newState: "CUSTOMER_VERIFIED",
+          request,
+        })
+      );
       logger.info("customer.confirmed", { jobId: job.id, tokenId: tokenRow.id });
       return NextResponse.json({ success: true, data: { alreadyConfirmed: false, status: "CUSTOMER_VERIFIED" } });
     }
@@ -237,6 +249,31 @@ export async function POST(request: Request, { params }: { params: { token: stri
         actor: { name: parsed.data.signatoryName, role: "customer" },
       });
       logger.info("approval.granted", { jobId: job.id, tokenId: tokenRow.id });
+      // Billing is now open: Accounts gets its deep link; referral commissions settle.
+      try {
+        const [{ notifyAccountsBillable }, { recordAudit }] = await Promise.all([
+          import("@/lib/server/notify"),
+          import("@/lib/server/audit"),
+        ]);
+        void notifyAccountsBillable(job.id).catch(() => {});
+        void recordAudit({
+          actor: { name: parsed.data.signatoryName, role: "customer" },
+          action: "CUSTOMER_APPROVED",
+          entityType: "job",
+          entityId: job.id,
+          jobId: job.id,
+          previousState: jobRow.status,
+          newState: "COMPLETED",
+          request,
+        });
+        const full = await prisma.job.findUnique({ where: { id: job.id }, select: { referralPartnerId: true } });
+        if (full?.referralPartnerId) {
+          const { settleCommissionForJob } = await import("@/lib/server/commission");
+          await settleCommissionForJob(job.id);
+        }
+      } catch (e) {
+        logger.warn("approval.side_effects_failed", { jobId: job.id, error: e instanceof Error ? e.message : String(e) });
+      }
 
       return NextResponse.json({
         success: true,
@@ -261,8 +298,10 @@ export async function POST(request: Request, { params }: { params: { token: stri
         return fail("This job is closed — please contact support to raise an issue.", 409);
       }
 
+      const { ROLES, scopeOf } = await import("@/lib/rbac");
+      const ownerRoles = ROLES.filter((r) => scopeOf(r, "complaints.manage") !== "NONE" && r !== "super_admin");
       const opsManager = await prisma.user.findFirst({
-        where: { role: "ops_manager", active: true },
+        where: { role: { in: ownerRoles }, active: true },
         orderBy: { createdAt: "asc" },
       });
 

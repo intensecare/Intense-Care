@@ -1,339 +1,359 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requireUser, authorizeJobAccess } from "@/lib/server/authz";
+import { requireUser, authorizeJob, HttpError } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
-import { getOpsDateVisibility } from "@/lib/ops-visibility";
-import { dispatchCutoffTime } from "@/lib/server/policy";
-import { getAllowedTransitions, JOB_STATUS_CONFIG } from "@/lib/state-machine";
+import { validateTransition, JOB_STATUS_CONFIG } from "@/lib/state-machine";
 import type { Job } from "@/lib/types";
-import { serializeJob, redactJobForOps, withStaffNames } from "@/lib/server/serialize";
+import { serializeJob, withStaffNames, fail } from "@/lib/server/serialize";
+import { projectJob } from "@/lib/server/projections";
 import { recordActivity } from "@/lib/server/activity";
+import { recordAudit } from "@/lib/server/audit";
 import { syncJobEvent, cancelJobEvent } from "@/lib/server/google-calendar";
+import { ASSIGNABLE_ROLES, can, scopeOf, type JobStatus } from "@/lib/rbac";
+import type { SessionUser } from "@/lib/server/session";
 
-/**
- * Serializes a single job for API responses with the same display data as the
- * list route: resolved staff names. The customer's verification state lives on
- * the Job itself (customerConfirmedAt — set by the secure-link confirm), so no
- * extra lookup is needed.
- */
-async function serializeJobWithDisplayData(
-  full: Parameters<typeof serializeJob>[0],
-  isSuperAdmin: boolean
-) {
+const JOB_INCLUDE = {
+  customer: { select: { name: true, phone: true } },
+  property: { select: { title: true, address: true } },
+  service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
+} as const;
+
+async function respondWithJob(user: SessionUser, id: string, status = 200) {
+  const full = await prisma.job.findUnique({ where: { id }, include: JOB_INCLUDE });
+  if (!full) return fail("Job not found.", 404);
   const users = await prisma.user.findMany({ select: { id: true, name: true } });
-  const nameMap = new Map(users.map((u) => [u.id, u.name]));
-  const serialized = isSuperAdmin ? serializeJob(full) : redactJobForOps(serializeJob(full));
-  return withStaffNames(serialized, nameMap);
+  const names = new Map(users.map((u) => [u.id, u.name]));
+  return NextResponse.json({ success: true, data: projectJob(user, withStaffNames(serializeJob(full), names)) }, { status });
 }
 
-/**
- * GET /api/jobs/[id] — server-side view of a single job (same shape as the
- * list route, including customer-confirmation state).
- */
-export async function GET(
-  _request: Request,
-  { params }: { params: { id: string } }
-) {
+/** GET /api/jobs/[id] — one job, inside the caller's `jobs.view` scope. */
+export async function GET(_request: Request, { params }: { params: { id: string } }) {
   try {
-    const { id } = params;
-    await authorizeJobAccess(id);
-
-    const job = await prisma.job.findUnique({
-      where: { id },
-      include: {
-        customer: { select: { name: true, phone: true } },
-        property: { select: { title: true, address: true } },
-        service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
-      },
-    });
-    if (!job) {
-      return NextResponse.json({ success: false, error: "Job not found." }, { status: 404 });
-    }
-
-    // Ops Managers are restricted to the dispatch visibility window on every
-    // route — single-job fetches included (no URL/date manipulation bypass).
-    const { user } = await requireUser();
-    if (user.role === "ops_manager") {
-      const visibility = getOpsDateVisibility(new Date(), {
-        nextDayDispatchTime: dispatchCutoffTime(),
-      });
-      if (!visibility.isDateVisible(job.scheduledDate)) {
-        logger.warn("jobs.get_one.ops_window_denied", { jobId: id, by: user.id });
-        return NextResponse.json(
-          { success: false, error: "This job is not yet open for dispatch." },
-          { status: 403 }
-        );
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: await serializeJobWithDisplayData(job, user.role === "super_admin"),
-    });
+    const { user } = await authorizeJob(params.id, "jobs.view");
+    return respondWithJob(user, params.id);
   } catch (err) {
     return errorResponse(err, "jobs.get_one.route_error");
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* GPS-verified arrival (§8 / §11)                                             */
+/* -------------------------------------------------------------------------- */
+
+const ArrivalSchema = z.object({
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+  accuracy: z.number().min(0).max(100000).optional(),
+  bypassReason: z.string().min(5).max(300).optional(),
+});
+
+function geofenceMeters(): number {
+  const raw = Number.parseInt(process.env.ARRIVAL_GEOFENCE_METERS || "300", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 300;
+}
+
+function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+const PatchSchema = z.object({
+  status: z.string().min(1).max(32).optional(),
+  assignedStaffIds: z.array(z.string().min(1).max(64)).max(20).optional(),
+  assignedManagerId: z.string().max(64).nullable().optional(),
+  notes: z.string().max(2000).optional(),
+  scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  scheduledTimeSlot: z.string().max(80).optional(),
+  arrival: ArrivalSchema.optional(),
+  /** Super Admin override of the state machine — must carry a reason (audited). */
+  override: z.boolean().optional(),
+  reason: z.string().max(500).optional(),
+});
+
 /**
- * PATCH /api/jobs/[id] — mirrors lifecycle status changes made in the ERP UI
- * (e.g. staff marking work completed) into the server store.
+ * PATCH /api/jobs/[id] — the ONLY write path for a job's lifecycle:
+ *   assignment  (jobs.assign)      crew + field manager
+ *   reschedule  (jobs.reschedule)  date / time window
+ *   work notes  (jobs.update)      ASSIGNED scope may change notes only
+ *   status      (transition permission from TRANSITION_PERMISSION)
+ * Every branch resolves permission + scope through the central matrix; the
+ * state machine is validated server-side for every role.
  */
-export async function PATCH(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(request: Request, { params }: { params: { id: string } }) {
   try {
-    const { user } = await requireUser();
     const { id } = params;
+    const parsed = PatchSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return fail("Invalid job update payload.", 400);
+    const body = parsed.data;
 
-    const body = await request.json().catch(() => null);
+    /* -------------------------------------------------------- assignment */
+    if (Array.isArray(body.assignedStaffIds) || body.assignedManagerId !== undefined) {
+      const { user, job: existing } = await authorizeJob(id, "jobs.assign");
+      const ids = Array.from(new Set(body.assignedStaffIds ?? existing.assignedStaffIds));
+      let managerId: string | null =
+        body.assignedManagerId === undefined ? existing.assignedManagerId : body.assignedManagerId;
 
-    // Assignment updates (managers/admins only): set the direct field-worker
-    // list; first entry becomes the lead worker. Optionally moves a
-    // SCHEDULED job to ASSIGNED. Assigned ids are validated against real,
-    // active staff accounts — no phantom assignments.
-    if (Array.isArray(body?.assignedStaffIds)) {
-      if (user.role === "staff") {
-        return NextResponse.json(
-          { success: false, error: "Only managers can assign workers." },
-          { status: 403 }
-        );
-      }
-      const ids = (body.assignedStaffIds as unknown[]).filter(
-        (v): v is string => typeof v === "string" && v.length > 0 && v.length <= 64
-      );
-      const existingJob = await prisma.job.findUnique({ where: { id } });
-      if (!existingJob) {
-        return NextResponse.json({ success: false, error: "Job not found." }, { status: 404 });
-      }
-
-      // Validate every assigned id: must be an active staff account.
-      if (ids.length > 0) {
-        const staffRows = await prisma.user.findMany({
-          where: { id: { in: ids }, role: "staff", active: true },
-          select: { id: true },
+      const crew = Array.from(new Set([...ids, ...(managerId ? [managerId] : [])]));
+      if (crew.length > 0) {
+        const rows = await prisma.user.findMany({
+          where: { id: { in: crew }, role: { in: ASSIGNABLE_ROLES }, active: true },
+          select: { id: true, role: true },
         });
-        const valid = new Set(staffRows.map((s) => s.id));
-        const invalid = ids.filter((x) => !valid.has(x));
-        if (invalid.length > 0) {
-          return NextResponse.json(
-            { success: false, error: "One or more selected workers are not active staff accounts." },
-            { status: 400 }
-          );
+        const valid = new Map(rows.map((r) => [r.id, r.role]));
+        if (crew.some((x) => !valid.has(x))) {
+          return fail("One or more selected workers are not active field accounts.", 400);
         }
-
-        // Double-booking guard (server-authoritative): a worker cannot be on
-        // two non-terminal jobs with the same date + time slot.
-        if (existingJob.scheduledDate && existingJob.scheduledTimeSlot) {
+        if (managerId && valid.get(managerId) !== "field_manager") {
+          return fail("The team leader must be a Field Manager account.", 400);
+        }
+        if (!managerId) {
+          managerId = ids.find((x) => valid.get(x) === "field_manager") ?? null;
+        }
+        if (existing.scheduledDate) {
+          const slotRow = await prisma.job.findUnique({ where: { id }, select: { scheduledTimeSlot: true } });
           const terminal = ["COMPLETED", "CANCELLED", "CLOSED"];
-          const sameSlot = await prisma.job.findMany({
+          const clash = await prisma.job.findFirst({
             where: {
               id: { not: id },
-              scheduledDate: existingJob.scheduledDate,
-              scheduledTimeSlot: existingJob.scheduledTimeSlot,
+              scheduledDate: existing.scheduledDate,
+              scheduledTimeSlot: slotRow?.scheduledTimeSlot ?? "",
               status: { notIn: terminal },
-              OR: ids.map((sid) => ({ assignedStaffIds: { has: sid } })),
+              OR: [{ assignedStaffIds: { hasSome: crew } }, { assignedManagerId: { in: crew } }],
             },
-            select: { id: true, assignedStaffIds: true },
+            select: { id: true },
           });
-          const busy = new Set(sameSlot.flatMap((j) => j.assignedStaffIds));
-          const clash = ids.filter((sid) => busy.has(sid));
-          if (clash.length > 0) {
-            return NextResponse.json(
-              {
-                success: false,
-                error:
-                  "Worker already booked on another job in this date & time slot (double-booking is not allowed).",
-              },
-              { status: 409 }
-            );
+          if (clash) {
+            return fail("Worker already booked on another job in this date & time slot (double-booking is not allowed).", 409);
           }
         }
       }
 
-      // Booking-window integrity: a job may not be pulled into the past.
-      if (
-        existingJob.scheduledDate &&
-        existingJob.scheduledDate < new Date().toISOString().slice(0, 10) &&
-        existingJob.status === "SCHEDULED"
-      ) {
-        // Past-dated scheduled jobs stay schedulable for record correction.
-      }
-
       const nextStatus =
-        ids.length > 0 &&
-        (existingJob.status === "SCHEDULED" || existingJob.status === "DRAFT")
+        crew.length > 0 && (existing.status === "SCHEDULED" || existing.status === "DRAFT")
           ? "ASSIGNED"
-          : ids.length === 0 && existingJob.status === "ASSIGNED"
+          : crew.length === 0 && existing.status === "ASSIGNED"
           ? "SCHEDULED"
-          : existingJob.status;
-      const job = await prisma.job.update({
+          : existing.status;
+
+      await prisma.job.update({
         where: { id },
-        data: { assignedStaffIds: ids, status: nextStatus, updatedAt: new Date() },
+        data: { assignedStaffIds: ids, assignedManagerId: managerId, status: nextStatus, updatedAt: new Date() },
       });
-      logger.info("jobs.assignment_updated", { jobId: id, count: ids.length, by: user.id });
-      // Supervisor-visible activity feed: crew changes are pipeline events.
+      logger.info("jobs.assignment_updated", { jobId: id, count: crew.length, by: user.id });
       await recordActivity({
         jobId: id,
         type: "STAFF_ASSIGNED",
         message:
-          ids.length > 0
-            ? `Crew updated — ${ids.length} field worker${ids.length === 1 ? "" : "s"} assigned${
-                nextStatus === "ASSIGNED" && existingJob.status !== "ASSIGNED" ? " (job is now Staff Assigned)" : ""
+          crew.length > 0
+            ? `Crew updated — ${crew.length} field worker${crew.length === 1 ? "" : "s"} assigned${
+                nextStatus === "ASSIGNED" && existing.status !== "ASSIGNED" ? " (job is now Staff Assigned)" : ""
               }`
             : "All field workers unassigned (job returned to Scheduled)",
         actor: { id: user.id, name: user.name, role: user.role },
       });
-      // §1 Google Calendar: the event carries the team — refresh on crew change.
+      void recordAudit({
+        actor: user,
+        action: "JOB_ASSIGNED",
+        entityType: "job",
+        entityId: id,
+        jobId: id,
+        previousState: existing.status,
+        newState: nextStatus,
+        details: `crew=${crew.join(",") || "none"} manager=${managerId ?? "none"}`,
+        request,
+      });
+      if (crew.length > 0 && existing.status !== nextStatus) {
+        try {
+          const { notifyJobAssigned } = await import("@/lib/server/notify");
+          void notifyJobAssigned(id).catch(() => {});
+        } catch {
+          /* notification never fails the assignment */
+        }
+      }
       void syncJobEvent(id).catch(() => {});
-      // Redact financial fields for non-super_admin callers on the way out.
-      const { user: _u } = await requireUser();
-      const full = await prisma.job.findUnique({
-        where: { id },
-        include: {
-          customer: { select: { name: true, phone: true } },
-          property: { select: { title: true, address: true } },
-          service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
-        },
-      });
-      return NextResponse.json({
-        success: true,
-        data: full ? await serializeJobWithDisplayData(full, _u.role === "super_admin") : job,
-      });
+      return respondWithJob(user, id);
     }
 
-    const status = body?.status;
-    if (typeof status !== "string" || status.length === 0 || status.length > 32) {
-      return NextResponse.json({ success: false, error: "status is required." }, { status: 400 });
-    }
-
-    // Role separation: field-execution states belong to the assigned field
-    // worker (they are physically on site). The ops_manager runs dispatch and
-    // the QC desk — not arrival, work progress or rework completion.
-    const FIELD_EXECUTION_STATUSES = [
-      "ARRIVED",
-      "CUSTOMER_VERIFIED",
-      "IN_PROGRESS",
-      "WORK_COMPLETED",
-      "REWORK_COMPLETED",
-    ];
-    if (user.role === "ops_manager" && FIELD_EXECUTION_STATUSES.includes(status)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Field execution actions (arrival, work progress, rework completion) are performed by the assigned field worker. Use the Quality Control desk for audits and rework.",
-        },
-        { status: 403 }
-      );
-    }
-
-    const existing = await prisma.job.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json({ success: false, error: "Job not found." }, { status: 404 });
-    }
-
-    // Authorization FIRST (before state validation) so unassigned workers
-    // get a clear 403 rather than leaking state-machine details.
-    // Directly-assigned workers may only update jobs they are assigned to;
-    // managers/admins may transition all.
-    if (user.role !== "super_admin" && user.role !== "ops_manager") {
-      if (
-        existing.assignedManagerId !== user.id &&
-        !(Array.isArray(existing.assignedStaffIds) && existing.assignedStaffIds.includes(user.id))
-      ) {
-        return NextResponse.json(
-          { success: false, error: "You are not assigned to this job." },
-          { status: 403 }
-        );
+    /* -------------------------------------------------------- reschedule */
+    if (body.scheduledDate || body.scheduledTimeSlot) {
+      const { user, job: existing } = await authorizeJob(id, "jobs.reschedule");
+      if (["IN_PROGRESS", "WORK_COMPLETED", "COMPLETED", "CLOSED", "CANCELLED"].includes(existing.status)) {
+        return fail(`A job in ${existing.status} cannot be rescheduled.`, 409);
       }
-    }
-
-    // Server-side state-machine gate: reject transitions the lifecycle does
-    // not allow (staff-scope PATCH is a status mirror, so workers cannot push
-    // arbitrary/unrelated states). Managers/admins are the mirror origin and
-    // stay unrestricted.
-    if (user.role === "staff") {
-      const allowed = getAllowedTransitions(existing as unknown as Job)
-        .filter((t) => t.allowedRoles.includes("staff"))
-        .map((t) => t.status as string);
-      if (!allowed.includes(status)) {
-        return NextResponse.json(
-          { success: false, error: `Transition to ${status} is not permitted for this job.` },
-          { status: 409 }
-        );
+      const current = await prisma.job.findUnique({ where: { id }, select: { scheduledDate: true, scheduledTimeSlot: true } });
+      const scheduledDate = body.scheduledDate ?? current?.scheduledDate ?? "";
+      const scheduledTimeSlot = body.scheduledTimeSlot ?? current?.scheduledTimeSlot ?? "";
+      const crew = [...existing.assignedStaffIds, ...(existing.assignedManagerId ? [existing.assignedManagerId] : [])];
+      if (crew.length > 0) {
+        const clash = await prisma.job.findFirst({
+          where: {
+            id: { not: id },
+            scheduledDate,
+            scheduledTimeSlot,
+            status: { notIn: ["COMPLETED", "CANCELLED", "CLOSED"] },
+            OR: [{ assignedStaffIds: { hasSome: crew } }, { assignedManagerId: { in: crew } }],
+          },
+          select: { id: true },
+        });
+        if (clash) return fail("The assigned crew is already booked in that slot. Re-assign or choose another window.", 409);
       }
+      await prisma.job.update({ where: { id }, data: { scheduledDate, scheduledTimeSlot, updatedAt: new Date() } });
+      await recordActivity({
+        jobId: id,
+        type: "STATUS_CHANGED",
+        message: `Rescheduled to ${scheduledDate} ${scheduledTimeSlot}${body.reason ? ` — ${body.reason}` : ""}`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
+      void recordAudit({
+        actor: user,
+        action: "JOB_RESCHEDULED",
+        entityType: "job",
+        entityId: id,
+        jobId: id,
+        previousState: `${current?.scheduledDate} ${current?.scheduledTimeSlot}`,
+        newState: `${scheduledDate} ${scheduledTimeSlot}`,
+        reason: body.reason,
+        request,
+      });
+      void syncJobEvent(id).catch(() => {});
+      return respondWithJob(user, id);
     }
 
-    // Verification integrity gate: CUSTOMER_VERIFIED may ONLY be reached
-    // through the customer's secure-link confirmation (customerConfirmedAt set
-    // by /api/customer/job/[token]) — never by mirroring a status value
-    // directly, for any role. This closes any bypass that skips verification.
+    /* -------------------------------------------------------- work notes */
+    if (body.notes !== undefined && !body.status) {
+      const { user } = await authorizeJob(id, "jobs.update");
+      await prisma.job.update({ where: { id }, data: { notes: body.notes, updatedAt: new Date() } });
+      void recordAudit({ actor: user, action: "JOB_NOTES_UPDATED", entityType: "job", entityId: id, jobId: id, request });
+      return respondWithJob(user, id);
+    }
+
+    /* ------------------------------------------------------------ status */
+    const status = body.status;
+    if (!status) return fail("status is required.", 400);
+    const { user } = await requireUser();
+
+    const existing = await prisma.job.findUnique({ where: { id }, include: { property: { select: { lat: true, lng: true } } } });
+    if (!existing) return fail("Job not found.", 404);
+
+    // CUSTOMER_VERIFIED is reachable ONLY through the customer's secure link.
     if (status === "CUSTOMER_VERIFIED") {
-      const confirmed = await prisma.job.findUnique({
-        where: { id },
-        select: { customerConfirmedAt: true },
-      });
-      if (!confirmed?.customerConfirmedAt) {
-        return NextResponse.json(
-          { success: false, error: "Customer confirmation via the secure link is required before this transition." },
-          { status: 409 }
-        );
-      }
+      return fail("Customer confirmation happens on the customer's secure link, not through this API.", 409);
     }
 
-    const job = await prisma.job.update({
-      where: { id },
-      data: { status, updatedAt: new Date() },
-    });
+    // 1. State machine + role permission (the same table the UI uses).
+    const verdict = validateTransition(existing as unknown as Job, status as JobStatus, user.role);
+    const isOverride = body.override === true && can(user, "settings.manage");
+    if (!verdict.allowed && !isOverride) {
+      const code = verdict.permission ? 403 : 409;
+      return fail(verdict.reason ?? `Transition to ${status} is not permitted for this job.`, code);
+    }
+    if (isOverride && !body.reason) return fail("An override requires a reason.", 400);
+    if (isOverride && !(status in JOB_STATUS_CONFIG)) return fail("Unknown status.", 400);
 
-    // Live pipeline feed: every lifecycle move is a supervisor-visible event.
+    // 2. Scope: the record must be inside the caller's scope for that permission.
+    const permission = verdict.permission ?? "jobs.update";
+    if (!isOverride) await authorizeJob(id, permission);
+
+    // 3. GPS verification on arrival (field scope only; desk overrides are audited).
+    const data: Record<string, unknown> = { status, updatedAt: new Date() };
+    if (status === "ARRIVED") {
+      const arrival = body.arrival ?? {};
+      const hasCoords = typeof arrival.lat === "number" && typeof arrival.lng === "number";
+      const propertyHasCoords = typeof existing.property?.lat === "number" && typeof existing.property?.lng === "number";
+      let verification: "gps" | "manual" = "manual";
+      let distance: number | null = null;
+      if (hasCoords && propertyHasCoords) {
+        distance = distanceMeters(arrival.lat!, arrival.lng!, existing.property!.lat!, existing.property!.lng!);
+        verification = distance <= geofenceMeters() + (arrival.accuracy ?? 0) ? "gps" : "manual";
+      }
+      if (verification === "manual" && !arrival.bypassReason && scopeOf(user.role, "jobs.arrive") === "ASSIGNED") {
+        return fail(
+          hasCoords
+            ? `You appear to be ${Math.round(distance ?? 0)} m from the property. Move closer or give a reason to proceed.`
+            : "Share your GPS location to verify arrival, or give a reason to proceed without it.",
+          409
+        );
+      }
+      Object.assign(data, {
+        arrivedAt: new Date(),
+        arrivalLat: arrival.lat ?? null,
+        arrivalLng: arrival.lng ?? null,
+        arrivalAccuracy: arrival.accuracy ?? null,
+        arrivalVerification: verification,
+        arrivalDistanceM: distance,
+        arrivalBypassReason: arrival.bypassReason ?? null,
+      });
+    }
+    if (status === "IN_PROGRESS") data.startedAt = new Date();
+    if (status === "WORK_COMPLETED") {
+      // Mandatory checklist items must be done before QC can be requested.
+      const openCritical = await prisma.jobChecklistItem.count({
+        where: { jobId: id, critical: true, status: { notIn: ["completed", "skipped"] } },
+      });
+      if (openCritical > 0 && !isOverride) {
+        return fail(`${openCritical} mandatory checklist item${openCritical === 1 ? "" : "s"} still open.`, 409);
+      }
+      data.completedAt = new Date();
+    }
+
+    const job = await prisma.job.update({ where: { id }, data });
+
     const STATUS_EVENT_MESSAGES: Record<string, string> = {
       SCHEDULED: "Job scheduled",
       ASSIGNED: "Field staff assigned to the job",
-      ARRIVED: "Field worker arrived on site — awaiting customer confirmation",
-      CUSTOMER_VERIFIED: "Customer confirmed via secure link — property entry authorized",
+      ARRIVED: "Field team arrived on site — awaiting customer confirmation",
       IN_PROGRESS: "Work started — cleaning in progress",
-      WORK_COMPLETED: "Field worker marked work completed — submitted for QC audit",
+      WORK_COMPLETED: "Work completed — submitted for QC",
       QUALITY_CHECK: "QC inspection started",
-      REWORK_COMPLETED: "Rework completed by field worker — awaiting reinspection",
+      REWORK_COMPLETED: "Rework completed — awaiting reinspection",
       CUSTOMER_APPROVAL: "QC passed — handover link sent to customer",
       COMPLETED: "Customer approved — job completed",
       FEEDBACK_REQUESTED: "Feedback & Google review link sent to customer",
       CLOSED: "Job closed and archived",
       CANCELLED: "Job cancelled",
     };
+    const gpsNote =
+      status === "ARRIVED"
+        ? data.arrivalVerification === "gps"
+          ? " (GPS verified)"
+          : ` (GPS not verified${data.arrivalBypassReason ? `: ${data.arrivalBypassReason}` : ""})`
+        : "";
     await recordActivity({
       jobId: id,
       type: "STATUS_CHANGED",
-      message: STATUS_EVENT_MESSAGES[status] || `Job moved to ${JOB_STATUS_CONFIG[status as Job["status"]]?.label || status}`,
+      message: (STATUS_EVENT_MESSAGES[status] || `Job moved to ${JOB_STATUS_CONFIG[status as Job["status"]]?.label || status}`) + gpsNote,
       actor: { id: user.id, name: user.name, role: user.role },
     });
+    void recordAudit({
+      actor: user,
+      action: isOverride ? "JOB_STATUS_OVERRIDE" : "JOB_STATUS_CHANGED",
+      entityType: "job",
+      entityId: id,
+      jobId: id,
+      previousState: existing.status,
+      newState: status,
+      reason: body.reason ?? (status === "ARRIVED" ? (data.arrivalBypassReason as string | null) : null),
+      details: status === "ARRIVED" ? `verification=${data.arrivalVerification} distance=${data.arrivalDistanceM ?? "n/a"}` : undefined,
+      request,
+    });
 
-    // §1 Google Calendar: refresh the event on job updates; cancel it on cancel.
-    if (status === "CANCELLED") {
-      void cancelJobEvent(id).catch(() => {});
-    } else {
-      void syncJobEvent(id).catch(() => {});
-    }
+    if (status === "CANCELLED") void cancelJobEvent(id).catch(() => {});
+    else void syncJobEvent(id).catch(() => {});
 
-    // §16 unified flow: work completion fires the QC notification + QC token
-    // mint server-side (field app and manager link both benefit).
-    if (status === "WORK_COMPLETED") {
-      try {
+    // Workflow side-effects (notifications always deep-link to the role screen).
+    try {
+      if (status === "WORK_COMPLETED") {
         const { onWorkCompleted } = await import("@/lib/server/workflow-service");
         void onWorkCompleted(id, { id: user.id, name: user.name }).catch(() => {});
-      } catch {
-        // never fail the transition on notification issues
       }
-    }
-
-    // Arrival side-effect: the customer gets the ONE secure link by SMS so
-    // they can confirm the team on site (provider-gated; audited in SmsLog).
-    if (status === "ARRIVED" && existing.status !== "ARRIVED") {
-      try {
+      if (status === "ARRIVED" && existing.status !== "ARRIVED") {
         const [{ ensureCustomerLink }, { notifyCustomerArrived }] = await Promise.all([
           import("@/lib/server/qr-service"),
           import("@/lib/server/notify"),
@@ -342,44 +362,23 @@ export async function PATCH(
           const link = await ensureCustomerLink(id, { id: user.id, name: user.name });
           if (link.success) await notifyCustomerArrived(id, link.data.linkUrl);
         })().catch(() => {});
-      } catch {
-        // notification failure must never fail the arrival transition
       }
-    }
-
-    // Server-authoritative commission settlement: when a referred job
-    // completes, create the commission entry (idempotent) and update the
-    // partner aggregates. Never left to a client-side call that may not fire.
-    if (status === "COMPLETED" && existing.referralPartnerId) {
-      try {
+      if (status === "CUSTOMER_APPROVAL" && existing.status === "PASS") {
+        const { onQcPassed } = await import("@/lib/server/workflow-service");
+        void onQcPassed(id, { id: user.id, name: user.name }).catch(() => {});
+      }
+      if (status === "COMPLETED" && existing.referralPartnerId) {
         const { settleCommissionForJob } = await import("@/lib/server/commission");
         await settleCommissionForJob(id);
-      } catch (e) {
-        logger.error("jobs.settle_commission_failed", {
-          jobId: id,
-          error: e instanceof Error ? e.message : String(e),
-        });
       }
+    } catch (e) {
+      logger.error("jobs.side_effect_failed", { jobId: id, status, error: e instanceof Error ? e.message : String(e) });
     }
 
-    logger.info("jobs.status_mirrored", { jobId: id, status, by: user.id });
-    // Redact financial fields for non-super_admin callers on the way out.
-    if (user.role === "super_admin") {
-      return NextResponse.json({ success: true, data: job });
-    }
-    const full = await prisma.job.findUnique({
-      where: { id },
-      include: {
-        customer: { select: { name: true, phone: true } },
-        property: { select: { title: true, address: true } },
-        service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
-      },
-    });
-    return NextResponse.json({
-      success: true,
-      data: full ? await serializeJobWithDisplayData(full, false) : job,
-    });
+    logger.info("jobs.status_changed", { jobId: id, from: existing.status, to: job.status, by: user.id, override: isOverride });
+    return respondWithJob(user, id);
   } catch (err) {
+    if (err instanceof HttpError) return fail(err.message, err.status);
     return errorResponse(err, "jobs.patch.route_error");
   }
 }
