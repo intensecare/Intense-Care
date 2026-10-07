@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
+import { ASSIGNABLE_ROLES } from "@/lib/rbac";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -44,6 +46,7 @@ const FREQUENCY_OPTIONS = [
 
 export default function AmcPage() {
   const { customers, properties, services, users, currentRole } = useApp();
+  const { can } = useAuth();
 
   const [contracts, setContracts] = useState<AmcContract[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -113,7 +116,7 @@ export default function AmcPage() {
     notes: "",
   });
   const formProperties = properties.filter((p) => p.customerId === form.customerId);
-  const eligibleStaff = users.filter((u) => u.role === "staff" && u.active);
+  const eligibleStaff = users.filter((u) => ASSIGNABLE_ROLES.includes(u.role) && u.active);
 
   const handleCreateContract = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -350,7 +353,7 @@ export default function AmcPage() {
                       {FREQUENCY_OPTIONS.find((f) => f.value === c.frequency)?.label ?? c.frequency} · {done}/{c.visitCount} visits completed ·{" "}
                       {nextVisit ? `next on ${formatDate(nextVisit.scheduledDate)}` : "no visits pending"}
                     </span>
-                    {currentRole === "super_admin" && (
+                    {can("finance.view") && (
                       <div className="flex items-center gap-1.5">
                         {c.paymentStatus !== "PAID" && (
                           <Button

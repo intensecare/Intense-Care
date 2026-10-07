@@ -28,7 +28,7 @@ export default function SettingsPage() {
     smsGatewayLogs,
     fetchSmsGatewayLog,
   } = useApp();
-  const { currentUser } = useAuth();
+  const { currentUser, can } = useAuth();
 
   const [resendCooldownSeconds, setResendCooldownSeconds] = useState(systemSettings.resendCooldownSeconds || 60);
   const [nextDayDispatchTime, setNextDayDispatchTime] = useState(systemSettings.nextDayDispatchTime || "20:00");
@@ -76,7 +76,7 @@ export default function SettingsPage() {
   };
 
   React.useEffect(() => {
-    if (currentUser?.role === "super_admin") void checkGoogleStatus();
+    if (can("integrations.manage")) void checkGoogleStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
 

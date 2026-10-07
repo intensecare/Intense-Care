@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission, jobWhereFor } from "@/lib/server/authz";
+import { recordAudit } from "@/lib/server/audit";
 import { errorResponse } from "@/lib/server/http";
 import { serializeProperty, ok, fail, readJson } from "@/lib/server/serialize";
 
@@ -46,8 +47,17 @@ const UpdateSchema = z.object({
 /** GET /api/properties — all properties (managers/admins). */
 export async function GET() {
   try {
-    await requireRole(["super_admin", "ops_manager"]);
-    const rows = await prisma.property.findMany({ orderBy: { createdAt: "desc" } });
+    const { user, scope } = await requirePermission("properties.view");
+    let where: Record<string, unknown> | undefined;
+    if (scope === "OWN") {
+      where = { customerId: user.customerId ?? "__none__" };
+    } else if (scope === "ASSIGNED" || scope === "TEAM" || scope === "BRANCH") {
+      // Field roles see the properties of the jobs they are on — nothing else.
+      const jobWhere = await jobWhereFor(user, "jobs.view");
+      const jobs = await prisma.job.findMany({ where: jobWhere ?? { id: "__none__" }, select: { propertyId: true } });
+      where = { id: { in: Array.from(new Set(jobs.map((j) => j.propertyId))) } };
+    }
+    const rows = await prisma.property.findMany({ where, orderBy: { createdAt: "desc" } });
     return ok(rows.map(serializeProperty));
   } catch (err) {
     return errorResponse(err, "properties.get.route_error");
@@ -57,7 +67,7 @@ export async function GET() {
 /** POST /api/properties — register a property (managers/admins). */
 export async function POST(request: Request) {
   try {
-    await requireRole(["super_admin", "ops_manager"]);
+    const { user } = await requirePermission("properties.create");
     const parsed = CreateSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json(
@@ -88,6 +98,7 @@ export async function POST(request: Request) {
         recurringFrequency: d.recurringService ? d.recurringFrequency : undefined,
       },
     });
+    void recordAudit({ actor: user, action: "PROPERTY_CREATED", entityType: "property", entityId: created.id, request });
     return ok(serializeProperty(created), 201);
   } catch (err) {
     return errorResponse(err, "properties.post.route_error");
@@ -97,7 +108,7 @@ export async function POST(request: Request) {
 /** PATCH /api/properties — update an existing property (managers/admins). */
 export async function PATCH(request: Request) {
   try {
-    await requireRole(["super_admin", "ops_manager"]);
+    const { user } = await requirePermission("properties.update");
     const parsed = UpdateSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json(
@@ -117,6 +128,7 @@ export async function PATCH(request: Request) {
       data[k === "carpetAreaSqFt" ? "areaSqFt" : k] = v;
     }
     const updated = await prisma.property.update({ where: { id }, data });
+    void recordAudit({ actor: user, action: "PROPERTY_UPDATED", entityType: "property", entityId: id, details: Object.keys(data).join(","), request });
     return ok(serializeProperty(updated));
   } catch (err) {
     return errorResponse(err, "properties.patch.route_error");
@@ -129,7 +141,7 @@ export async function PATCH(request: Request) {
  */
 export async function DELETE(request: Request) {
   try {
-    await requireRole(["super_admin"]);
+    const { user } = await requirePermission("properties.delete");
     const body = await readJson(request);
     const id = typeof body?.id === "string" ? body.id : null;
     if (!id) return fail("Property id is required.", 400);
@@ -146,6 +158,7 @@ export async function DELETE(request: Request) {
     }
 
     await prisma.property.delete({ where: { id } });
+    void recordAudit({ actor: user, action: "PROPERTY_DELETED", entityType: "property", entityId: id, request });
     return ok({ id, deleted: true });
   } catch (err) {
     return errorResponse(err, "properties.delete.route_error");

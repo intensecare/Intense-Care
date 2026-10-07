@@ -15,6 +15,7 @@ import { getOpsDateVisibility } from "@/lib/ops-visibility";
 import { Link2, Copy, Check, Loader2, MessageCircle } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getAllowedTransitions, JOB_STATUS_CONFIG } from "@/lib/state-machine";
+import { ASSIGNABLE_ROLES, can as rbacCan, normalizeRole, scopeOf } from "@/lib/rbac";
 import { formatCurrency, formatDate, formatDateTime, timeAgo, formatTimeSlot, buildWhatsAppShareUrl, cn } from "@/lib/utils";
 import type { JobActivityEvent } from "@/lib/types";
 import {
@@ -97,7 +98,7 @@ const STAGE_TAB_MAP: Record<string, string> = {
 function stageTabFor(status: string, role: string): string | null {
   const tab = STAGE_TAB_MAP[status] || null;
   // Non-super_admin roles have no Finance tab — fall back to sign-off.
-  if (tab === "financials" && role !== "super_admin") return "approval";
+  if (tab === "financials" && !rbacCan({ role: normalizeRole(role) }, "finance.view")) return "approval";
   return tab;
 }
 
@@ -134,7 +135,7 @@ type NextAction = {
 export default function JobDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, can } = useAuth();
   const jobId = (params?.id as string) || "";
 
   const {
@@ -300,14 +301,15 @@ export default function JobDetailPage() {
   // path — same validation, double-booking 409 and status sync as the
   // dispatcher tower). Backend flags are the source of truth; the store's
   // optimistic flip is authoritative on success.
-  const canManage = currentRole === "super_admin" || currentRole === "ops_manager";
+  const canManage = can("jobs.assign");
+  const canSeeMoney = can("finance.view");
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [assignmentSaving, setAssignmentSaving] = useState(false);
   const [selectedWorkerIds, setSelectedWorkerIds] = useState<string[]>([]);
   const [assignmentErrorMsg, setAssignmentErrorMsg] = useState<string | null>(null);
 
   const eligibleWorkers = users
-    .filter((u) => u.role === "staff" && u.active)
+    .filter((u) => ASSIGNABLE_ROLES.includes(u.role) && u.active)
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const openAssignmentModal = () => {
@@ -391,7 +393,7 @@ export default function JobDetailPage() {
   // evidence uploads, arrival) belong to the assigned field worker; the
   // owner may override. The ops_manager runs dispatch + QC and gets a
   // read-only execution view.
-  const canExecuteFieldWork = currentRole === "super_admin" || currentRole === "staff";
+  const canExecuteFieldWork = can("checklist.execute");
 
   // Ops Managers cannot open jobs outside their dispatch visibility window
   // (past + today + tomorrow after the cutoff). Direct URL access to a future
@@ -520,7 +522,7 @@ export default function JobDetailPage() {
   const allowedTransitions = getAllowedTransitions(job).filter(
     (action) =>
       action.status !== "ASSIGNED" &&
-      (currentRole === "super_admin" || action.allowedRoles.includes(currentRole))
+      scopeOf(currentRole, action.permission) !== "NONE"
   );
 
   // --- §5 Next-Action: derive the single primary action for this state ---
@@ -857,7 +859,7 @@ export default function JobDetailPage() {
             Quality {jobIssues.length > 0 && `(${jobIssues.length} issues)`}
           </TabsTrigger>
           <TabsTrigger value="approval">Customer</TabsTrigger>
-          {currentRole === "super_admin" && (
+          {canSeeMoney && (
             <TabsTrigger value="financials">Billing</TabsTrigger>
           )}
           <TabsTrigger value="audit">Activity</TabsTrigger>
@@ -929,7 +931,7 @@ export default function JobDetailPage() {
                   <span className="text-slate-500">Time Window:</span>
                   <span className="font-medium text-slate-900">{formatTimeSlot(job.scheduledTimeSlot)}</span>
                 </div>
-                {currentRole === "super_admin" && (
+                {canSeeMoney && (
                   <>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Service Fee:</span>
@@ -1251,7 +1253,7 @@ export default function JobDetailPage() {
                     Linked defect history and corrective action tracking.
                   </p>
                 </div>
-                {((job.status === "REWORK_REQUIRED" || job.status === "REWORK_COMPLETED" || job.status === "REINSPECTION") && (currentRole === "super_admin" || currentRole === "ops_manager")) && (
+                {((job.status === "REWORK_REQUIRED" || job.status === "REWORK_COMPLETED" || job.status === "REINSPECTION") && can("rework.create")) && (
                   <Button
                     size="sm"
                     onClick={() => {

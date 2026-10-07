@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission } from "@/lib/server/authz";
 import { prisma } from "@/lib/server/prisma";
 import { maskPhone } from "@/lib/server/logger";
 import { errorResponse } from "@/lib/server/http";
@@ -11,7 +11,7 @@ import { errorResponse } from "@/lib/server/http";
  */
 export async function GET() {
   try {
-    await requireRole(["super_admin", "ops_manager"]);
+    await requirePermission("notifications.view");
 
     const logs = await prisma.smsLog.findMany({
       orderBy: { createdAt: "desc" },

@@ -1,0 +1,83 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import type { NextAction } from "./rbac";
+
+/**
+ * The ONE home payload of the signed-in role (GET /api/me/workspace).
+ * Polled while the tab is visible so every workspace home stays live.
+ */
+export interface WorkspaceQueueItem {
+  id: string;
+  status: string;
+  stage: string;
+  scheduledDate: string;
+  scheduledTimeSlot: string;
+  customerName: string | null;
+  propertyTitle: string | null;
+  city: string | null;
+  serviceName: string | null;
+  nextAction: NextAction | null;
+  actionable: boolean;
+}
+
+export interface WorkspacePayload {
+  role: string;
+  workspace: { title: string; home: string; queue: string; layout: string };
+  today: string;
+  counts: {
+    today: number;
+    scheduled: number;
+    assigned: number;
+    inProgress: number;
+    qcPending: number;
+    rework: number;
+    approvalPending: number;
+    completed: number;
+  };
+  attention: { key: string; label: string; count: number; href: string }[];
+  queue: WorkspaceQueueItem[];
+  finance?: {
+    outstanding: number;
+    collected: number;
+    pending: number;
+    overdueCount: number;
+    overdueAmount: number;
+    pendingCount: number;
+    revenueMonth: number;
+  };
+  features?: { amc: boolean; nri: boolean };
+}
+
+export function useWorkspace(pollMs = 15000) {
+  const [data, setData] = useState<WorkspacePayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/me/workspace");
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        setData(json.data as WorkspacePayload);
+        setError(null);
+      } else {
+        setError(json?.error || "Could not load your workspace.");
+      }
+    } catch {
+      setError("Network error. Check your connection and retry.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, pollMs);
+    return () => clearInterval(interval);
+  }, [load, pollMs]);
+
+  return { data, error, loading, refresh: load };
+}

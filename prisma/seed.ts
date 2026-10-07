@@ -10,7 +10,9 @@ import "dotenv/config";
  * SEED_SUPERADMIN_PASSWORD) so no secrets are committed to the repository.
  * There are no other hardcoded users, catalogs, or demo data anywhere in the
  * application: services, rubrics, partners, and staff accounts are all
- * created through the app by the company.
+ * created through the app by the company. Accounts for the other eight RBAC
+ * roles (ops_manager, scheduler, field_manager, field_staff, qc_inspector,
+ * accounts, referral_partner, customer) are created on Users & Roles.
  *
  * Run with: npm run db:seed
  */

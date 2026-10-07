@@ -7,7 +7,8 @@
     "build": "prisma generate && next build",
     "start": "next start -H 0.0.0.0 -p 3000",
     "lint": "next lint",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "test": "tsx tests/rbac.test.ts && tsx tests/ops-visibility.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",

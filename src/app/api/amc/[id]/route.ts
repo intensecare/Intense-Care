@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { syncJobEvent } from "@/lib/server/google-calendar";
@@ -177,7 +177,7 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { user } = await requireRole(["super_admin", "ops_manager"]);
+    const { user } = await requirePermission("amc.manage");
     const { id } = params;
 
     const parsed = ActionSchema.safeParse(await request.json().catch(() => null));

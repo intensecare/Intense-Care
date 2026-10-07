@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission } from "@/lib/server/authz";
+import { recordAudit } from "@/lib/server/audit";
+import { can } from "@/lib/rbac";
 import { errorResponse } from "@/lib/server/http";
 import { serializeCustomer, ok, fail, readJson } from "@/lib/server/serialize";
 import { logger } from "@/lib/server/logger";
@@ -35,10 +37,14 @@ const UpdateSchema = z.object({
  */
 export async function GET() {
   try {
-    const { user } = await requireRole(["super_admin", "ops_manager"]);
-    const rows = await prisma.customer.findMany({ orderBy: { createdAt: "desc" } });
+    const { user, scope } = await requirePermission("customers.view");
+    // OWN scope (customer logins) resolves only the caller's own record.
+    const rows = await prisma.customer.findMany({
+      where: scope === "OWN" ? { id: user.customerId ?? "__none__" } : undefined,
+      orderBy: { createdAt: "desc" },
+    });
     const mapped = rows.map(serializeCustomer);
-    if (user.role === "super_admin") return ok(mapped);
+    if (can(user, "finance.view")) return ok(mapped);
     return ok(
       mapped.map((c) => ({
         ...c,
@@ -54,7 +60,7 @@ export async function GET() {
 /** POST /api/customers — register a customer (managers/admins). */
 export async function POST(request: Request) {
   try {
-    await requireRole(["super_admin", "ops_manager"]);
+    const { user } = await requirePermission("customers.create");
     const parsed = CreateSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json(
@@ -91,7 +97,8 @@ export async function POST(request: Request) {
       });
     }
 
-    logger.info("customers.created", { customerId: created.id, by: "api" });
+    logger.info("customers.created", { customerId: created.id, by: user.id });
+    void recordAudit({ actor: user, action: "CUSTOMER_CREATED", entityType: "customer", entityId: created.id, request });
     return ok(serializeCustomer(created), 201);
   } catch (err) {
     return errorResponse(err, "customers.post.route_error");
@@ -101,7 +108,7 @@ export async function POST(request: Request) {
 /** PATCH /api/customers — update an existing customer (managers/admins). */
 export async function PATCH(request: Request) {
   try {
-    await requireRole(["super_admin", "ops_manager"]);
+    const { user, scope } = await requirePermission("customers.update");
     const parsed = UpdateSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json(
@@ -110,9 +117,14 @@ export async function PATCH(request: Request) {
       );
     }
     const { id, ...rest } = parsed.data;
+    if (scope === "OWN" && id !== user.customerId) return fail("You can only update your own profile.", 403);
     const data: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(rest)) {
       if (v !== undefined) data[k] = v;
+    }
+    // Customers may edit contact details only — never attribution or status.
+    if (scope === "OWN") {
+      for (const k of ["referralPartnerId", "source", "status", "notes"]) delete data[k];
     }
 
     // Referral re-attribution must keep the partner lead counters honest:
@@ -155,6 +167,7 @@ export async function PATCH(request: Request) {
     }
 
     const updated = await prisma.customer.update({ where: { id }, data });
+    void recordAudit({ actor: user, action: "CUSTOMER_UPDATED", entityType: "customer", entityId: id, details: Object.keys(data).join(","), request });
     return ok(serializeCustomer(updated));
   } catch (err) {
     return errorResponse(err, "customers.patch.route_error");
@@ -169,7 +182,7 @@ export async function PATCH(request: Request) {
  */
 export async function DELETE(request: Request) {
   try {
-    await requireRole(["super_admin"]);
+    const { user } = await requirePermission("customers.delete");
     const body = await readJson(request);
     const id = typeof body?.id === "string" ? body.id : null;
     if (!id) return fail("Customer id is required.", 400);
@@ -195,7 +208,8 @@ export async function DELETE(request: Request) {
       }).catch(() => null);
     }
 
-    logger.info("customers.deleted", { customerId: id });
+    logger.info("customers.deleted", { customerId: id, by: user.id });
+    void recordAudit({ actor: user, action: "CUSTOMER_DELETED", entityType: "customer", entityId: id, request });
     return ok({ id, deleted: true });
   } catch (err) {
     return errorResponse(err, "customers.delete.route_error");

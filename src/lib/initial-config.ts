@@ -22,4 +22,6 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   gstin: "",
   sacCode: "",
   resendCooldownSeconds: 60,
+  refundApprovalLimit: 5000,
+  discountApprovalLimitPercent: 10,
 };

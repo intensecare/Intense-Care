@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
+import { FinanceHome } from "@/components/finance/FinanceHome";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
@@ -109,13 +110,13 @@ export default function FinancePage() {
   return (
     <AdminLayout>
       <PageHeader
-        title="Super Admin Financial Governance"
-        description="Quotations, tax invoices, actual payment collections, operational business expenses, and net profit ledger."
-        breadcrumbs={[
-          { label: "Operations", href: "/" },
-          { label: "Finance & Invoices" },
-        ]}
+        title="Finance"
+        description="Billable job → invoice → payment → reconcile → report. Outstanding, collections and refunds at a glance."
+        breadcrumbs={[{ label: "Finance" }]}
       />
+
+      {/* Role home: outstanding / collected / pending / overdue + attention + refunds */}
+      <FinanceHome />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">

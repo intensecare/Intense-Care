@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission, dispatchWindowApplies } from "@/lib/server/authz";
+import { can } from "@/lib/rbac";
 import { errorResponse } from "@/lib/server/http";
 import { getOpsDateVisibility } from "@/lib/ops-visibility";
 import { dispatchCutoffTime } from "@/lib/server/policy";
@@ -66,8 +67,13 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { user } = await requireRole(["super_admin", "ops_manager"]);
+    const { user, scope } = await requirePermission("customers.view");
     const { id } = params;
+    // OWN scope (customer login) may open only their own file.
+    if (scope === "OWN" && id !== user.customerId) return fail("Customer not found.", 404);
+    if (scope === "ASSIGNED" || scope === "TEAM" || scope === "BRANCH") {
+      return fail("Customer files are not available in the field app.", 403);
+    }
 
     const customer = await prisma.customer.findUnique({ where: { id } });
     if (!customer) return fail("Customer not found.", 404);
@@ -115,12 +121,13 @@ export async function GET(
         }),
       ]);
 
-    const isSuper = user.role === "super_admin";
+    // Financial detail follows finance.view, never a role name.
+    const isSuper = can(user, "finance.view");
 
     // Ops managers operate inside the dispatch visibility window on every
     // route — the customer file's booking history is no exception.
     let visibleJobs = jobRows;
-    if (user.role === "ops_manager") {
+    if (dispatchWindowApplies(user)) {
       const visibility = getOpsDateVisibility(new Date(), {
         nextDayDispatchTime: dispatchCutoffTime(),
       });

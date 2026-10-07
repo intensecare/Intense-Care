@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission, requireAnyPermission, requireApproval, HttpError } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import {
   serializeInvoice,
   serializePayment,
   serializeExpense,
   serializeQuote,
+  serializeRefund,
   ok,
   fail,
   readJson,
@@ -16,24 +17,33 @@ import {
 import { getTaxRate } from "@/lib/tax";
 import { getSystemSettings } from "@/lib/server/settings";
 import { logger } from "@/lib/server/logger";
+import { recordAudit } from "@/lib/server/audit";
+import { recordActivity } from "@/lib/server/activity";
+import { can, canApprove, refundNeedsApproval, discountNeedsApproval } from "@/lib/rbac";
 
 /**
- * GET /api/finance — invoices, payments, expenses (super_admin ONLY).
- * Financial data (collections, receivables, expenses, commissions) is the
- * super_admin's domain; ops_manager is denied at the API boundary.
+ * GET /api/finance — invoices, payments, refunds, expenses, quotes.
+ *   finance.view ALL  (Accounts, Super Admin) → everything
+ *   invoice.view OWN  (customer login)        → own invoices + payments only
  */
 export async function GET() {
   try {
-    await requireRole(["super_admin"]);
-    const [invoices, payments, expenses, quotes] = await Promise.all([
-      prisma.invoice.findMany({ orderBy: { issuedAt: "desc" }, take: 500 }),
-      prisma.payment.findMany({ orderBy: { paidAt: "desc" }, take: 500 }),
-      prisma.expense.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
-      prisma.quote.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
+    const { user, permission, scope } = await requireAnyPermission(["finance.view", "invoice.view"]);
+    const own = scope === "OWN";
+    const customerFilter = own ? { customerId: user.customerId ?? "__none__" } : {};
+
+    const [invoices, payments, refunds, expenses, quotes] = await Promise.all([
+      prisma.invoice.findMany({ where: customerFilter, orderBy: { issuedAt: "desc" }, take: 500 }),
+      prisma.payment.findMany({ where: customerFilter, orderBy: { paidAt: "desc" }, take: 500 }),
+      prisma.refund.findMany({ where: customerFilter, orderBy: { createdAt: "desc" }, take: 500 }),
+      own || !can(user, "expenses.manage") ? Promise.resolve([]) : prisma.expense.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
+      own || !can(user, "quotes.manage") ? Promise.resolve([]) : prisma.quote.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
     ]);
+    logger.debug("finance.get", { by: user.id, permission, scope });
     return ok({
       invoices: invoices.map(serializeInvoice),
       payments: payments.map(serializePayment),
+      refunds: refunds.map(serializeRefund),
       expenses: expenses.map(serializeExpense),
       quotes: quotes.map(serializeQuote),
     });
@@ -48,6 +58,30 @@ const PaymentSchema = z.object({
   amount: z.number().min(0.01).max(100000000),
   paymentMethod: z.enum(["card", "bank_transfer", "cash", "upi", "online_link"]),
   reference: z.string().min(1).max(160),
+});
+
+const FinalizeSchema = z.object({ action: z.literal("finalize-invoice"), invoiceId: z.string().min(1).max(64) });
+
+const UpdateInvoiceSchema = z.object({
+  action: z.literal("update-invoice"),
+  invoiceId: z.string().min(1).max(64),
+  discount: z.number().min(0).max(100000000).optional(),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  reason: z.string().max(300).optional(),
+});
+
+const RefundSchema = z.object({
+  action: z.literal("create-refund"),
+  invoiceId: z.string().min(1).max(64),
+  amount: z.number().min(0.01).max(100000000),
+  reason: z.string().min(5).max(500),
+  method: z.enum(["original", "bank_transfer", "upi", "cash"]).default("original"),
+});
+
+const RefundDecisionSchema = z.object({
+  action: z.enum(["approve-refund", "reject-refund"]),
+  refundId: z.string().min(1).max(64),
+  reason: z.string().max(300).optional(),
 });
 
 const ExpenseSchema = z.object({
@@ -81,8 +115,6 @@ const QuoteSchema = z.object({
 const ConvertSchema = z.object({
   action: z.literal("convert-quote"),
   quoteId: z.string().min(1).max(64),
-  // Optional service schedule for the converted booking; falls back to
-  // tomorrow's date with a morning window when omitted.
   scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   scheduledTimeSlot: z
     .string()
@@ -91,37 +123,51 @@ const ConvertSchema = z.object({
     .optional(),
 });
 
-/** POST /api/finance — record payments, log expenses, create/convert quotes (admins). */
+/** Applies an approved refund to the ledger (invoice totals + job status), atomically. */
+async function processRefund(refundId: string) {
+  return prisma.$transaction(async (tx) => {
+    const refund = await tx.refund.findUnique({ where: { id: refundId } });
+    if (!refund) throw new HttpError(404, "Refund not found.");
+    if (refund.status === "PROCESSED") return refund;
+    const invoice = await tx.invoice.findUnique({ where: { id: refund.invoiceId } });
+    if (!invoice) throw new HttpError(404, "Invoice not found.");
+    const refundedAmount = invoice.refundedAmount + refund.amount;
+    const status = refundedAmount >= invoice.amountPaid - 0.005 ? "REFUNDED" : invoice.status;
+    await tx.invoice.update({ where: { id: invoice.id }, data: { refundedAmount, status } });
+    await tx.job.update({ where: { id: invoice.jobId }, data: { paymentStatus: status } });
+    return tx.refund.update({ where: { id: refundId }, data: { status: "PROCESSED", processedAt: new Date() } });
+  });
+}
+
+/** POST /api/finance — payments, invoice finalization/updates, refunds (with approval), expenses, quotes. */
 export async function POST(request: Request) {
   try {
-    const { user } = await requireRole(["super_admin"]);
     const body = await readJson(request);
     const action = typeof body?.action === "string" ? body.action : "";
 
+    /* ------------------------------------------------------- record payment */
     if (action === "record-payment") {
+      const { user } = await requirePermission("payment.record");
       const parsed = PaymentSchema.safeParse(body);
       if (!parsed.success) return fail("Invalid payment payload.", 400);
       const d = parsed.data;
 
       const invoice = await prisma.invoice.findUnique({ where: { id: d.invoiceId } });
       if (!invoice) return fail("Invoice not found.", 404);
+      if (invoice.status === "CANCELLED") return fail("This invoice is cancelled.", 409);
 
-      // §13 edge case: a payment may not exceed the invoice's outstanding
-      // balance. Over-collection would push amountPaid above total and flip
-      // the invoice to PAID with untracked credit on the ledger. Half-a-paisa
-      // tolerance absorbs binary float noise on 2-decimal money fields.
+      // Idempotency: the same reference on the same invoice is the same payment.
+      const duplicate = await prisma.payment.findFirst({ where: { invoiceId: d.invoiceId, transactionReference: d.reference } });
+      if (duplicate) return ok({ ...serializePayment(duplicate), duplicate: true });
+
       if (d.amount - invoice.balanceDue > 0.005) {
         return fail(
           `Payment amount (₹${d.amount.toFixed(2)}) exceeds the outstanding balance (₹${invoice.balanceDue.toFixed(2)}).`,
-          400,
+          400
         );
       }
 
-      // Atomic settlement: the payment receipt, the invoice/job status, and
-      // the customer's lifetime-revenue counter commit together. The counter
-      // is RECOMPUTED from the payment ledger inside the transaction, so
-      // Customer.lifetimeRevenue can never drift from actual collections.
-      const { payment, lifetimeRevenue } = await prisma.$transaction(async (tx) => {
+      const { payment, lifetimeRevenue, status } = await prisma.$transaction(async (tx) => {
         const created = await tx.payment.create({
           data: {
             invoiceId: d.invoiceId,
@@ -132,96 +178,191 @@ export async function POST(request: Request) {
             transactionReference: d.reference,
           },
         });
-
         const amountPaid = invoice.amountPaid + d.amount;
         const balanceDue = Math.max(0, invoice.total - amountPaid);
         const status = balanceDue === 0 ? "PAID" : amountPaid > 0 ? "PARTIAL" : "UNPAID";
-
-        await tx.invoice.update({
-          where: { id: d.invoiceId },
-          data: { amountPaid, balanceDue, status },
-        });
-        await tx.job.update({
-          where: { id: invoice.jobId },
-          data: { paymentStatus: status },
-        });
-
-        const agg = await tx.payment.aggregate({
-          where: { customerId: invoice.customerId },
-          _sum: { amount: true },
-        });
+        await tx.invoice.update({ where: { id: d.invoiceId }, data: { amountPaid, balanceDue, status } });
+        await tx.job.update({ where: { id: invoice.jobId }, data: { paymentStatus: status } });
+        const agg = await tx.payment.aggregate({ where: { customerId: invoice.customerId }, _sum: { amount: true } });
         const revenue = agg._sum.amount ?? 0;
-        await tx.customer.update({
-          where: { id: invoice.customerId },
-          data: { lifetimeRevenue: revenue },
-        });
-
-        return { payment: created, lifetimeRevenue: revenue };
+        await tx.customer.update({ where: { id: invoice.customerId }, data: { lifetimeRevenue: revenue } });
+        return { payment: created, lifetimeRevenue: revenue, status };
       });
 
-      logger.info("finance.payment_recorded", {
-        invoiceId: d.invoiceId,
-        amount: d.amount,
-        customerLifetimeRevenue: lifetimeRevenue,
-        by: user.id,
-      });
+      logger.info("finance.payment_recorded", { invoiceId: d.invoiceId, amount: d.amount, customerLifetimeRevenue: lifetimeRevenue, by: user.id });
+      void recordAudit({ actor: user, action: "PAYMENT_RECORDED", entityType: "payment", entityId: payment.id, jobId: invoice.jobId, previousState: invoice.status, newState: status, details: `₹${d.amount} via ${d.paymentMethod} ref ${d.reference}`, request });
       return ok(serializePayment(payment), 201);
     }
 
+    /* ----------------------------------------------------- finalize invoice */
+    if (action === "finalize-invoice") {
+      const { user } = await requirePermission("invoice.finalize");
+      const parsed = FinalizeSchema.safeParse(body);
+      if (!parsed.success) return fail("Invalid payload.", 400);
+      const invoice = await prisma.invoice.findUnique({ where: { id: parsed.data.invoiceId } });
+      if (!invoice) return fail("Invoice not found.", 404);
+      if (invoice.finalizedAt) return ok({ ...serializeInvoice(invoice), alreadyFinalized: true });
+      const updated = await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: { finalizedAt: new Date(), finalizedBy: `${user.id}:${user.name}` },
+      });
+      await recordActivity({ jobId: invoice.jobId, type: "STATUS_CHANGED", message: `Invoice ${invoice.invoiceNumber} finalized and sent`, actor: { id: user.id, name: user.name, role: user.role } });
+      void recordAudit({ actor: user, action: "INVOICE_FINALIZED", entityType: "invoice", entityId: invoice.id, jobId: invoice.jobId, details: `₹${invoice.total}`, request });
+      return ok(serializeInvoice(updated));
+    }
+
+    /* -------------------------------------------------- update (pre-final) */
+    if (action === "update-invoice") {
+      const { user } = await requirePermission("invoice.update");
+      const parsed = UpdateInvoiceSchema.safeParse(body);
+      if (!parsed.success) return fail("Invalid invoice update.", 400);
+      const d = parsed.data;
+      const invoice = await prisma.invoice.findUnique({ where: { id: d.invoiceId } });
+      if (!invoice) return fail("Invoice not found.", 404);
+      if (invoice.finalizedAt) return fail("Finalized invoices cannot be edited. Issue a refund or credit instead.", 409);
+      if (invoice.amountPaid > 0 && d.discount !== undefined) return fail("A discount cannot be applied after a payment was recorded.", 409);
+
+      const data: Record<string, unknown> = {};
+      if (d.dueDate) data.dueDate = d.dueDate;
+      if (d.discount !== undefined) {
+        const settings = await getSystemSettings();
+        const percent = invoice.subtotal > 0 ? (d.discount / invoice.subtotal) * 100 : 0;
+        if (discountNeedsApproval(percent, settings)) {
+          // High-value discount: approval authority (§17).
+          requireApproval(user, "discount.high_value");
+          if (!d.reason) return fail("A reason is required for a discount above the configured limit.", 400);
+        }
+        const total = Math.max(0, invoice.subtotal + invoice.tax - d.discount);
+        data.discount = d.discount;
+        data.total = total;
+        data.balanceDue = Math.max(0, total - invoice.amountPaid);
+      }
+      const updated = await prisma.invoice.update({ where: { id: invoice.id }, data });
+      void recordAudit({ actor: user, action: "INVOICE_UPDATED", entityType: "invoice", entityId: invoice.id, jobId: invoice.jobId, previousState: `total=${invoice.total}`, newState: `total=${updated.total}`, reason: d.reason, request });
+      return ok(serializeInvoice(updated));
+    }
+
+    /* -------------------------------------------------------------- refunds */
+    if (action === "create-refund") {
+      const { user } = await requirePermission("refund.create");
+      const parsed = RefundSchema.safeParse(body);
+      if (!parsed.success) return fail("Invalid refund payload (a reason of at least 5 characters is required).", 400);
+      const d = parsed.data;
+      const invoice = await prisma.invoice.findUnique({ where: { id: d.invoiceId } });
+      if (!invoice) return fail("Invoice not found.", 404);
+      const refundable = invoice.amountPaid - invoice.refundedAmount;
+      if (d.amount - refundable > 0.005) return fail(`Refund exceeds the refundable amount (₹${refundable.toFixed(2)}).`, 400);
+
+      const settings = await getSystemSettings();
+      const needsApproval = refundNeedsApproval(d.amount, settings);
+      const selfApproved = !needsApproval || canApprove(user.role, "refund.high_value");
+
+      const refund = await prisma.refund.create({
+        data: {
+          invoiceId: invoice.id,
+          jobId: invoice.jobId,
+          customerId: invoice.customerId,
+          amount: d.amount,
+          reason: d.reason,
+          method: d.method,
+          status: selfApproved ? "APPROVED" : "PENDING_APPROVAL",
+          requestedBy: `${user.id}:${user.name}`,
+          approvedBy: selfApproved ? `${user.id}:${user.name}` : null,
+          approvedAt: selfApproved ? new Date() : null,
+        },
+      });
+      const final = selfApproved ? await processRefund(refund.id) : refund;
+      void recordAudit({
+        actor: user,
+        action: selfApproved ? "REFUND_PROCESSED" : "REFUND_REQUESTED",
+        entityType: "refund",
+        entityId: refund.id,
+        jobId: invoice.jobId,
+        newState: final.status,
+        reason: d.reason,
+        details: `₹${d.amount}${needsApproval ? " (above limit)" : ""}`,
+        request,
+      });
+      return ok(serializeRefund(final), 201);
+    }
+
+    if (action === "approve-refund" || action === "reject-refund") {
+      const { user } = await requirePermission("refund.approve");
+      requireApproval(user, "refund.high_value");
+      const parsed = RefundDecisionSchema.safeParse(body);
+      if (!parsed.success) return fail("Invalid payload.", 400);
+      const refund = await prisma.refund.findUnique({ where: { id: parsed.data.refundId } });
+      if (!refund) return fail("Refund not found.", 404);
+      if (refund.status !== "PENDING_APPROVAL") return fail(`Refund is already ${refund.status}.`, 409);
+      if (action === "reject-refund") {
+        const rejected = await prisma.refund.update({ where: { id: refund.id }, data: { status: "REJECTED", approvedBy: `${user.id}:${user.name}`, approvedAt: new Date() } });
+        void recordAudit({ actor: user, action: "REFUND_REJECTED", entityType: "refund", entityId: refund.id, jobId: refund.jobId, previousState: "PENDING_APPROVAL", newState: "REJECTED", reason: parsed.data.reason, request });
+        return ok(serializeRefund(rejected));
+      }
+      await prisma.refund.update({ where: { id: refund.id }, data: { status: "APPROVED", approvedBy: `${user.id}:${user.name}`, approvedAt: new Date() } });
+      const processed = await processRefund(refund.id);
+      void recordAudit({ actor: user, action: "REFUND_APPROVED", entityType: "refund", entityId: refund.id, jobId: refund.jobId, previousState: "PENDING_APPROVAL", newState: "PROCESSED", reason: parsed.data.reason, details: `₹${refund.amount}`, request });
+      return ok(serializeRefund(processed));
+    }
+
+    /* ------------------------------------------------------------- expenses */
     if (action === "create-expense") {
+      const { user } = await requirePermission("expenses.manage");
       const parsed = ExpenseSchema.safeParse(body);
       if (!parsed.success) return fail("Invalid expense payload.", 400);
       const { action: _action, ...d } = parsed.data;
-      const created = await prisma.expense.create({
-        data: { ...d, reference: d.reference, createdBy: user.id },
-      });
+      const created = await prisma.expense.create({ data: { ...d, reference: d.reference, createdBy: user.id } });
+      void recordAudit({ actor: user, action: "EXPENSE_CREATED", entityType: "expense", entityId: created.id, details: `₹${d.amount} ${d.category}`, request });
       return ok(serializeExpense(created), 201);
     }
 
+    if (action === "delete-expense") {
+      const { user } = await requirePermission("expenses.manage");
+      const parsed = z.object({ action: z.literal("delete-expense"), id: z.string().min(1).max(64) }).safeParse(body);
+      if (!parsed.success) return fail("Invalid expense delete payload.", 400);
+      const existing = await prisma.expense.findUnique({ where: { id: parsed.data.id } });
+      if (!existing) return fail("Expense not found.", 404);
+      await prisma.expense.delete({ where: { id: parsed.data.id } });
+      logger.info("finance.expense_deleted", { expenseId: parsed.data.id, by: user.id });
+      void recordAudit({ actor: user, action: "EXPENSE_DELETED", entityType: "expense", entityId: parsed.data.id, request });
+      return ok({ id: parsed.data.id, deleted: true });
+    }
+
+    /* --------------------------------------------------------------- quotes */
     if (action === "create-quote") {
+      const { user } = await requirePermission("quotes.manage");
       const parsed = QuoteSchema.safeParse(body);
       if (!parsed.success) return fail("Invalid quote payload.", 400);
       const d = parsed.data;
-
       const settings = await getSystemSettings();
       const subtotal = d.items.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0);
       const rate = getTaxRate(settings);
       const tax = Math.round(subtotal * rate * 100) / 100;
-
       const created = await prisma.quote.create({
         data: {
           quoteNumber: nextDocNumber("QUO"),
           customerId: d.customerId,
           propertyId: d.propertyId,
           serviceId: d.serviceId,
-          // Line items are stored verbatim so the quoted document can show
-          // exactly what was priced (legacy quotations have none).
-          items: d.items.map((it) => ({
-            description: it.description,
-            quantity: it.quantity,
-            unitPrice: it.unitPrice,
-          })),
+          items: d.items.map((it) => ({ description: it.description, quantity: it.quantity, unitPrice: it.unitPrice })),
           subtotal,
           tax,
           total: subtotal + tax,
           validUntil: d.validUntil,
         },
       });
+      void recordAudit({ actor: user, action: "QUOTE_CREATED", entityType: "quote", entityId: created.id, details: `₹${created.total}`, request });
       return ok(serializeQuote(created), 201);
     }
 
     if (action === "convert-quote") {
+      const { user } = await requireAnyPermission(["quotes.manage", "jobs.create"]);
       const parsed = ConvertSchema.safeParse(body);
       if (!parsed.success) return fail("Invalid convert payload.", 400);
-
       const quote = await prisma.quote.findUnique({ where: { id: parsed.data.quoteId } });
       if (!quote) return fail("Quote not found.", 404);
       if (quote.status !== "sent") return fail("Only open quotations can be converted.", 409);
 
-      // Accepted quotations become a scheduled job with its tax invoice,
-      // created atomically so the invoice always has a real job behind it.
-      // The desk picks the service date/window at conversion; defaults keep
-      // the previous behavior for API callers that omit them.
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       const scheduledDate = parsed.data.scheduledDate ?? tomorrow.toISOString().slice(0, 10);
@@ -253,19 +394,11 @@ export async function POST(request: Request) {
             dueDate: quote.validUntil,
           },
         });
-        // The converted booking counts toward the customer's booking total.
-        await tx.customer.update({
-          where: { id: quote.customerId },
-          data: { totalBookings: { increment: 1 } },
-        });
-        // Status string matches the client contract (Quote["status"]) so the
-        // UI hides convert/delete actions on converted quotations.
+        await tx.customer.update({ where: { id: quote.customerId }, data: { totalBookings: { increment: 1 } } });
         await tx.quote.update({ where: { id: quote.id }, data: { status: "converted_to_job" } });
         return { job: createdJob, invoice: createdInvoice };
       });
 
-      // The customer's ONE secure link: minted the moment the quotation
-      // becomes a job. Fire-and-forget — never fails a conversion.
       void (async () => {
         try {
           const { ensureCustomerLink } = await import("@/lib/server/qr-service");
@@ -274,30 +407,20 @@ export async function POST(request: Request) {
           logger.warn("finance.customer_link_ensure_failed", { jobId: job.id, error: e instanceof Error ? e.message : String(e) });
         }
       })();
-
+      void recordAudit({ actor: user, action: "QUOTE_CONVERTED", entityType: "quote", entityId: quote.id, jobId: job.id, newState: "SCHEDULED", request });
       return ok({ invoice: serializeInvoice(invoice), jobId: job.id }, 201);
     }
 
-    if (action === "delete-expense") {
-      const parsed = z.object({ action: z.literal("delete-expense"), id: z.string().min(1).max(64) }).safeParse(body);
-      if (!parsed.success) return fail("Invalid expense delete payload.", 400);
-      const existing = await prisma.expense.findUnique({ where: { id: parsed.data.id } });
-      if (!existing) return fail("Expense not found.", 404);
-      await prisma.expense.delete({ where: { id: parsed.data.id } });
-      logger.info("finance.expense_deleted", { expenseId: parsed.data.id, by: user.id });
-      return ok({ id: parsed.data.id, deleted: true });
-    }
-
     if (action === "delete-quote") {
+      const { user } = await requirePermission("quotes.manage");
       const parsed = z.object({ action: z.literal("delete-quote"), id: z.string().min(1).max(64) }).safeParse(body);
       if (!parsed.success) return fail("Invalid quote delete payload.", 400);
       const quote = await prisma.quote.findUnique({ where: { id: parsed.data.id } });
       if (!quote) return fail("Quote not found.", 404);
-      if (quote.status !== "sent") {
-        return fail("Only open quotations can be deleted; converted quotations are part of job history.", 409);
-      }
+      if (quote.status !== "sent") return fail("Only open quotations can be deleted; converted quotations are part of job history.", 409);
       await prisma.quote.delete({ where: { id: parsed.data.id } });
       logger.info("finance.quote_deleted", { quoteId: parsed.data.id, by: user.id });
+      void recordAudit({ actor: user, action: "QUOTE_DELETED", entityType: "quote", entityId: parsed.data.id, request });
       return ok({ id: parsed.data.id, deleted: true });
     }
 

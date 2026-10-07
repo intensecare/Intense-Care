@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 
 export function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
   const { smsGatewayLogs, fetchSmsGatewayLog, fontSize, setFontSize } = useApp();
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, can, roleLabel } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
   const router = useRouter();
@@ -95,8 +95,8 @@ export function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
           </button>
         </div>
 
-        {/* Quick New Job Button - Super Admin Only */}
-        {currentUser?.role === "super_admin" && (
+        {/* Quick New Booking — anyone who may create jobs */}
+        {can("jobs.create") && (
           <Link href="/jobs?create=true">
             <Button size="sm" className="h-8 text-xs bg-rose-500 hover:bg-rose-600 text-white font-medium rounded px-3 shadow-xs border border-zinc-800">
               <Plus className="h-3.5 w-3.5 mr-1" />
@@ -184,7 +184,7 @@ export function Navbar({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
                 {currentUser.name}
               </div>
               <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                {currentUser.role.replace("_", " ")}
+                {roleLabel}
               </div>
             </div>
 

@@ -6,6 +6,7 @@ import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
 import { formatCurrency } from "@/lib/utils";
 import {
   Users,
@@ -29,7 +30,8 @@ import type { Customer } from "@/lib/types";
 
 export default function CustomersPage() {
   const router = useRouter();
-  const { customers, properties, partners, createCustomer, updateCustomer, deleteCustomer, currentRole } = useApp();
+  const { customers, properties, partners, createCustomer, updateCustomer, deleteCustomer } = useApp();
+  const { can } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -37,8 +39,8 @@ export default function CustomersPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [actionError, setActionError] = useState("");
 
-  const canEdit = currentRole === "super_admin" || currentRole === "ops_manager";
-  const canDelete = currentRole === "super_admin";
+  const canEdit = can("customers.update");
+  const canDelete = can("customers.delete");
 
   const filteredCustomers = customers.filter(
     (c) =>

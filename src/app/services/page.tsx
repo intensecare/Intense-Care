@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
 import { Service } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -32,6 +33,7 @@ export default function ServicesPage() {
     addChecklistItemToService,
     removeChecklistItemFromService,
   } = useApp();
+  const { can } = useAuth();
 
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -133,7 +135,7 @@ export default function ServicesPage() {
           { label: "Services & Checklists" },
         ]}
         actions={
-          currentRole === "super_admin" && (
+          can("services.manage") && (
             <Button
               onClick={() => {
                 setName("");
@@ -215,7 +217,7 @@ export default function ServicesPage() {
                 Your catalog starts empty. Create your first service package with its own pricing and
                 checklist rubric — everything here is authored by your company, nothing is preset.
               </p>
-              {currentRole === "super_admin" && (
+              {can("services.manage") && (
                 <Button
                   size="sm"
                   className="bg-slate-900 text-white mt-2"
@@ -255,7 +257,7 @@ export default function ServicesPage() {
                   <div className="text-[11px] text-slate-400">Base Starting Rate</div>
                 </div>
 
-                {currentRole === "super_admin" && (
+                {can("services.manage") && (
                   <div className="flex items-center justify-end gap-1.5 pt-1">
                     <Button
                       size="sm"
@@ -289,7 +291,7 @@ export default function ServicesPage() {
                   Standard Checklist Rubric ({selectedService.checklistTemplate.length} Tasks)
                 </h4>
 
-                {currentRole === "super_admin" && (
+                {can("services.manage") && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -334,7 +336,7 @@ export default function ServicesPage() {
 
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                      {currentRole === "super_admin" && (
+                      {can("services.manage") && (
                         <button
                           onClick={() => removeChecklistItemFromService(selectedService.id, item.id)}
                           className="text-slate-400 hover:text-red-600 transition-colors p-1"

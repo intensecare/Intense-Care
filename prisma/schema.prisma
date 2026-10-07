@@ -13,16 +13,30 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Login account. `role` is one of the nine RBAC roles (src/lib/rbac/roles.ts):
+/// super_admin | ops_manager | scheduler | field_manager | field_staff |
+/// qc_inspector | accounts | referral_partner | customer.
+/// Scope attributes: teamId/branchId (TEAM/BRANCH scopes), customerId
+/// (customer login → OWN scope), referralPartnerId (partner login → OWN scope).
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  phone        String
-  role         String // "super_admin" | "ops_manager" | "staff"
-  avatar       String?
-  passwordHash String? // bcrypt hash; null = password login disabled until set
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  id                String   @id @default(cuid())
+  name              String
+  email             String   @unique
+  phone             String
+  role              String
+  avatar            String?
+  passwordHash      String? // bcrypt hash; null = password login disabled until set
+  active            Boolean  @default(true)
+  teamId            String?
+  branchId          String?
+  customerId        String?
+  referralPartnerId String?
+  createdAt         DateTime @default(now())
+
+  @@index([role])
+  @@index([customerId])
+  @@index([referralPartnerId])
+  @@index([teamId])
 }
 
 model Customer {
@@ -209,12 +223,42 @@ model Invoice {
   dueDate       String
   status        String   @default("UNPAID") // UNPAID | PARTIAL | PAID | REFUNDED | CANCELLED
   issuedAt      DateTime @default(now())
+  /// Set when Accounts finalizes the invoice; line amounts are frozen after this.
+  finalizedAt   DateTime?
+  finalizedBy   String?
+  /// Running total of approved refunds against this invoice.
+  refundedAmount Float   @default(0)
 
   job      Job       @relation(fields: [jobId], references: [id])
   payments Payment[]
+  refunds  Refund[]
 
   @@index([jobId])
   @@index([customerId])
+}
+
+/// Refund against an invoice. Refunds up to the configured limit are
+/// processed by Accounts; above it the record waits in PENDING_APPROVAL until
+/// an Operations Manager or Super Admin approves (approval authority §17).
+model Refund {
+  id          String    @id @default(cuid())
+  invoiceId   String
+  jobId       String
+  customerId  String
+  amount      Float
+  reason      String
+  method      String // original | bank_transfer | upi | cash
+  status      String    @default("PENDING_APPROVAL") // PENDING_APPROVAL | APPROVED | REJECTED | PROCESSED
+  requestedBy String
+  approvedBy  String?
+  approvedAt  DateTime?
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@index([status])
 }
 
 model Payment {
@@ -477,18 +521,27 @@ model SystemSettings {
   updatedAt DateTime @updatedAt
 }
 
+/// Immutable audit trail (§27): who (user + role), what (action + resource),
+/// which job, previous/new state, reason, and device metadata. Rows are only
+/// ever inserted — there is no delete path through the application.
 model AuditLog {
-  id          String   @id @default(cuid())
-  entityType  String
-  entityId    String
-  action      String
-  performedBy String
-  oldState    String?
-  newState    String?
-  details     String?
-  timestamp   DateTime @default(now())
+  id              String   @id @default(cuid())
+  entityType      String
+  entityId        String
+  action          String
+  performedBy     String // "userId:displayName" ("system:…" for automated steps)
+  performedByRole String?
+  jobId           String?
+  oldState        String?
+  newState        String?
+  reason          String?
+  details         String?
+  ipAddress       String?
+  userAgent       String?
+  timestamp       DateTime @default(now())
 
   @@index([entityType, entityId])
+  @@index([jobId])
   @@index([timestamp])
 }
 

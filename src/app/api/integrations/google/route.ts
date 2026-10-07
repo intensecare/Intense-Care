@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { getGoogleIntegrationStatus } from "@/lib/server/google-calendar";
 
@@ -9,7 +9,7 @@ import { getGoogleIntegrationStatus } from "@/lib/server/google-calendar";
  */
 export async function GET() {
   try {
-    await requireRole(["super_admin"]);
+    await requirePermission("integrations.manage");
     const status = await getGoogleIntegrationStatus();
     return NextResponse.json({ success: true, data: status });
   } catch (err) {

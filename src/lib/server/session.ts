@@ -2,14 +2,16 @@ import crypto from "crypto";
 import { cookies } from "next/headers";
 import { prisma } from "./prisma";
 import { logger } from "./logger";
+import { normalizeRole, type Role } from "@/lib/rbac/roles";
 
 /**
  * Server-side session layer.
  *
- * The ERP UI signs users in client-side (role switcher against the user
- * directory). To make server APIs trustworthy, every browser also establishes
- * a server session cookie carrying a signed userId assertion. API routes
- * resolve the session to a real user row and enforce role-based authorization.
+ * Sessions are established exclusively by POST /api/auth/login after bcrypt
+ * verification. The cookie carries ONLY a signed user id + expiry: the role
+ * and scope attributes are re-read from the database on every request, so a
+ * role change or deactivation takes effect immediately and the client can
+ * never assert its own role ("never trust frontend role values").
  */
 
 const COOKIE_NAME = "erp_session";
@@ -27,7 +29,6 @@ function getSessionSecret(): string {
       "ERP_SESSION_SECRET must be at least 32 characters long for security. Generate a stronger secret with: openssl rand -hex 32"
     );
   }
-  // Check for high entropy (not a simple pattern)
   const uniqueChars = new Set(secret.split(""));
   if (uniqueChars.size < 16) {
     throw new Error(
@@ -48,19 +49,20 @@ function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(aBuf, bBuf);
 }
 
+/** The authenticated identity every API route works with (= RBAC Principal). */
 export interface SessionUser {
   id: string;
   name: string;
   email: string;
-  role: string;
+  role: Role;
+  teamId: string | null;
+  branchId: string | null;
+  customerId: string | null;
+  referralPartnerId: string | null;
 }
 
-function buildToken(user: SessionUser, issuedAtMs: number, expiresAtMs: number): string {
-  const payload = JSON.stringify({
-    uid: user.id,
-    iat: issuedAtMs,
-    exp: expiresAtMs,
-  });
+function buildToken(userId: string, issuedAtMs: number, expiresAtMs: number): string {
+  const payload = JSON.stringify({ uid: userId, iat: issuedAtMs, exp: expiresAtMs });
   const encoded = Buffer.from(payload).toString("base64url");
   return `${encoded}.${sign(encoded)}`;
 }
@@ -83,10 +85,10 @@ function verifyToken(token: string): { uid: string } | null {
 }
 
 /** Issues the session cookie for the given user. */
-export async function createSession(user: SessionUser): Promise<void> {
+export async function createSession(user: Pick<SessionUser, "id" | "role">): Promise<void> {
   const now = Date.now();
   const expiresAtMs = now + SESSION_TTL_HOURS * 60 * 60 * 1000;
-  const token = buildToken(user, now, expiresAtMs);
+  const token = buildToken(user.id, now, expiresAtMs);
 
   const store = await cookies();
   store.set(COOKIE_NAME, token, {
@@ -106,11 +108,33 @@ export async function destroySession(): Promise<void> {
   store.delete(COOKIE_NAME);
 }
 
+/** Maps a User row to the session identity (role normalized, scope attrs attached). */
+export function toSessionUser(user: {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  teamId?: string | null;
+  branchId?: string | null;
+  customerId?: string | null;
+  referralPartnerId?: string | null;
+}): SessionUser {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: normalizeRole(user.role),
+    teamId: user.teamId ?? null,
+    branchId: user.branchId ?? null,
+    customerId: user.customerId ?? null,
+    referralPartnerId: user.referralPartnerId ?? null,
+  };
+}
+
 /**
  * Resolves the current authenticated user from the session cookie.
  * Returns null when unauthenticated or when the referenced user no longer
- * exists / is deactivated. User records live in the ERP client store, so the
- * server keeps its own mirror (User model) and upserts it on sync.
+ * exists / is deactivated.
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
   const store = await cookies();
@@ -123,12 +147,5 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const user = await prisma.user.findUnique({ where: { id: uid } });
   if (!user || !user.active) return null;
 
-  return { id: user.id, name: user.name, email: user.email, role: user.role };
+  return toSessionUser(user);
 }
-
-/*
- * NOTE: the legacy syncAndSignIn helper (client-asserted identity upsert +
- * session) was removed — it allowed any browser to mint a session for an
- * arbitrary user id. Sessions are now established exclusively by
- * POST /api/auth/login after bcrypt verification against the database.
- */

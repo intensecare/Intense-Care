@@ -28,6 +28,8 @@ import {
 } from "./types";
 import { DEFAULT_SYSTEM_SETTINGS } from "./initial-config";
 import { useAuth } from "./auth-context";
+import { can as rbacCan, normalizeRole } from "./rbac";
+import type { Refund } from "./types";
 
 /**
  * Application data layer — the DATABASE is the source of truth.
@@ -71,10 +73,17 @@ interface AppContextType {
   quotes: Quote[];
   invoices: Invoice[];
   payments: Payment[];
+  refunds: Refund[];
   expenses: Expense[];
   smsGatewayLogs: SmsGatewayLog[];
 
   // Actions
+  /** Re-fetches invoices, payments, refunds, expenses and quotes (finance.view / invoice.view). */
+  refreshFinance: () => Promise<void>;
+  finalizeInvoice: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
+  updateInvoice: (invoiceId: string, updates: { discount?: number; dueDate?: string; reason?: string }) => Promise<{ success: boolean; message: string }>;
+  createRefund: (invoiceId: string, amount: number, reason: string, method?: Refund["method"]) => Promise<{ success: boolean; message: string; refund?: Refund }>;
+  decideRefund: (refundId: string, decision: "approve" | "reject", reason?: string) => Promise<{ success: boolean; message: string }>;
   transitionJobStatus: (
     jobId: string,
     nextStatus: JobStatus,
@@ -236,10 +245,22 @@ interface AppContextType {
     phone: string;
     role: UserRole;
     password: string;
+    teamId?: string | null;
+    customerId?: string | null;
+    referralPartnerId?: string | null;
   }) => Promise<{ success: boolean; message: string }>;
   updateUser: (
     id: string,
-    updates: { name?: string; phone?: string; role?: UserRole; active?: boolean; password?: string }
+    updates: {
+      name?: string;
+      phone?: string;
+      role?: UserRole;
+      active?: boolean;
+      password?: string;
+      teamId?: string | null;
+      customerId?: string | null;
+      referralPartnerId?: string | null;
+    }
   ) => Promise<{ success: boolean; message: string }>;
   toggleUserStatus: (id: string) => Promise<void>;
   deleteUser: (id: string) => Promise<{ success: boolean; message: string }>;
@@ -306,6 +327,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [refunds, setRefunds] = useState<Refund[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [smsGatewayLogs, setSmsGatewayLogs] = useState<SmsGatewayLog[]>([]);
   /** Last rejected transition (jobId + server message) surfaced to the UI. */
@@ -337,7 +359,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     setLoading(true);
 
-    const isManager = authUser.role === "super_admin" || authUser.role === "ops_manager";
+    // Every collection is fetched only when the role holds its permission
+    // (the server scopes the rows; this just avoids pointless 403s).
+    const allowed = (p: Parameters<typeof rbacCan>[1]) => rbacCan({ role: authUser.role }, p);
     const parallel: Promise<void>[] = [];
 
     // Settings: any signed-in user may read.
@@ -361,22 +385,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
     );
 
-    if (isManager) {
+    if (allowed("customers.view")) {
       parallel.push(
         api<Customer[]>("/api/customers").then((r) => {
           if (r.ok && r.data) setCustomers(r.data);
         })
       );
+    }
+    if (allowed("properties.view")) {
       parallel.push(
         api<Property[]>("/api/properties").then((r) => {
           if (r.ok && r.data) setProperties(r.data);
         })
       );
+    }
+    if (allowed("users.view") || allowed("users.manage")) {
       parallel.push(
         api<User[]>("/api/users").then((r) => {
-          if (r.ok && r.data) setUsers(r.data);
+          if (r.ok && r.data) setUsers(r.data.map((u) => ({ ...u, role: normalizeRole(u.role) })));
         })
       );
+    }
+    if (allowed("referrals.view") && authUser.role !== "referral_partner") {
       parallel.push(
         api<{
           partners: ReferralPartner[];
@@ -392,11 +422,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         })
       );
+    }
+    if (allowed("finance.view")) {
       parallel.push(
-        api<{ invoices: Invoice[]; payments: Payment[]; expenses: Expense[]; quotes: Quote[] }>("/api/finance").then((r) => {
+        api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[]; expenses: Expense[]; quotes: Quote[] }>("/api/finance").then((r) => {
           if (r.ok && r.data) {
             setInvoices(r.data.invoices);
             setPayments(r.data.payments);
+            setRefunds(r.data.refunds ?? []);
             setExpenses(r.data.expenses);
             setQuotes(r.data.quotes);
           }
@@ -533,6 +566,49 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * that fails silently, making it safe to call after any server-side write
    * that may have settled a commission (e.g. job completion).
    */
+  const refreshFinance = useCallback(async () => {
+    const r = await api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[]; expenses: Expense[]; quotes: Quote[] }>("/api/finance");
+    if (r.ok && r.data) {
+      setInvoices(r.data.invoices);
+      setPayments(r.data.payments);
+      setRefunds(r.data.refunds ?? []);
+      setExpenses(r.data.expenses);
+      setQuotes(r.data.quotes);
+    }
+  }, []);
+
+  const finalizeInvoice = async (invoiceId: string) => {
+    const r = await api<Invoice>("/api/finance", { method: "POST", body: JSON.stringify({ action: "finalize-invoice", invoiceId }) });
+    if (!r.ok) return { success: false, message: r.error || "Could not finalize the invoice." };
+    await refreshFinance();
+    return { success: true, message: "Invoice finalized and sent." };
+  };
+
+  const updateInvoice = async (invoiceId: string, updates: { discount?: number; dueDate?: string; reason?: string }) => {
+    const r = await api<Invoice>("/api/finance", { method: "POST", body: JSON.stringify({ action: "update-invoice", invoiceId, ...updates }) });
+    if (!r.ok) return { success: false, message: r.error || "Could not update the invoice." };
+    await refreshFinance();
+    return { success: true, message: "Invoice updated." };
+  };
+
+  const createRefund = async (invoiceId: string, amount: number, reason: string, method: Refund["method"] = "original") => {
+    const r = await api<Refund>("/api/finance", { method: "POST", body: JSON.stringify({ action: "create-refund", invoiceId, amount, reason, method }) });
+    if (!r.ok || !r.data) return { success: false, message: r.error || "Could not create the refund." };
+    await refreshFinance();
+    return {
+      success: true,
+      message: r.data.status === "PENDING_APPROVAL" ? "Refund recorded — waiting for Operations Manager approval." : "Refund processed.",
+      refund: r.data,
+    };
+  };
+
+  const decideRefund = async (refundId: string, decision: "approve" | "reject", reason?: string) => {
+    const r = await api<Refund>("/api/finance", { method: "POST", body: JSON.stringify({ action: decision === "approve" ? "approve-refund" : "reject-refund", refundId, reason }) });
+    if (!r.ok) return { success: false, message: r.error || "Could not record the decision." };
+    await refreshFinance();
+    return { success: true, message: decision === "approve" ? "Refund approved and processed." : "Refund rejected." };
+  };
+
   const refreshReferrals = useCallback(async () => {
     const r = await api<{
       partners: ReferralPartner[];
@@ -903,7 +979,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * Merges into the users store without clobbering existing hydrated users.
    */
   const fetchStaffDirectory = useCallback(async () => {
-    const r = await api<Array<Pick<User, "id" | "name" | "phone" | "active">>>("/api/users", {
+    const r = await api<Array<Pick<User, "id" | "name" | "phone" | "active" | "role" | "teamId">>>("/api/users", {
       method: "PUT",
     });
     if (!r.ok || !r.data) return;
@@ -919,7 +995,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           name: s.name,
           email: "",
           phone: s.phone || "",
-          role: "staff" as const,
+          role: normalizeRole(s.role),
+          teamId: s.teamId ?? null,
           active: s.active !== false,
           createdAt: "",
         })),
@@ -1360,6 +1437,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     phone: string;
     role: UserRole;
     password: string;
+    teamId?: string | null;
+    customerId?: string | null;
+    referralPartnerId?: string | null;
   }): Promise<{ success: boolean; message: string }> => {
     const r = await api<User>("/api/users", {
       method: "POST",
@@ -1373,7 +1453,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const updateUser = async (
     id: string,
-    updates: { name?: string; phone?: string; role?: UserRole; active?: boolean; password?: string }
+    updates: {
+      name?: string;
+      phone?: string;
+      role?: UserRole;
+      active?: boolean;
+      password?: string;
+      teamId?: string | null;
+      customerId?: string | null;
+      referralPartnerId?: string | null;
+    }
   ): Promise<{ success: boolean; message: string }> => {
     const r = await api<User>("/api/users", {
       method: "PATCH",
@@ -1452,7 +1541,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         quotes,
         invoices,
         payments,
+        refunds,
         expenses,
+        refreshFinance,
+        finalizeInvoice,
+        updateInvoice,
+        createRefund,
+        decideRefund,
         smsGatewayLogs,
         transitionJobStatus,
         refreshJobs,

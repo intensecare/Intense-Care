@@ -5,6 +5,7 @@ import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
 import { formatCurrency, formatDate, formatDateTime, timeAgo } from "@/lib/utils";
 import type { JobActivityEvent } from "@/lib/types";
 import {
@@ -55,6 +56,7 @@ export default function QualityManagementPage() {
     refreshJobs,
     refreshQuality,
   } = useApp();
+  const { can } = useAuth();
 
   // Jobs ready for QC inspection or rework clearance
   const qcQueueJobs = jobs.filter(
@@ -375,7 +377,7 @@ export default function QualityManagementPage() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        {job.status === "WORK_COMPLETED" && (
+                        {job.status === "WORK_COMPLETED" && can("qc.inspect") && (
                           <Button
                             size="sm"
                             onClick={() => handleOpenAuditModal(job.id)}
@@ -386,7 +388,7 @@ export default function QualityManagementPage() {
                           </Button>
                         )}
 
-                        {(job.status === "REWORK_REQUIRED" || job.status === "REWORK_COMPLETED" || job.status === "REINSPECTION") && (
+                        {(job.status === "REWORK_COMPLETED" || job.status === "REINSPECTION") && can("qc.reinspect") && (
                           <Button
                             size="sm"
                             disabled={isProcessingRework}

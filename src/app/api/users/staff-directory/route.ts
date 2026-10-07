@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireRole } from "@/lib/server/authz";
+import { requirePermission } from "@/lib/server/authz";
+import { ASSIGNABLE_ROLES } from "@/lib/rbac";
 import { errorResponse } from "@/lib/server/http";
 import type { StaffDirectoryEntry } from "@/lib/types";
 
@@ -23,10 +24,10 @@ const DONE_STATUSES = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
  */
 export async function GET() {
   try {
-    await requireRole(["super_admin", "ops_manager"]);
+    await requirePermission("users.view");
 
     const staff = await prisma.user.findMany({
-      where: { role: "staff" },
+      where: { role: { in: ASSIGNABLE_ROLES } },
       orderBy: [{ active: "desc" }, { name: "asc" }],
     });
     const staffIds = staff.map((s) => s.id);

@@ -23,6 +23,7 @@ import type {
   Payout,
   Quote,
   Expense,
+  Refund,
   JobStatus,
   PaymentStatus,
 } from "@/lib/types";
@@ -216,6 +217,8 @@ export function serializeInvoice(i: Prisma.InvoiceGetPayload<object>): Invoice {
     dueDate: i.dueDate,
     status: i.status as Invoice["status"],
     issuedAt: new Date(i.issuedAt).toISOString(),
+    finalizedAt: i.finalizedAt ? new Date(i.finalizedAt).toISOString() : undefined,
+    refundedAmount: i.refundedAmount,
   };
 }
 
@@ -429,13 +432,51 @@ export function serializeAuditLog(a: Prisma.AuditLogGetPayload<object>) {
     performedBy: {
       id: id || "system",
       name: rest.join(":") || "System",
-      role: "",
+      role: a.performedByRole ?? "",
     },
+    jobId: a.jobId ?? undefined,
     oldState: a.oldState ?? undefined,
     newState: a.newState ?? undefined,
+    reason: a.reason ?? undefined,
     details: a.details ?? undefined,
+    ipAddress: a.ipAddress ?? undefined,
+    userAgent: a.userAgent ?? undefined,
     timestamp: new Date(a.timestamp).toISOString(),
   };
+}
+
+export function serializeRefund(r: Prisma.RefundGetPayload<object>): Refund {
+  return {
+    id: r.id,
+    invoiceId: r.invoiceId,
+    jobId: r.jobId,
+    customerId: r.customerId,
+    amount: r.amount,
+    reason: r.reason,
+    method: r.method as Refund["method"],
+    status: r.status as Refund["status"],
+    requestedBy: r.requestedBy,
+    approvedBy: r.approvedBy ?? undefined,
+    approvedAt: r.approvedAt ? new Date(r.approvedAt).toISOString() : undefined,
+    processedAt: r.processedAt ? new Date(r.processedAt).toISOString() : undefined,
+    createdAt: new Date(r.createdAt).toISOString(),
+  };
+}
+
+/**
+ * Customer-safe projection of a job (§13/§22): no internal notes, no crew
+ * ids, no money on the job row itself (invoices are served separately).
+ */
+export function redactJobForCustomer(job: SerializedJob) {
+  const {
+    notes: _notes,
+    amount: _amount,
+    assignedManagerId: _m,
+    assignedStaffIds: _s,
+    customerPhone: _p,
+    ...rest
+  } = job;
+  return { ...rest, assignedStaffIds: [] as string[] };
 }
 
 /** Human-readable, collision-safe document number, e.g. INV-LX2K-8341. */

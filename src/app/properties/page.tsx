@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
+import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/utils";
 import {
   Building2,
@@ -38,7 +39,8 @@ import {
 } from "@/components/ui/dialog";
 
 export default function PropertiesPage() {
-  const { properties, customers, jobs, createProperty, updateProperty, deleteProperty, currentRole } = useApp();
+  const { properties, customers, jobs, createProperty, updateProperty, deleteProperty } = useApp();
+  const { can } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -47,8 +49,8 @@ export default function PropertiesPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [actionError, setActionError] = useState("");
 
-  const canEdit = currentRole === "super_admin" || currentRole === "ops_manager";
-  const canDelete = currentRole === "super_admin";
+  const canEdit = can("properties.update");
+  const canDelete = can("properties.delete");
 
   const filteredProperties = properties.filter(
     (p) =>
