@@ -114,7 +114,7 @@ test("customer vocabulary: confirm → view progress → approve → rate", () =
 
 test("workspaces: five separate experiences, each with its own home", () => {
   assert.equal(homePathFor("tax_officer"), "/gst");
-  assert.deepEqual(navFor("tax_officer").map((n) => n.label), ["GST Dashboard", "GST Invoices", "GST Reports", "Intense AI"]);
+  assert.deepEqual(navFor("tax_officer").map((n) => n.label), ["GST Dashboard", "GST Invoices", "GST Reports"]);
   assert.deepEqual(
     navFor("admin").filter((n) => !n.secondary).map((n) => n.label),
     ["Dashboard", "Intense AI", "Jobs", "Customers", "Invoices", "QC", "Reports", "Users"]
@@ -122,8 +122,8 @@ test("workspaces: five separate experiences, each with its own home", () => {
   assert.equal(homePathFor("admin"), "/");
   assert.equal(homePathFor("field_manager"), "/my-jobs");
   assert.equal(homePathFor("qc_inspector"), "/quality-queue");
-  assert.deepEqual(navFor("field_manager").map((n) => n.href), ["/my-jobs", "/assistant"]);
-  assert.deepEqual(navFor("qc_inspector").map((n) => n.href), ["/quality-queue", "/assistant"]);
+  assert.deepEqual(navFor("field_manager").map((n) => n.href), ["/my-jobs"]);
+  assert.deepEqual(navFor("qc_inspector").map((n) => n.href), ["/quality-queue"]);
   assert.equal(navFor("customer").length, 0);
   assert.ok(navFor("admin").some((n) => n.href === "/users"));
 });
@@ -142,7 +142,7 @@ test("routing: Field Manager and QC can't open the Operations desk; customer pag
 
 test("Tax Officer: GST invoices and GST reports only — nothing else, read-only", () => {
   const grants = Object.entries(ROLE_PERMISSIONS.tax_officer).filter(([, s]) => s !== "NONE").map(([p]) => p).sort();
-  assert.deepEqual(grants, ["ai.use", "gst.reports", "gst.view"]);
+  assert.deepEqual(grants, ["gst.reports", "gst.view"]);
   for (const p of ["finance.view", "invoice.view", "invoice.create", "invoice.update", "jobs.view", "jobs.update", "users.manage", "customers.view", "qc.view", "settings.manage", "links.manage"] as const) {
     assert.equal(scopeOf("tax_officer", p), "NONE", p);
   }
@@ -157,19 +157,14 @@ test("Tax Officer: GST invoices and GST reports only — nothing else, read-only
   assert.equal(routeAllowed("admin", "/gst/reports"), true);
 });
 
-test("Intense AI: every sign-in role may open it; the data tools follow each role's permissions", () => {
-  for (const r of ["admin", "field_manager", "qc_inspector", "tax_officer"] as const) {
-    assert.equal(scopeOf(r, "ai.use") !== "NONE", true, r);
-    assert.equal(routeAllowed(r, "/assistant"), true, r);
+test("Intense AI: only Admin may open it; other roles are forbidden", () => {
+  assert.equal(scopeOf("admin", "ai.use") !== "NONE", true, "admin");
+  assert.equal(routeAllowed("admin", "/assistant"), true, "admin");
+
+  for (const r of ["field_manager", "qc_inspector", "tax_officer", "customer"] as const) {
+    assert.equal(scopeOf(r, "ai.use"), "NONE", r);
+    assert.equal(routeAllowed(r, "/assistant"), false, r);
   }
-  assert.equal(scopeOf("customer", "ai.use"), "NONE", "customers use the QR-token assistant, not a login");
-  const names = (role: "admin" | "field_manager" | "qc_inspector" | "tax_officer") =>
-    toolsFor({ kind: "user", user: { id: "u", name: "U", email: "u@x", role, teamId: null, branchId: null, customerId: null, referralPartnerId: null } }).map((t) => t.name).sort();
-  assert.deepEqual(names("tax_officer"), ["get_gst_summary", "get_invoices"]);
-  assert.deepEqual(names("qc_inspector"), ["get_job_details", "get_jobs", "get_qc_report", "get_rework_report"]);
-  assert.deepEqual(names("field_manager"), ["get_customers", "get_job_details", "get_jobs", "get_my_work_summary", "get_qc_report", "get_rework_report"]);
-  assert.ok(names("admin").includes("get_revenue_summary") && names("admin").includes("get_field_manager_performance") && !names("admin").includes("get_my_service"));
-  assert.deepEqual(toolsFor({ kind: "customer", jobId: "j", customerName: "C" }).map((t) => t.name), ["get_my_service"]);
 });
 
 test("GST / Non-GST invoice maths", () => {

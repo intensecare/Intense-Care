@@ -189,7 +189,7 @@ const FIELD_MANAGER: PermissionGrant = {
     "customer_approval.view"
   ),
   ...own("photos.delete"), // only photos they uploaded themselves
-  ...all("services.view", "ai.use"),
+  ...all("services.view"),
 };
 
 /** QC — inspects completed work; never touches money, users or settings. */
@@ -206,8 +206,7 @@ const QC_INSPECTOR: PermissionGrant = {
     "qc.reinspect",
     "rework.view",
     "rework.create",
-    "services.view",
-    "ai.use"
+    "services.view"
   ),
 };
 
@@ -233,7 +232,7 @@ const CUSTOMER: PermissionGrant = {
  * invoiceType = GST for anyone without `finance.view`.
  */
 const TAX_OFFICER: PermissionGrant = {
-  ...all("gst.view", "gst.reports", "ai.use"),
+  ...all("gst.view", "gst.reports"),
 };
 
 export const ROLE_PERMISSIONS: Record<Role, PermissionGrant> = {

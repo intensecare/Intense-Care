@@ -70,7 +70,6 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     layout: "mobile",
     nav: [
       { label: "My Jobs", href: "/my-jobs", permission: "jobs.view" },
-      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
     ],
   },
   qc_inspector: {
@@ -81,7 +80,6 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     layout: "mobile",
     nav: [
       { label: "Quality", href: "/quality-queue", permission: "qc.inspect", badge: "qc_pending" },
-      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
     ],
   },
   tax_officer: {
@@ -94,7 +92,6 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
       { label: "GST Dashboard", href: "/gst", permission: "gst.view" },
       { label: "GST Invoices", href: "/gst/invoices", permission: "gst.view" },
       { label: "GST Reports", href: "/gst/reports", permission: "gst.reports" },
-      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
     ],
   },
   customer: {
