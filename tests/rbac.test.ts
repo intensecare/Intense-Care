@@ -3,6 +3,7 @@
  * Permission matrix, sign-in rules, next action and workspace routing.
  * Run: npm test
  */
+import "dotenv/config";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
