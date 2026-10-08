@@ -1,63 +1,64 @@
-# Laundry Operations
+# Intense Care — Deep Cleaning Operations
 
-A simple, production-ready laundry operations system: **customer → order → pickup → processing → QC → ready → delivery → completed**.
+A simple service-management app for a deep-cleaning business. **Four user types, one Job ID per job, one customer link per job.**
 
-Built with Next.js 14 (App Router, server components), TypeScript, Prisma 7 + PostgreSQL, Tailwind CSS. WhatsApp Business Cloud API for customer updates, Cloudinary (optional) for pickup photos.
-
-## Four user types
-
-| Who | Where | Answers |
+| Who | Experience | What they do |
 |---|---|---|
-| **Admin** | `/admin` — Dashboard, Orders, Customers, Users, Services, Payments, Reports, Settings | "What needs my attention?" |
-| **Field Manager** | `/field` — Today, Pickups, Deliveries, Profile (mobile app) | "What do I pick up or deliver today?" |
-| **QC** | `/qc` — QC Queue, Passed, Failed, Profile (mobile app) | "What do I need to inspect?" |
-| **Customer** | `/customer/order/AC1024?k=…` — no login | "Where is my order?" |
+| **Admin** | **Operations** (desk) | Customers, properties, services, jobs, Field Manager assignment, scheduling, quality status, rework, customer approvals and issues, payments, reports, users, settings |
+| **Field Manager** | **My Jobs** (mobile) | Only their assigned jobs: Navigate → I'M HERE (GPS) → wait for customer → START SERVICE → checklist by area → before/after photos + notes → COMPLETE WORK → fix rework → SUBMIT FOR QC |
+| **QC** | **Quality** (mobile) | Jobs waiting for inspection → INSPECT → PASS or REWORK REQUIRED (area · issue · photo · comment) → reinspection (PASS / REWORK AGAIN), full history kept |
+| **Customer** | **My Service** (secure link, no login) | The page follows the job: View service → CONFIRM & START → progress → quality check pending → VIEW BEFORE / AFTER + APPROVE SERVICE → report, star rating, Google review |
 
-Admins run the entire workflow from one **Order** screen (`/admin/orders/[id]`): status and next step, customer, pickup, items, QC, delivery, payment, customer link and the full activity timeline.
+## The job
 
-## The order workflow
+One Job ID (`JOB-10245`) from booking to feedback — rework never creates a new job:
 
 ```
-CREATED → PICKUP_ASSIGNED → PICKED_UP → PROCESSING → QC_PENDING → QC_PASSED → READY → OUT_FOR_DELIVERY → DELIVERED
-QC_PENDING → QC_FAILED → REWORK → QC_PENDING        QC_PENDING → REWORK (needs rework)
-CREATED / PICKUP_ASSIGNED / PICKED_UP / PROCESSING → CANCELLED (admin, reason required)
+BOOKED → SCHEDULED → ASSIGNED → ARRIVED → CUSTOMER CONFIRMED → IN PROGRESS
+→ WORK COMPLETED → QC → PASS ─────────────→ CUSTOMER APPROVAL → COMPLETED → FEEDBACK
+                       └→ REWORK REQUIRED → Field Manager fixes → SUBMIT FOR QC → REINSPECTION ┘
 ```
 
-- The transition table lives in `src/lib/workflow.ts`; `src/lib/server/orders.ts` enforces it. Invalid moves are rejected (409).
-- Each status write is a compare-and-set inside a database transaction, so double taps and races cannot apply a step twice.
-- Every change is written to `ActivityLog`; every WhatsApp message to `Notification`.
-- **Automation:** order created → pickup assigned to the least-busy field manager · picked up → processing · QC passed → ready → delivery assigned → customer notified · delivery started → customer notified · delivered → completed.
-- QC **Fail** and **Needs rework** require a reason. Payments at the door are recorded in the same transaction as "Delivered".
+Server-enforced: arrival is GPS-checked against the property (`ARRIVAL_GEOFENCE_METERS`, a reason is required to proceed without GPS); work cannot start until the customer confirms on their link; required checklist items must be done before COMPLETE WORK; status changes are compare-and-set so double taps or two devices can't apply twice.
 
-## Security
+## Customer link and QR
 
-- Staff sign in with email + password (bcrypt). The session cookie is HMAC-signed and holds only the user id; role and active flag are re-read from the database on every request.
-- Every page layout and API route checks the role on the server. Field managers can only act on pickups/deliveries assigned to them (anything else returns 404). QC can only make QC decisions.
-- Customer links carry `k = HMAC(secret, orderId:linkVersion)`. Changing the order number in the URL fails; "Revoke & create new link" bumps `linkVersion` and kills old links. Rate-limited, `no-referrer`, `no-store`.
-- Money is stored in paise (integers). Payments are idempotent per form submission and can never exceed the balance.
+- **One secure link per job** — `APP_BASE_URL/customer/service/<token>`, valid for the whole job. 256-bit random token, only its SHA-256 hash is stored (plus an encrypted copy so Admin can re-share the same link). Admin can replace or turn it off. Old `/customer/job/<token>` links redirect.
+- The customer only ever receives: service, date, property, team names, checklist progress and **before/after** photos (served through a token-checked proxy). Never amounts, notes, QC findings or QC/rework photos.
+- **One optional property QR** (Admin → Properties → property → *Property QR*). Scanning it opens the customer page of that property's current or upcoming service. No other QR codes exist.
 
-## Setup
+## Stack
+
+Next.js 14 (App Router) · React 18 · TypeScript strict · Prisma 7 + PostgreSQL · Tailwind · Cloudinary (before / after / QC / rework photos) · WhatsApp / SMS notifications with links.
+
+Authorization: `src/lib/rbac/` holds the one permission matrix (permission + scope). Every API route checks permission and record scope on the server — the UI hiding a button is never the guard. Sessions are HMAC-signed httpOnly cookies; the role is re-read from the database on every request. See [docs/RBAC.md](docs/RBAC.md).
+
+## Getting started
 
 ```bash
 npm install
-cp .env.example .env            # fill DATABASE_URL, SESSION_SECRET, APP_BASE_URL, SEED_ADMIN_*
-npx prisma migrate deploy       # create the tables
-npm run db:seed                 # first admin (SEED_STARTER_SERVICES=1 adds a starter price list)
-npm run dev                     # http://localhost:3000
+cp .env.example .env          # DATABASE_URL, ERP_SESSION_SECRET, APP_BASE_URL, CLOUDINARY_*, WHATSAPP_* …
+npx prisma migrate deploy     # apply migrations
+npm run db:seed               # creates the first Admin from SEED_SUPERADMIN_EMAIL / _PASSWORD
+npm run dev                   # http://localhost:3000
 ```
 
-Then sign in as the admin → **Services** (prices) → **Users** (field managers, QC) → **Settings** (business name, support contacts, UPI ID) → **New Order**.
+Production: `npm run build && npm run start`. **Set `APP_BASE_URL`** to your public https address — customer links and the property QR are built on it, and the app refuses to build them on localhost in production.
 
-> **Upgrading from the previous cleaning-services version:** this is a new data model with a fresh baseline migration. Deploy it to a **new, empty database**. `migrate deploy` on the old database fails safely rather than altering it; `npx prisma migrate reset` would wipe it.
+First run: sign in as Admin → **Services** (add services and their checklist by area) → **Users** (add Field Managers and QC) → **Settings** (tax, Google review URL) → **New Job**.
 
-## Scripts
+Upgrading an existing database: `migrate deploy` maps old accounts automatically — every desk role (super admin, ops manager, scheduler, accounts) becomes **Admin**, field staff become **Field Manager**, and customer / referral-partner logins are disabled (customers use their link). Existing jobs get readable Job IDs.
+
+## Notifications
+
+Composed for every step and logged (`SmsLog`); delivered when a provider is configured:
+- **WhatsApp Cloud API** — `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TEMPLATE_NAME` (template with one body variable). The older `WHATSAPP_API_URL` webhook is still supported.
+- **SMS** — `TWOFACTOR_API_KEY`.
+
+Messages: job assigned (Field Manager), team arrived (customer link), QC ready / reinspection (QC), rework (Field Manager), approve your service (customer link).
+
+## Tests
 
 ```bash
-npm run build   # prisma generate + next build
-npm test        # workflow, pricing and customer-link tests
-npm run lint
+npm test     # roles, permissions, routing, next action, state machine
 ```
-
-## Data model
-
-`User`, `Customer`, `Order`, `OrderItem`, `Service`, `Pickup`, `QCRecord`, `Delivery`, `Payment`, `Notification`, `ActivityLog`, plus `Setting` for the admin-editable business settings. See `prisma/schema.prisma`.

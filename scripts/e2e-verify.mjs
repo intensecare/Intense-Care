@@ -1,0 +1,198 @@
+// End-to-end check against a running server and an EMPTY test database:
+// four user types, one Job ID from booking to feedback, rework loop, security.
+//
+//   DATABASE_URL=… npx prisma migrate deploy
+//   SEED_SUPERADMIN_EMAIL=admin@test.local SEED_SUPERADMIN_PASSWORD=adminpass123 npm run db:seed
+//   APP_BASE_URL=https://example.test npm run build && npm run start -- -p 3100
+//   DATABASE_URL=… BASE_URL=http://localhost:3100 node scripts/e2e-verify.mjs
+//
+// Needs the psql client (rows are inserted directly where Cloudinary would be needed).
+import { execSync } from "node:child_process";
+const BASE = process.env.BASE_URL || "http://localhost:3100";
+let pass = 0, fail = 0;
+const ok = (c, m) => { if (c) { pass++; console.log("PASS", m); } else { fail++; console.log("FAIL", m); } };
+const sql = (q) => execSync(`psql "${process.env.DATABASE_URL}" -tA -c ${JSON.stringify(q)}`).toString().trim();
+
+function client() {
+  let cookie = "";
+  return async (path, { method = "GET", body, raw } = {}) => {
+    const res = await fetch(BASE + path, { method, redirect: "manual", headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const sc = res.headers.get("set-cookie");
+    if (sc) cookie = sc.split(";")[0];
+    if (raw) return res;
+    const json = await res.json().catch(() => null);
+    return { status: res.status, json };
+  };
+}
+const login = async (email, password) => { const c = client(); const r = await c("/api/auth/login", { method: "POST", body: { email, password } }); return { c, r }; };
+
+const admin = (await login("admin@test.local", "adminpass123")).c;
+ok((await admin("/api/auth/session")).json?.data?.role === "admin", "admin signs in as Admin");
+
+// Users: Field Managers + QC
+const mk = async (name, email, role) => (await admin("/api/users", { method: "POST", body: { name, email, phone: "+919800000000", role, password: "password123" } })).json?.data;
+const fm1 = await mk("Ravi FM", "fm1@test.local", "field_manager");
+const fm2 = await mk("Sana FM", "fm2@test.local", "field_manager");
+const qcU = await mk("Quinn QC", "qc@test.local", "qc_inspector");
+ok(fm1 && fm2 && qcU, "admin creates 2 Field Managers + 1 QC");
+ok((await admin("/api/users", { method: "POST", body: { name: "X", email: "x@test.local", phone: "+919800000000", role: "referral_partner", password: "password123" } })).status === 400, "cannot create a 5th role (referral_partner)");
+ok((await admin("/api/users", { method: "POST", body: { name: "X", email: "x2@test.local", phone: "+919800000000", role: "customer", password: "password123" } })).status === 400, "cannot create a customer login");
+
+// Legacy role still signs in (mapped), a customer-role row cannot.
+sql(`insert into "User"(id,name,email,phone,role,"passwordHash",active) values ('legacy1','Old Ops','ops@test.local','1','ops_manager',(select "passwordHash" from "User" where email='admin@test.local'),true), ('cust1','Cust Login','cust@test.local','1','customer',(select "passwordHash" from "User" where email='admin@test.local'),true)`);
+const legacy = await login("ops@test.local", "adminpass123");
+ok(legacy.r.status === 200 && legacy.r.json?.data?.role === "admin", "legacy ops_manager account signs in as Admin");
+ok((await login("cust@test.local", "adminpass123")).r.status === 403, "customer-role account cannot sign in");
+
+// Catalog, customer, property, job
+const svc = (await admin("/api/services", { method: "POST", body: { name: "Deep Clean 2BHK", basePrice: 4999, estimatedDurationHours: 4, checklistTemplate: [{ area: "Kitchen", task: "Degrease hob", critical: true }, { area: "Bathroom", task: "Descale tiles", critical: true }, { area: "Bathroom", task: "Polish mirror" }] } })).json?.data;
+const cust = (await admin("/api/customers", { method: "POST", body: { name: "Asha Rao", phone: "+919812345678" } })).json?.data;
+const prop = (await admin("/api/properties", { method: "POST", body: { customerId: cust?.id, title: "Lakeside 2BHK", address: "12 Lake Rd, Bengaluru" } })).json?.data;
+ok(svc?.id && cust?.id && prop?.id, "service, customer, property created");
+sql(`update "Property" set lat=12.9716, lng=77.5946 where id='${prop.id}'`);
+const today = new Date().toISOString().slice(0, 10);
+const jobR = await admin("/api/jobs", { method: "POST", body: { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: today, scheduledTimeSlot: "09:00 - 13:00" } });
+const job = jobR.json?.data?.job;
+ok(/^JOB-\d{5}$/.test(job?.jobNumber ?? ""), `job created with ONE readable Job ID ${job?.jobNumber}`);
+const job2 = (await admin("/api/jobs", { method: "POST", body: { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: today, scheduledTimeSlot: "14:00 - 18:00" } })).json?.data?.job;
+
+// Dashboard
+let ws = (await admin("/api/me/workspace")).json?.data;
+ok(ws?.counts?.today >= 2 && ws.attention.some((a) => a.jobId === job.id && /No Field Manager/.test(a.reason)), "Operations: today's jobs + 'No Field Manager' attention");
+
+// Assign FM1 to job, FM2 to job2
+ok((await admin(`/api/jobs/${job.id}`, { method: "PATCH", body: { assignedManagerId: fm1.id, assignedStaffIds: [] } })).json?.data?.status === "ASSIGNED", "admin assigns Field Manager → ASSIGNED");
+await admin(`/api/jobs/${job2.id}`, { method: "PATCH", body: { assignedManagerId: fm2.id, assignedStaffIds: [] } });
+
+const fmc = (await login("fm1@test.local", "password123")).c;
+const fm2c = (await login("fm2@test.local", "password123")).c;
+const qcc = (await login("qc@test.local", "password123")).c;
+
+// FM scope
+const fmJobs = (await fmc("/api/jobs")).json?.data ?? [];
+ok(fmJobs.length === 1 && fmJobs[0].id === job.id, "FM sees only their assigned job");
+ok(fmJobs[0].amount === undefined || fmJobs[0].amount === null, "FM never receives the job amount (revenue)");
+ok((await fm2c(`/api/jobs/${job.id}`)).status === 403, "other FM cannot open the job");
+for (const p of ["/api/finance", "/api/users", "/api/settings"]) {
+  const r = await fmc(p, { method: p === "/api/settings" ? "PATCH" : "GET", body: p === "/api/settings" ? {} : undefined });
+  ok(r.status === 403, `FM blocked from ${p} (${r.status})`);
+}
+
+sql(`insert into "Customer"(id,name,phone,"updatedAt") values ('other_c','Other Customer','+910000000000',now())`);
+const fmCust = (await fmc("/api/customers")).json?.data ?? [];
+ok(fmCust.length === 1 && fmCust[0].id === cust.id, "FM sees only the customer of their assigned job (not the directory)");
+ok((await admin("/api/customers")).json?.data?.length === 2, "Admin sees the full customer directory");
+
+// Customer link before arrival
+const link = (await admin("/api/qr-links", { method: "POST", body: { action: "get", jobId: job.id } })).json?.data;
+ok(link?.linkUrl?.startsWith("https://example.test/customer/service/"), "customer link uses APP_BASE_URL + /customer/service/");
+const token = link.linkUrl.split("/").pop();
+const cust1 = client();
+ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "confirm" } })).status === 409, "customer cannot confirm before the team arrives");
+const oldPath = await fetch(`${BASE}/customer/job/${token}`, { redirect: "manual" });
+ok([301, 308].includes(oldPath.status) && oldPath.headers.get("location")?.includes(`/customer/service/${token}`), "old /customer/job link redirects to /customer/service");
+const qrOff = await admin("/api/qr-links", { method: "POST", body: { action: "qr", tokenId: link.tokenId } });
+ok(qrOff.status === 400, "no per-job QR any more");
+
+// Arrival: far away → 409, at the property → GPS verified
+ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { lat: 13.5, lng: 77.5, accuracy: 10 } } })).status === 409, "I'm Here far from the property is refused");
+ok((await qcc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { lat: 12.9716, lng: 77.5946 } } })).status === 403, "QC cannot mark arrival");
+const arr = await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { lat: 12.9717, lng: 77.5947, accuracy: 15 } } });
+ok(arr.json?.data?.status === "ARRIVED", "I'm Here at the property → ARRIVED");
+ok(sql(`select "arrivalVerification" from "Job" where id='${job.id}'`) === "gps", "arrival GPS verified");
+ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "IN_PROGRESS" } })).status >= 400, "FM cannot start before customer confirms");
+let cv = (await cust1(`/api/customer/job/${token}`)).json?.data;
+ok(cv?.job?.status === "ARRIVED", "customer page shows ARRIVED");
+ok(JSON.stringify(cv).includes("amount") === false && cv.qualityCheck === null, "customer payload has no amounts / QC internals");
+ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "confirm" } })).json?.data?.status === "CUSTOMER_VERIFIED", "customer CONFIRM & START");
+ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "confirm" } })).json?.data?.alreadyConfirmed === true, "confirm is idempotent");
+
+// Start + checklist + complete
+ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "IN_PROGRESS" } })).json?.data?.status === "IN_PROGRESS", "START SERVICE");
+const items = (await fmc(`/api/checklist?jobId=${job.id}`)).json?.data ?? [];
+ok(items.length === 3, "checklist instantiated from the service (3 items)");
+ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "WORK_COMPLETED" } })).status === 409, "cannot complete with required checklist items open");
+for (const it of items) await fmc("/api/quality", { method: "PATCH", body: { itemId: it.id, status: "completed" } });
+ok(sql(`select count(*) from "JobChecklistItem" where "jobId"='${job.id}' and status='completed'`) === "3", "checklist completed");
+// Photos (Cloudinary is not configured here) — insert evidence rows directly.
+for (const [t, a] of [["before", "Kitchen"], ["after", "Kitchen"], ["qc", "Kitchen"]]) sql(`insert into "JobPhoto"(id,"jobId",area,"photoType","cloudinaryPublicId","photoUrl","uploadedByUserId","uploadedByName") values ('ph_${t}','${job.id}','${a}','${t}','x','https://res.cloudinary.com/demo/image/upload/sample.jpg','${fm1.id}','Ravi')`);
+await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { notes: "Hob had heavy grease" } });
+ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "WORK_COMPLETED" } })).json?.data?.status === "WORK_COMPLETED", "COMPLETE WORK → waiting for QC");
+ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "WORK_COMPLETED" } })).status >= 400, "double tap does not re-complete");
+cv = (await cust1(`/api/customer/job/${token}`)).json?.data;
+ok(cv.photos.length === 2 && cv.photos.every((p) => p.photoType !== "qc"), "customer sees before/after only — QC evidence hidden");
+ok((await fetch(`${BASE}/api/secure-photo/ph_qc?t=${token}`)).status === 404, "secure-photo refuses QC evidence on the customer link");
+
+// QC round 1: rework
+ok((await fmc("/api/quality", { method: "POST", body: { action: "submit-check", jobId: job.id, score: 100, decision: "PASS", issues: [] } })).status === 403, "FM cannot pass QC");
+ok((await qcc("/api/quality", { method: "POST", body: { action: "start-inspection", jobId: job.id } })).json?.data?.status === "QUALITY_CHECK", "QC INSPECT starts inspection");
+const r1 = await qcc("/api/quality", { method: "POST", body: { action: "submit-check", jobId: job.id, score: 90, decision: "REWORK_REQUIRED", issues: [{ area: "Bathroom", itemDescription: "Mirror has streaks", severity: "major", notes: "Re-polish" }] } });
+ok(r1.status === 201, "QC REWORK REQUIRED with area/issue/comment");
+ok(sql(`select status from "Job" where id='${job.id}'`) === "REWORK_ASSIGNED", "rework goes straight to the Field Manager (same job)");
+ok(sql(`select count(*) from "Job" where "propertyId"='${prop.id}'`) === "2", "no duplicate job created for rework");
+cv = (await cust1(`/api/customer/job/${token}`)).json?.data;
+ok(cv.qualityCheck === null && !JSON.stringify(cv).includes("streaks"), "customer never sees QC findings");
+ws = (await admin("/api/me/workspace")).json?.data;
+ok(ws.counts.rework === 1 && ws.attention.some((a) => a.jobId === job.id && a.reason === "Rework pending"), "Operations: Rework Pending count + attention");
+
+// FM fixes → submit → reinspection → rework again → fix → pass
+const tasks = (await fmc("/api/quality")).json?.data?.reworkTasks.filter((t) => t.jobId === job.id && t.status !== "completed");
+ok(tasks.length === 1, "FM sees the rework item in My Jobs");
+for (const t of tasks) await fmc("/api/quality", { method: "POST", body: { action: "complete-rework", taskId: t.id, notes: "Fixed" } });
+ok(sql(`select status from "Job" where id='${job.id}'`) === "REWORK_COMPLETED", "SUBMIT FOR QC → reinspection");
+await qcc("/api/quality", { method: "POST", body: { action: "submit-check", jobId: job.id, score: 95, decision: "REWORK_REQUIRED", issues: [{ area: "Bathroom", itemDescription: "Corner still dusty", severity: "major", notes: "" }] } });
+ok(sql(`select status from "Job" where id='${job.id}'`) === "REWORK_ASSIGNED", "REWORK AGAIN on reinspection");
+for (const t of (await fmc("/api/quality")).json.data.reworkTasks.filter((t) => t.jobId === job.id && t.status !== "completed")) await fmc("/api/quality", { method: "POST", body: { action: "complete-rework", taskId: t.id, notes: "Fixed" } });
+const pr = await qcc("/api/quality", { method: "POST", body: { action: "reinspect-pass", jobId: job.id, notes: "" } });
+ok(pr.json?.data?.status === "CUSTOMER_APPROVAL", "reinspection PASS → customer approval");
+const hist = (await qcc("/api/quality")).json.data.qualityChecks.filter((q) => q.jobId === job.id);
+ok(hist.length === 3 && hist.every((q) => q.inspectorName === "Quinn QC"), "full QC history kept (3 rounds, inspector named)");
+ok(sql(`select count(*) from "QualityIssue" where "jobId"='${job.id}'`) === "2", "both rework issues kept in history");
+
+// Customer approves + rates
+cv = (await cust1(`/api/customer/job/${token}`)).json?.data;
+ok(cv.job.status === "CUSTOMER_APPROVAL" && cv.qualityCheck?.passed === true, "customer page: QC PASSED → approve");
+ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "approve", signatoryName: "Asha Rao", confirmChecked: true } })).json?.data?.status === "COMPLETED", "APPROVE SERVICE → COMPLETED");
+ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "approve", signatoryName: "Asha Rao", confirmChecked: true } })).json?.data?.alreadyApproved === true, "approve is idempotent");
+ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "feedback", rating: 5, googleReviewClicked: true } })).status === 200, "star rating + Google review recorded");
+ok(sql(`select "customerFeedbackRating" from "Job" where id='${job.id}'`) === "5", "rating stored on the job");
+
+// Complaint → attention → resolve
+await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "complaint", category: "quality", description: "Balcony door glass smudged" } });
+ws = (await admin("/api/me/workspace")).json?.data;
+const comp = ws.attention.find((a) => a.key.startsWith("complaint-"));
+ok(!!comp, "customer issue appears in Attention Required");
+const cid = comp.key.replace("complaint-", "");
+ok((await qcc("/api/quality", { method: "POST", body: { action: "resolve-complaint", complaintId: cid } })).status === 403, "QC cannot resolve customer issues");
+ok((await admin("/api/quality", { method: "POST", body: { action: "resolve-complaint", complaintId: cid, notes: "Re-cleaned" } })).status === 200, "admin resolves the customer issue");
+ws = (await admin("/api/me/workspace")).json?.data;
+ok(!ws.attention.some((a) => a.key === comp.key), "resolved issue leaves Attention Required");
+
+// Property QR
+const pq = (await admin(`/api/properties/${prop.id}/access-link`, { method: "POST" })).json?.data;
+ok(pq?.url?.startsWith("https://example.test/customer/property/"), "property QR link created (APP_BASE_URL)");
+ok((await fmc(`/api/properties/${prop.id}/access-link`, { method: "POST" })).status === 403, "FM cannot create property QR");
+const pt = pq.url.split("/").pop();
+const scan = await fetch(`${BASE}/customer/property/${pt}`, { redirect: "manual" });
+const loc = scan.headers.get("location") || "";
+ok([303, 307, 308].includes(scan.status) && loc.includes("/customer/service/"), `property QR opens the active/upcoming service (${scan.status})`);
+const scanTok = loc.split("/").pop();
+const scanned = (await cust1(`/api/customer/job/${scanTok}`)).json?.data;
+ok(scanned?.job?.id === job2.jobNumber, "QR picked the upcoming job (job 2), not the finished one");
+const rep = (await admin(`/api/properties/${prop.id}/access-link`, { method: "POST" })).json?.data;
+const oldScan = await fetch(`${BASE}/customer/property/${pt}`, { redirect: "manual" });
+ok(rep.url !== pq.url && oldScan.status === 404 && (await oldScan.text()).includes("not active"), "replacing the QR retires the old one");
+
+// Customer link isolation
+const link2 = (await admin("/api/qr-links", { method: "POST", body: { action: "get", jobId: job2.id } })).json?.data;
+const token2 = link2.linkUrl.split("/").pop();
+ok((await fetch(`${BASE}/api/secure-photo/ph_before?t=${token2}`)).status === 404, "job B's link cannot read job A's photo");
+ok((await cust1(`/api/customer/job/${token.slice(0, -2)}xx`)).status >= 400, "tampered token rejected");
+const rv = await admin("/api/qr-links", { method: "POST", body: { action: "revoke", tokenId: link2.tokenId, reason: "test" } });
+ok(rv.status === 200 && (await cust1(`/api/customer/job/${token2}`)).status === 410, "revoked link stops working");
+
+// Roles cannot open each other's desks (server-rendered APIs)
+ok((await qcc("/api/me/workspace")).status === 200 && (await qcc("/api/finance")).status === 403, "QC has a workspace but no finance");
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

@@ -1,18 +1,24 @@
 /** @type {import('next').NextConfig} */
-const securityHeaders = [
-  { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
-  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(self), geolocation=(), microphone=()" },
-];
-
 const nextConfig = {
-  poweredByHeader: false,
+  async redirects() {
+    // Links sent before the customer page moved keep working.
+    return [
+      { source: "/customer/job/:token", destination: "/customer/service/:token", permanent: true },
+      { source: "/operations", destination: "/", permanent: false },
+      { source: "/quality", destination: "/quality-queue", permanent: false },
+    ];
+  },
   async headers() {
     return [
-      { source: "/:path*", headers: securityHeaders },
-      // The customer link carries its key in the query string — never leak it via Referer.
-      { source: "/customer/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }, { key: "Cache-Control", value: "private, no-store" }] },
+      {
+        // Customer secure links: never leak the token via Referer, never cache.
+        source: "/customer/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      },
     ];
   },
 };

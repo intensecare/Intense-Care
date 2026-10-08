@@ -3,16 +3,81 @@
 @tailwind utilities;
 
 @layer base {
-  html {
-    -webkit-text-size-adjust: 100%;
+  :root {
+    /* Intense Care brand tokens — from https://intensecare.in/
+       cream paper #fdfbf8 · ink #262626 · coral #ea506c · maroon #61170f */
+    --background: 40 33% 98%; /* #fdfbf8 warm cream paper */
+    --foreground: 0 0% 15%; /* #262626 ink */
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 15%;
+
+    --primary: 351 80% 62%; /* #ea506c brand coral */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 40 33% 96%; /* cream tint */
+    --secondary-foreground: 0 0% 15%; /* ink — secondary text on cream */
+
+    --muted: 40 30% 96%;
+    --muted-foreground: 30 7% 45%;
+
+    --accent: 351 80% 96%; /* blush */
+    --accent-foreground: 351 66% 35%;
+
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 36 28% 90%; /* warm hairline */
+    --input: 36 28% 90%;
+    --ring: 351 80% 62%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
   }
   body {
-    @apply bg-white text-slate-900 antialiased;
+    @apply bg-background text-foreground antialiased selection:bg-rose-500 selection:text-white font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
-  /* 16px inputs stop iOS from zooming the page on focus. */
-  input,
-  select,
-  textarea {
-    font-size: 16px;
-  }
+}
+
+/* Accessibility Font Size Scaler (Govt website style: -A, A, +A, ++A) */
+html {
+  font-size: 16px;
+  transition: font-size 0.15s ease-in-out;
+}
+html.font-scale-sm {
+  font-size: 14px;
+}
+html.font-scale-md {
+  font-size: 16px;
+}
+html.font-scale-lg {
+  font-size: 18px;
+}
+html.font-scale-xl {
+  font-size: 20px;
+}
+
+/* Crisp, clean custom scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #ddd4c6;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c3b8a9;
 }
