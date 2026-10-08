@@ -6,6 +6,9 @@ import { useParams } from "next/navigation";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { CustomerLinkCard } from "@/components/common/CustomerLinkCard";
+import { JobJourney } from "@/components/job/JobJourney";
+import { NextActionCard } from "@/components/job/NextAction";
+import { Skeleton } from "@/components/ui/states";
 import { PromptModal } from "@/components/common/PromptModal";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
@@ -17,7 +20,6 @@ import {
   ArrowLeft,
   CalendarDays,
   CheckCircle2,
-  Clock,
   MapPin,
   Phone,
   User,
@@ -34,27 +36,12 @@ import type { Job, JobActivityEvent, JobPhoto } from "@/lib/types";
 
 type DeskJob = Job & { customerName?: string; customerPhone?: string; propertyTitle?: string; service?: { name: string } };
 
-/** The journey every job follows — one Job ID from booking to feedback. */
-const JOURNEY: { label: string; statuses: string[] }[] = [
-  { label: "Booked", statuses: ["DRAFT"] },
-  { label: "Scheduled", statuses: ["SCHEDULED"] },
-  { label: "Assigned", statuses: ["ASSIGNED"] },
-  { label: "Arrived", statuses: ["ARRIVED"] },
-  { label: "Customer confirmed", statuses: ["CUSTOMER_VERIFIED"] },
-  { label: "In progress", statuses: ["IN_PROGRESS"] },
-  { label: "Work completed", statuses: ["WORK_COMPLETED"] },
-  { label: "QC", statuses: ["QUALITY_CHECK", "REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS", "REWORK_COMPLETED", "REINSPECTION"] },
-  { label: "Customer approval", statuses: ["PASS", "CUSTOMER_APPROVAL"] },
-  { label: "Completed", statuses: ["COMPLETED"] },
-  { label: "Feedback", statuses: ["FEEDBACK_REQUESTED", "CLOSED"] },
-];
-
 const REWORK = ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
 
 export default function JobPage() {
   const params = useParams();
   const jobId = String(params?.id ?? "");
-  const { jobs, customers, properties, users, checklistItems, photos, qualityChecks, qualityIssues, reworkTasks, complaints, invoices, currentUser, refreshJobs, refreshPhotos, refreshQuality } = useApp();
+  const { loading, jobs, customers, properties, users, checklistItems, photos, qualityChecks, qualityIssues, reworkTasks, complaints, invoices, currentUser, refreshJobs, refreshPhotos, refreshQuality } = useApp();
   const { can } = useAuth();
 
   const job = jobs.find((j) => j.id === jobId) as DeskJob | undefined;
@@ -103,6 +90,18 @@ export default function JobPage() {
     };
   }, [jobId, refreshJobs, refreshPhotos, refreshQuality]);
 
+  if (!job && loading) {
+    return (
+      <AdminLayout>
+        <div className="max-w-5xl mx-auto space-y-4" role="status" aria-label="Loading job">
+          <Skeleton className="h-40 rounded-2xl" />
+          <Skeleton className="h-28 rounded-2xl" />
+          <Skeleton className="h-36 rounded-2xl" />
+        </div>
+      </AdminLayout>
+    );
+  }
+
   if (!job) {
     return (
       <AdminLayout>
@@ -146,8 +145,6 @@ export default function JobPage() {
     feedbackAt: job.customerFeedbackAt ?? null,
   });
 
-  const journeyAt = JOURNEY.findIndex((s) => s.statuses.includes(job.status));
-  const inRework = REWORK.includes(job.status) || ["REWORK_COMPLETED", "REINSPECTION"].includes(job.status);
   const cancelled = job.status === "CANCELLED";
   const terminal = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED", "CANCELLED"].includes(job.status);
   const managers = users.filter((u) => u.role === "field_manager" && u.active).sort((a, b) => a.name.localeCompare(b.name));
@@ -192,7 +189,7 @@ export default function JobPage() {
         </Link>
 
         {/* HEADER — customer, property, service, date, status */}
-        <header className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <header className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-xs font-mono font-semibold text-zinc-400">{job.jobNumber ?? job.id}</div>
@@ -208,42 +205,21 @@ export default function JobPage() {
         </header>
 
         {/* JOB JOURNEY */}
-        {!cancelled && (
-          <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-4">Job journey</h2>
-            <ol className="flex gap-1 overflow-x-auto pb-1">
-              {JOURNEY.map((step, i) => {
-                const isDone = i < journeyAt;
-                const isNow = i === journeyAt;
-                const rework = isNow && step.label === "QC" && inRework;
-                return (
-                  <li key={step.label} className="flex-1 min-w-[72px]">
-                    <div className={cn("h-2 rounded-full transition-colors duration-500", isDone ? "bg-emerald-500" : isNow ? (rework ? "bg-amber-500" : "bg-rose-500") : "bg-zinc-200")} />
-                    <div className={cn("mt-2 text-[11px] leading-tight font-semibold", isNow ? "text-zinc-900" : isDone ? "text-zinc-500" : "text-zinc-300")}>
-                      {rework ? "Rework" : step.label}
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
-          </section>
-        )}
+        <section className="rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6">
+          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-4">Job journey</h2>
+          <JobJourney status={job.status} />
+        </section>
 
         {/* CURRENT STATUS + NEXT ACTION */}
-        <section className={cn("rounded-3xl border p-6 shadow-sm", cancelled ? "border-zinc-200 bg-zinc-50" : inRework ? "border-amber-200 bg-amber-50/60" : "border-rose-200 bg-white")}>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
+        <section className="rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">Current status</div>
-              <div className="text-xl font-semibold text-zinc-950 mt-1">{config?.label ?? job.status}</div>
-              <div className="text-sm text-zinc-600 mt-0.5">{next?.hint ?? config?.shortDescription}</div>
-              {next?.waiting && <div className="text-sm text-zinc-500 mt-2 inline-flex items-center gap-1.5"><Clock className="h-4 w-4" /> Next: {next.label}</div>}
+              <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Current status</div>
+              <div className="mt-1.5"><JobStatusBadge status={job.status} /></div>
+              <p className="text-sm text-zinc-600 mt-2">{config?.shortDescription}</p>
             </div>
-            {primary && (
-              <button disabled={busy} onClick={primary.onClick} className="h-12 px-6 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 shadow-sm transition-colors shrink-0">
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />} {primary.label}
-              </button>
-            )}
           </div>
+          <NextActionCard action={next} onAction={primary?.onClick} busy={busy} />
           {error && <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</div>}
           {!terminal && can("jobs.assign") && (
             <div className="mt-4 pt-4 border-t border-zinc-100 flex flex-wrap gap-2 text-sm">
@@ -264,7 +240,7 @@ export default function JobPage() {
           <div className="lg:col-span-3 space-y-6">
             {/* Customer issues */}
             {openComplaints.length > 0 && (
-              <section className="rounded-3xl border border-red-200 bg-white p-6 shadow-sm space-y-3">
+              <section className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm space-y-3">
                 <h2 className="text-base font-semibold text-red-800 flex items-center gap-2"><AlertTriangle className="h-5 w-5" /> Customer issue</h2>
                 {openComplaints.map((c) => (
                   <div key={c.id} className="rounded-2xl bg-red-50 p-4 space-y-2">
@@ -280,7 +256,7 @@ export default function JobPage() {
 
             {/* Quality */}
             {(lastQc || openRework.length > 0) && (
-              <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm space-y-3">
+              <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-3">
                 <h2 className="text-base font-semibold text-zinc-900">Quality</h2>
                 {lastQc && (
                   <div className={cn("text-sm font-semibold inline-flex items-center gap-1.5", lastQc.status === "PASS" ? "text-emerald-700" : "text-amber-800")}>
@@ -293,7 +269,7 @@ export default function JobPage() {
                     {issues.map((i) => (
                       <li key={i.id} className="flex items-start justify-between gap-2 text-sm">
                         <span><strong>{i.area}:</strong> {i.itemDescription}{i.notes && i.notes !== i.itemDescription ? ` — ${i.notes}` : ""}</span>
-                        <span className={cn("shrink-0 px-2 py-0.5 rounded-lg text-[11px] font-semibold", i.status === "resolved" || i.status === "reinspected_pass" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")}>
+                        <span className={cn("shrink-0 px-2 py-0.5 rounded-lg text-xs font-semibold", i.status === "resolved" || i.status === "reinspected_pass" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")}>
                           {i.status === "resolved" ? "Fixed" : i.status === "reinspected_pass" ? "Passed" : "Open"}
                         </span>
                       </li>
@@ -307,7 +283,7 @@ export default function JobPage() {
             )}
 
             {/* Photos / evidence */}
-            <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm space-y-4">
+            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-4">
               <h2 className="text-base font-semibold text-zinc-900">Photos</h2>
               {jobPhotos.length === 0 ? (
                 <p className="text-sm text-zinc-500">No photos yet. The Field Manager adds before / after photos on site.</p>
@@ -328,7 +304,7 @@ export default function JobPage() {
             </section>
 
             {/* Activity timeline */}
-            <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <h2 className="text-base font-semibold text-zinc-900 mb-4">Activity</h2>
               {events.length === 0 ? (
                 <p className="text-sm text-zinc-500">No activity yet.</p>
@@ -356,7 +332,7 @@ export default function JobPage() {
               </div>
             )}
 
-            <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm space-y-4">
+            <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-4">
               <h2 className="text-base font-semibold text-zinc-900">Details</h2>
               <Detail icon={<User className="h-4 w-4" />} label="Customer" value={customer?.name ?? job.customerName ?? "—"} href={customer ? `/customers/${customer.id}` : undefined} />
               {(customer?.phone || job.customerPhone) && <Detail icon={<Phone className="h-4 w-4" />} label="Phone" value={customer?.phone ?? job.customerPhone ?? ""} href={`tel:${customer?.phone ?? job.customerPhone}`} />}
@@ -372,7 +348,7 @@ export default function JobPage() {
             </section>
 
             {can("finance.view") && (
-              <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm space-y-2">
+              <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-2">
                 <h2 className="text-base font-semibold text-zinc-900">Payment</h2>
                 <div className="text-2xl font-semibold text-zinc-950">{formatCurrency(invoice?.total ?? job.amount ?? 0)}</div>
                 {invoice ? (
@@ -491,7 +467,7 @@ function HeaderItem({ icon, label, value }: { icon: React.ReactNode; label: stri
     <div className="flex items-start gap-3 min-w-0">
       <span className="h-9 w-9 rounded-xl bg-zinc-100 text-zinc-500 flex items-center justify-center shrink-0">{icon}</span>
       <div className="min-w-0">
-        <dt className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">{label}</dt>
+        <dt className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">{label}</dt>
         <dd className="text-sm font-medium text-zinc-900 break-words">{value}</dd>
       </div>
     </div>
@@ -504,7 +480,7 @@ function Detail({ icon, label, value, href }: { icon: React.ReactNode; label: st
     <div className="flex items-start gap-3">
       <span className="h-8 w-8 rounded-lg bg-zinc-100 text-zinc-500 flex items-center justify-center shrink-0">{icon}</span>
       <div className="min-w-0">
-        <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">{label}</div>
+        <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">{label}</div>
         {href ? <a href={href} className="text-sm font-medium text-rose-600 break-words">{value}</a> : body}
       </div>
     </div>
@@ -525,7 +501,7 @@ function PhotoThumb({ photo }: { photo: JobPhoto }) {
   return (
     <a href={photo.photoUrl} target="_blank" rel="noreferrer" className="relative shrink-0 group">
       <img src={photo.thumbnailUrl || photo.photoUrl} alt={`${photo.area} ${photo.photoType}`} className="h-28 w-28 rounded-xl object-cover group-hover:opacity-90" loading="lazy" />
-      <span className={cn("absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold text-white", photo.photoType === "before" ? "bg-zinc-900/80" : photo.photoType === "after" ? "bg-emerald-600" : photo.photoType === "qc" ? "bg-amber-600" : "bg-rose-500")}>
+      <span className={cn("absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-xs font-bold text-white", photo.photoType === "before" ? "bg-zinc-900/80" : photo.photoType === "after" ? "bg-emerald-600" : photo.photoType === "qc" ? "bg-amber-600" : "bg-rose-500")}>
         {PHOTO_LABEL[photo.photoType]}
       </span>
     </a>

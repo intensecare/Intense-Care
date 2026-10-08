@@ -45,8 +45,8 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     queue: "/",
     layout: "desk",
     nav: [
-      { label: "Operations", href: "/", permission: "dashboard.view", badge: "jobs_open" },
-      { label: "Jobs", href: "/jobs", permission: "jobs.view" },
+      { label: "Dashboard", href: "/", permission: "dashboard.view" },
+      { label: "Jobs", href: "/jobs", permission: "jobs.view", badge: "jobs_open" },
       { label: "Schedule", href: "/schedule", permission: "scheduling.manage" },
       { label: "Quality", href: "/quality-queue", permission: "qc.view", badge: "qc_pending" },
       { label: "Customers", href: "/customers", permission: "customers.view" },

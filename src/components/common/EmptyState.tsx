@@ -12,34 +12,17 @@ interface EmptyStateProps {
   className?: string;
 }
 
-export function EmptyState({
-  icon: Icon,
-  title,
-  description,
-  actionLabel,
-  onAction,
-  className,
-}: EmptyStateProps) {
+/** Friendly empty screen: what this is, why it's empty, what to do next. */
+export function EmptyState({ icon: Icon, title, description, actionLabel, onAction, className }: EmptyStateProps) {
   return (
-    <div
-      className={cn(
-        "flex min-h-[300px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/50 p-8 text-center",
-        className
-      )}
-    >
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-xs border border-slate-200/80 mb-3 text-slate-600">
-        <Icon className="h-6 w-6" />
+    <div className={cn("flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-12 text-center", className)}>
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-500 mb-4">
+        <Icon className="h-7 w-7" aria-hidden />
       </div>
-      <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
-      <p className="mt-1 text-xs text-slate-500 max-w-sm leading-relaxed">
-        {description}
-      </p>
+      <h3 className="text-base font-semibold text-zinc-900">{title}</h3>
+      <p className="mt-1 text-sm text-zinc-500 max-w-sm">{description}</p>
       {actionLabel && onAction && (
-        <Button
-          onClick={onAction}
-          size="sm"
-          className="mt-4"
-        >
+        <Button onClick={onAction} className="mt-5">
           {actionLabel}
         </Button>
       )}

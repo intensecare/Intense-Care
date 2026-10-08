@@ -27,6 +27,15 @@ Server-enforced: arrival is GPS-checked against the property (`ARRIVAL_GEOFENCE_
 - The customer only ever receives: service, date, property, team names, checklist progress and **before/after** photos (served through a token-checked proxy). Never amounts, notes, QC findings or QC/rework photos.
 - **One optional property QR** (Admin → Properties → property → *Property QR*). Scanning it opens the customer page of that property's current or upcoming service. No other QR codes exist.
 
+## Screens and design system
+
+- **Admin** — desktop sidebar (Dashboard, Jobs, Schedule, Quality, Customers, Properties, Services, Payments, Reports, Users, Settings); on phones a bottom bar with Home / Jobs / More.
+- **Field Manager** — Home / Jobs / Tasks / Profile. The job screen shows the journey, the current step and one sticky next-action button (I'm here → Start service → Checklist → Photos → Complete work → Submit for QC).
+- **QC** — Home / Quality / History / Profile. Large PASS and REWORK buttons; rework items take area, issue, severity, photo and comment.
+- **Customer link** — Home / Service / Reports / Profile: confirm & start, progress, before/after, approve, rating and Google review.
+
+Shared building blocks live in `src/components/ui` and `src/components/job`: `StatusBadge` (labels and tones from `src/lib/status.ts`, always icon + text), `JobJourney`, `NextActionCard`, `DataTable` (table at ≥1280px, cards below), `Dialog` (bottom sheet on phones with a sticky footer), `Field`/`Input`/`Button` (44px+ touch targets, `loading` state), skeleton / empty / error / offline states. Palette: coral brand, green success, amber warning, red error, blue info, warm neutrals. Every screen is checked for horizontal overflow at 320, 360, 375, 390, 414, 430, 768, 1024, 1280 and 1440px.
+
 ## Stack
 
 Next.js 14 (App Router) · React 18 · TypeScript strict · Prisma 7 + PostgreSQL · Tailwind · Cloudinary (before / after / QC / rework photos) · WhatsApp / SMS notifications with links.

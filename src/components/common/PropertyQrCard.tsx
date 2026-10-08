@@ -70,7 +70,7 @@ export function PropertyQrCard({ propertyId, propertyTitle }: { propertyId: stri
         <div className="flex flex-col sm:flex-row gap-4 items-center">
           {img ? <img src={img} alt="Property QR code" className="h-36 w-36 rounded-xl border border-slate-200" /> : <div className="h-36 w-36 rounded-xl bg-slate-100" />}
           <div className="flex-1 min-w-0 space-y-2 w-full">
-            <div className="text-[11px] font-mono text-slate-500 break-all">{url}</div>
+            <div className="text-xs font-mono text-slate-500 break-all">{url}</div>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => { void navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="h-9 px-3 rounded-lg border border-slate-200 text-xs font-semibold inline-flex items-center gap-1.5">
                 {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />} {copied ? "Copied" : "Copy link"}

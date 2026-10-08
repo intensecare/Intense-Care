@@ -1,10 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Input, Field } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -55,6 +53,7 @@ export function CustomerFormDialog({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
+  // Source / referral attribution are kept as-is (no longer edited in the UI).
   const [source, setSource] = useState("direct");
   const [partnerId, setPartnerId] = useState("");
   const [notes, setNotes] = useState("");
@@ -76,10 +75,6 @@ export function CustomerFormDialog({
     setStatus(editing?.status === "inactive" ? "inactive" : "active");
   }, [open, editing]);
 
-  const partnerOptions = [
-    { value: "", label: "Direct / None" },
-    ...partners.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
-  ];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,116 +104,39 @@ export function CustomerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit Customer" : "Register Customer"}</DialogTitle>
-          <DialogDescription>
-            {isEditing
-              ? "Update the customer profile, referral attribution, or account status."
-              : "Add customer profile and configure referral attribution."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-3 py-2 text-xs">
-          <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Customer Full Name *</label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="E.g. Siddharth Rao"
-              required
-              className="text-xs"
-            />
+      <DialogContent className="sm:max-w-lg">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>{isEditing ? "Edit customer" : "Add customer"}</DialogTitle>
+            <DialogDescription>Contact details used for job updates and the customer link.</DialogDescription>
+          </DialogHeader>
+          {error && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">{error}</div>}
+          <Field label="Full name" required htmlFor="cf-name">
+            <Input id="cf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rahul Shetty" required minLength={2} autoComplete="name" />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Phone" required hint="Used for WhatsApp / SMS updates" htmlFor="cf-phone">
+              <Input id="cf-phone" type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98450 12345" required minLength={7} autoComplete="tel" />
+            </Field>
+            <Field label="Email" htmlFor="cf-email">
+              <Input id="cf-email" type="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" autoComplete="email" />
+            </Field>
           </div>
-
-          <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Phone (Notifications) *</label>
-            <Input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+91 98860 12345"
-              required
-              className="text-xs font-mono"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Email Address</label>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="siddharth@example.com"
-              className="text-xs"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Primary Billing Address</label>
-            <Input
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="Bengaluru residence address..."
-              className="text-xs"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Referral Partner Attribution</label>
-            <SearchableSelect
-              value={partnerId}
-              onChange={setPartnerId}
-              options={partnerOptions}
-              placeholder="Direct / None"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Customer Preferences / Notes</label>
-            <Input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="E.g. Prefers eco chemicals..."
-              className="text-xs"
-            />
-          </div>
-
+          <Field label="Address" htmlFor="cf-address">
+            <Input id="cf-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, area, city" autoComplete="street-address" />
+          </Field>
+          <Field label="Notes" hint="Preferences, access instructions…" htmlFor="cf-notes">
+            <textarea id="cf-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm" />
+          </Field>
           {isEditing && (
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Account Status</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as "active" | "inactive")}
-                className="w-full h-9 rounded-md border border-slate-200 px-2 bg-white text-xs"
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
+            <label className="flex items-center gap-3 rounded-xl border border-zinc-200 px-4 h-12 text-sm">
+              <input type="checkbox" checked={status === "active"} onChange={(e) => setStatus(e.target.checked ? "active" : "inactive")} className="h-5 w-5 accent-rose-500" />
+              Active customer
+            </label>
           )}
-
-          {error && (
-            <p className="text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
-              {error}
-            </p>
-          )}
-
-          <DialogFooter className="pt-3 border-t border-slate-100">
-            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" className="" disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Saving...
-                </>
-              ) : isEditing ? (
-                "Save Changes"
-              ) : (
-                "Save Customer"
-              )}
-            </Button>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" loading={isSubmitting} disabled={!name.trim() || !phone.trim()}>{isSubmitting ? "Saving…" : isEditing ? "Save changes" : "Add customer"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

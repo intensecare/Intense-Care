@@ -1,4 +1,5 @@
 import { Job, JobStatus, UserRole } from "./types";
+import { statusView } from "./status";
 import { TRANSITION_PERMISSION } from "./rbac/next-action";
 import type { Permission } from "./rbac/permissions";
 import { scopeOf } from "./rbac/engine";
@@ -226,6 +227,11 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
 };
+
+// Labels always come from the one status vocabulary (src/lib/status.ts).
+for (const key of Object.keys(JOB_STATUS_CONFIG) as JobStatus[]) {
+  JOB_STATUS_CONFIG[key].label = statusView(key).label;
+}
 
 export interface TransitionAction {
   status: JobStatus;

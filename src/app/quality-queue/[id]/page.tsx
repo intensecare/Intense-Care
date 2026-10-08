@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { QualityShell } from "@/components/quality/QualityShell";
-import { PrimaryAction } from "@/components/workspace/WorkspaceWidgets";
+import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { compressImageForUpload } from "@/lib/image-compress";
@@ -12,7 +13,8 @@ import { CheckCircle2, AlertTriangle, Plus, X, Loader2, ShieldCheck, Camera, Rot
 import type { Job, JobPhoto } from "@/lib/types";
 
 type DeskJob = Job & { customerName?: string; propertyTitle?: string; service?: { name: string } };
-type DraftIssue = { area: string; issue: string; comment: string; photo?: JobPhoto };
+type Severity = "minor" | "major" | "critical";
+type DraftIssue = { area: string; issue: string; comment: string; severity: Severity; photo?: JobPhoto };
 
 const INSPECTABLE = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"];
 
@@ -23,7 +25,7 @@ const INSPECTABLE = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REI
  * Reinspection offers PASS or REWORK AGAIN. Every round stays in the history;
  * rework always stays on the SAME job.
  */
-export default function QualityInspectPage() {
+function QualityInspect() {
   const params = useParams();
   const router = useRouter();
   const jobId = String(params?.id ?? "");
@@ -38,7 +40,7 @@ export default function QualityInspectPage() {
 
   const [mode, setMode] = useState<"review" | "rework">("review");
   const [issues, setIssues] = useState<DraftIssue[]>([]);
-  const [draft, setDraft] = useState<DraftIssue>({ area: "", issue: "", comment: "" });
+  const [draft, setDraft] = useState<DraftIssue>({ area: "", issue: "", comment: "", severity: "major" });
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +104,7 @@ export default function QualityInspectPage() {
   const addDraft = () => {
     if (!draft.issue.trim()) return;
     setIssues((prev) => [...prev, { ...draft, issue: draft.issue.trim(), comment: draft.comment.trim() }]);
-    setDraft({ area: draft.area, issue: "", comment: "" });
+    setDraft({ area: draft.area, issue: "", comment: "", severity: "major" });
   };
 
   const pass = async () => {
@@ -129,7 +131,7 @@ export default function QualityInspectPage() {
       score,
       "REWORK_REQUIRED",
       "",
-      all.map((i) => ({ area: i.area, itemDescription: i.issue, severity: "major" as const, notes: i.comment }))
+      all.map((i) => ({ area: i.area, itemDescription: i.issue, severity: i.severity, notes: i.comment }))
     );
     setBusy(false);
     if (!res.success) {
@@ -144,11 +146,17 @@ export default function QualityInspectPage() {
   const pendingCount = issues.length + (draft.issue.trim() ? 1 : 0);
   const action = !inspectable ? undefined : mode === "review" ? (
     <div className="grid grid-cols-2 gap-2">
-      <PrimaryAction label={reinspect ? "REWORK AGAIN" : "REWORK REQUIRED"} tone="warning" disabled={busy} onClick={() => setMode("rework")} icon={<RotateCcw className="h-5 w-5" />} />
-      <PrimaryAction label="PASS" tone="success" busy={busy} onClick={() => void pass()} icon={<ShieldCheck className="h-5 w-5" />} />
+      <Button size="lg" variant="outline" className="border-amber-400 text-amber-800 hover:bg-amber-50 px-2" disabled={busy} onClick={() => { setMode("rework"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+        <RotateCcw className="h-5 w-5" aria-hidden /> {reinspect ? "REWORK AGAIN" : "REWORK"}
+      </Button>
+      <Button size="lg" variant="success" loading={busy} onClick={() => void pass()}>
+        <ShieldCheck className="h-5 w-5" aria-hidden /> PASS
+      </Button>
     </div>
   ) : (
-    <PrimaryAction label={`CREATE REWORK${pendingCount ? ` (${pendingCount})` : ""}`} tone="warning" disabled={pendingCount === 0 || uploading} busy={busy} onClick={() => void createRework()} icon={<AlertTriangle className="h-5 w-5" />} />
+    <Button size="lg" className="w-full bg-amber-500 hover:bg-amber-600" disabled={pendingCount === 0 || uploading} loading={busy} onClick={() => void createRework()}>
+      <AlertTriangle className="h-5 w-5" aria-hidden /> CREATE REWORK{pendingCount ? ` · ${pendingCount}` : ""}
+    </Button>
   );
 
   const before = (a: string) => jobPhotos.filter((p) => p.area === a && p.photoType === "before");
@@ -174,7 +182,9 @@ export default function QualityInspectPage() {
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-2">
         <div className="flex items-center justify-between gap-2">
           <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 font-mono">{job.jobNumber ?? job.id}</span>
-          {reinspect ? (
+          {!inspectable ? (
+            <StatusBadge status={job.status} />
+          ) : reinspect ? (
             <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">Reinspection</span>
           ) : (
             <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">First inspection</span>
@@ -202,7 +212,7 @@ export default function QualityInspectPage() {
                 <li key={idx} className="px-5 py-3 flex items-start gap-3">
                   {i.photo ? <img src={i.photo.thumbnailUrl || i.photo.photoUrl} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0" /> : <span className="h-12 w-12 rounded-lg bg-slate-100 shrink-0" />}
                   <div className="flex-1 min-w-0 text-sm">
-                    <div className="font-semibold text-slate-900">{i.area}: {i.issue}</div>
+                    <div className="font-semibold text-slate-900">{i.area}: {i.issue} <span className="text-xs font-semibold text-slate-500 capitalize">· {i.severity}</span></div>
                     {i.comment && <div className="text-slate-500">{i.comment}</div>}
                   </div>
                   <button onClick={() => setIssues((prev) => prev.filter((_, k) => k !== idx))} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100 inline-flex items-center justify-center" aria-label="Remove">
@@ -228,6 +238,16 @@ export default function QualityInspectPage() {
               <input id="qc-issue" value={draft.issue} onChange={(e) => setDraft({ ...draft, issue: e.target.value })} placeholder="e.g. Mirror has streaks" className="w-full h-12 rounded-xl border border-slate-200 px-3 text-base focus:outline-none focus:ring-2 focus:ring-amber-500" />
             </div>
             <div className="space-y-1.5">
+              <span className="text-sm font-semibold text-slate-700">Severity</span>
+              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Severity">
+                {(["minor", "major", "critical"] as const).map((sv) => (
+                  <button key={sv} type="button" role="radio" aria-checked={draft.severity === sv} onClick={() => setDraft({ ...draft, severity: sv })} className={cn("h-11 rounded-xl border text-sm font-semibold capitalize", draft.severity === sv ? (sv === "critical" ? "bg-red-600 border-red-600 text-white" : sv === "major" ? "bg-amber-500 border-amber-500 text-white" : "bg-zinc-900 border-zinc-900 text-white") : "bg-white border-slate-200 text-slate-600")}>
+                    {sv}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">Photo</label>
               {draft.photo ? (
                 <div className="flex items-center gap-3">
@@ -251,6 +271,33 @@ export default function QualityInspectPage() {
         </section>
       )}
 
+      {/* Before / After */}
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 text-base font-semibold text-slate-900">Before / After</div>
+        <ul className="divide-y divide-slate-100">
+          {areas.map((a) => (
+            <li key={a} className="p-5 space-y-2">
+              <div className="text-sm font-semibold text-slate-900">{a}</div>
+              <div className="grid grid-cols-2 gap-2">
+                {[{ label: "BEFORE", list: before(a) }, { label: "AFTER", list: after(a) }].map(({ label, list }) => (
+                  <div key={label}>
+                    <div className="text-xs font-semibold text-slate-400 mb-1">{label}</div>
+                    {list.length ? (
+                      <a href={list[0].photoUrl} target="_blank" rel="noreferrer">
+                        <img src={list[0].thumbnailUrl || list[0].photoUrl} alt={`${label} ${a}`} className="aspect-[4/3] w-full rounded-xl object-cover" />
+                      </a>
+                    ) : (
+                      <div className="aspect-[4/3] w-full rounded-xl bg-slate-100 text-xs text-slate-400 flex items-center justify-center">No photo</div>
+                    )}
+                    {list.length > 1 && <div className="text-xs text-slate-400 mt-1">+{list.length - 1} more</div>}
+                  </div>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
       {/* Checklist */}
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -266,7 +313,7 @@ export default function QualityInspectPage() {
                 return (
                   <li key={item.id} className="px-5 py-2.5 flex items-center gap-3 text-sm">
                     <span className={cn("h-6 w-6 rounded-full flex items-center justify-center shrink-0", done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400")}>
-                      {done ? <Check className="h-4 w-4" /> : <span className="text-[10px]">○</span>}
+                      {done ? <Check className="h-4 w-4" /> : <span className="text-xs">○</span>}
                     </span>
                     <span className={done ? "text-slate-800" : "text-slate-500"}>{item.task}</span>
                   </li>
@@ -278,33 +325,6 @@ export default function QualityInspectPage() {
         {checklist.length === 0 && <div className="p-6 text-center text-sm text-slate-500">No checklist on this service.</div>}
       </section>
 
-      {/* Before / After */}
-      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 text-base font-semibold text-slate-900">Before / After</div>
-        <ul className="divide-y divide-slate-100">
-          {areas.map((a) => (
-            <li key={a} className="p-5 space-y-2">
-              <div className="text-sm font-semibold text-slate-900">{a}</div>
-              <div className="grid grid-cols-2 gap-2">
-                {[{ label: "BEFORE", list: before(a) }, { label: "AFTER", list: after(a) }].map(({ label, list }) => (
-                  <div key={label}>
-                    <div className="text-[11px] font-semibold text-slate-400 mb-1">{label}</div>
-                    {list.length ? (
-                      <a href={list[0].photoUrl} target="_blank" rel="noreferrer">
-                        <img src={list[0].thumbnailUrl || list[0].photoUrl} alt={`${label} ${a}`} className="aspect-[4/3] w-full rounded-xl object-cover" />
-                      </a>
-                    ) : (
-                      <div className="aspect-[4/3] w-full rounded-xl bg-slate-100 text-xs text-slate-400 flex items-center justify-center">No photo</div>
-                    )}
-                    {list.length > 1 && <div className="text-[11px] text-slate-400 mt-1">+{list.length - 1} more</div>}
-                  </div>
-                ))}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-
       {reworkPhotos.length > 0 && (
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5 space-y-2">
           <div className="text-base font-semibold text-slate-900">Rework photos</div>
@@ -312,7 +332,7 @@ export default function QualityInspectPage() {
             {reworkPhotos.map((p) => (
               <a key={p.id} href={p.photoUrl} target="_blank" rel="noreferrer" className="shrink-0 text-center">
                 <img src={p.thumbnailUrl || p.photoUrl} alt="" className="h-24 w-24 rounded-xl object-cover" />
-                <span className="text-[11px] text-slate-500">{p.area}</span>
+                <span className="text-xs text-slate-500">{p.area}</span>
               </a>
             ))}
           </div>
@@ -341,7 +361,7 @@ export default function QualityInspectPage() {
                       {round.map((i) => (
                         <li key={i.id} className="text-sm text-slate-700 flex items-start justify-between gap-2">
                           <span><strong>{i.area}:</strong> {i.itemDescription}{i.notes && i.notes !== i.itemDescription ? ` — ${i.notes}` : ""}</span>
-                          <span className={cn("shrink-0 px-2 py-0.5 rounded-lg text-[11px] font-semibold", i.status === "resolved" || i.status === "reinspected_pass" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")}>
+                          <span className={cn("shrink-0 px-2 py-0.5 rounded-lg text-xs font-semibold", i.status === "resolved" || i.status === "reinspected_pass" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")}>
                             {i.status === "resolved" ? "Fixed" : i.status === "reinspected_pass" ? "Passed" : "Open"}
                           </span>
                         </li>
@@ -355,5 +375,13 @@ export default function QualityInspectPage() {
         </section>
       )}
     </QualityShell>
+  );
+}
+
+export default function QualityInspectPage() {
+  return (
+    <Suspense>
+      <QualityInspect />
+    </Suspense>
   );
 }

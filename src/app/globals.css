@@ -81,3 +81,69 @@ html.font-scale-xl {
 ::-webkit-scrollbar-thumb:hover {
   background: #c3b8a9;
 }
+
+/* ---------------------------------------------------------------------------
+ * Design-system base: focus, touch, motion, mobile inputs.
+ * ------------------------------------------------------------------------- */
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+  body {
+    overflow-x: hidden;
+  }
+  /* One visible focus ring everywhere (keyboard only). */
+  a:focus-visible,
+  button:focus-visible,
+  [role="button"]:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid #ea506c;
+    outline-offset: 2px;
+  }
+  /* iOS zooms into inputs smaller than 16px — keep them at 16px on phones. */
+  @media (max-width: 640px) {
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
+  img {
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skeleton shimmer */
+@keyframes ds-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.ds-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #f1ece4;
+}
+.ds-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  animation: ds-shimmer 1.4s infinite;
+}

@@ -242,7 +242,7 @@ export function getNextAction(roleRaw: Role | string, job: JobContext): NextActi
     case "REINSPECTION":
       return WAIT("Reinspection Pending", "Rework submitted. Waiting for QC.");
     case "PASS":
-      return { kind: "transition", target: "CUSTOMER_APPROVAL", label: "Send for Approval", hint: "QC passed.", tone: "primary" };
+      return { kind: "transition", target: "CUSTOMER_APPROVAL", label: "Send to Customer", hint: "QC passed.", tone: "primary" };
     case "CUSTOMER_APPROVAL":
       return { kind: "handover", label: "Share Customer Link", hint: "QC passed. Waiting for customer approval.", tone: "neutral" };
     case "COMPLETED":

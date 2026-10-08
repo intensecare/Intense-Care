@@ -34,13 +34,16 @@ export function QualityShell({
     <AdminLayout>
       <div className="max-w-2xl mx-auto space-y-4 pb-28">
         <div>
-          <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">{subtitle ?? "Quality"}</div>
-          <h1 className="text-2xl font-semibold text-zinc-950">{title}</h1>
+          {backHref && (
+            <a href={backHref} className="text-sm text-zinc-500 hover:text-zinc-900">← Quality</a>
+          )}
+          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mt-1">{subtitle ?? "Quality"}</div>
+          <h1 className="text-2xl sm:text-3xl font-semibold text-zinc-950">{title}</h1>
         </div>
         {children}
       </div>
       {action && (
-        <div className="fixed bottom-0 inset-x-0 md:left-64 z-30 bg-white/95 backdrop-blur border-t border-zinc-200 p-3">
+        <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] lg:bottom-0 lg:left-64 z-30 bg-white/95 backdrop-blur border-t border-zinc-200 p-3">
           <div className="max-w-2xl mx-auto">{action}</div>
         </div>
       )}

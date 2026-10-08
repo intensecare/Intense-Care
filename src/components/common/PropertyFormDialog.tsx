@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Field } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Dialog,
@@ -130,206 +129,100 @@ export function PropertyFormDialog({
     onOpenChange(false);
   };
 
+  const num = (set: (n: number) => void) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    set(e.target.value === "" ? 0 : Number(e.target.value));
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit Property" : "Register Property"}</DialogTitle>
-          <DialogDescription>
-            {isEditing
-              ? "Update the property details, gate access notes, or reassign its owner."
-              : "Add a residence or commercial facility to customer's portfolio."}
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="sm:max-w-lg">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>{isEditing ? "Edit property" : "Add property"}</DialogTitle>
+            <DialogDescription>Where the service happens and how the team gets in.</DialogDescription>
+          </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-3 py-2 text-xs">
-          <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Linked Customer *</label>
-            <SearchableSelect
-              value={customerId}
-              onChange={setCustomerId}
-              options={customerOptions}
-              placeholder="Select a customer"
-              required
-              name="customerId"
-            />
+          {error && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">{error}</div>}
+
+          <Field label="Customer" required>
+            <SearchableSelect value={customerId} onChange={setCustomerId} options={customerOptions} placeholder="Select a customer" required name="customerId" />
+          </Field>
+
+          <Field label="Property name" required htmlFor="pf-title" hint="How the team will recognise it">
+            <Input id="pf-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Sobha Dream Acres 3BHK" required />
+          </Field>
+
+          <Field label="Address" required htmlFor="pf-address">
+            <Input id="pf-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Flat, tower, community, locality" required autoComplete="street-address" />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="City" htmlFor="pf-city">
+              <Input id="pf-city" value={city} onChange={(e) => setCity(e.target.value)} autoComplete="address-level2" />
+            </Field>
+            <Field label="Postal code" htmlFor="pf-pin">
+              <Input id="pf-pin" inputMode="numeric" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} placeholder="560102" autoComplete="postal-code" />
+            </Field>
           </div>
 
-          <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Property Nickname / Title *</label>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="E.g., Sobha Dream Acres 3BHK"
-              required
-              className="text-xs"
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-2">
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Type</label>
-              <select
-                value={propertyType}
-                onChange={(e) => setPropertyType(e.target.value as PropertyFormPayload["propertyType"])}
-                className="w-full h-9 rounded-md border border-slate-200 px-2 bg-white"
-              >
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-zinc-950">Size</legend>
+            <Field label="Type" htmlFor="pf-type">
+              <select id="pf-type" value={propertyType} onChange={(e) => setPropertyType(e.target.value as PropertyFormPayload["propertyType"])} className="w-full h-11 rounded-xl border border-zinc-300 px-3 bg-white text-sm">
                 <option value="apartment">Apartment</option>
                 <option value="villa">Villa</option>
                 <option value="duplex">Duplex</option>
                 <option value="penthouse">Penthouse</option>
-                <option value="office">Commercial Office</option>
+                <option value="office">Office</option>
                 <option value="commercial">Commercial</option>
               </select>
+            </Field>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Bedrooms" htmlFor="pf-bed">
+                <Input id="pf-bed" type="number" inputMode="numeric" min={0} value={bedrooms} onFocus={(e) => e.target.select()} onChange={num(setBedrooms)} />
+              </Field>
+              <Field label="Bathrooms" htmlFor="pf-bath">
+                <Input id="pf-bath" type="number" inputMode="numeric" min={0} value={bathrooms} onFocus={(e) => e.target.select()} onChange={num(setBathrooms)} />
+              </Field>
+              <Field label="Sq ft" htmlFor="pf-sqft">
+                <Input id="pf-sqft" type="number" inputMode="numeric" min={0} value={sqFt} onFocus={(e) => e.target.select()} onChange={num(setSqFt)} />
+              </Field>
             </div>
+          </fieldset>
 
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Bedrooms</label>
-              <Input
-                type="number"
-                value={bedrooms}
-                onFocus={(e) => e.target.select()}
-                onChange={(e) => setBedrooms(e.target.value === "" ? 0 : Number(e.target.value))}
-                className="text-xs"
-              />
-            </div>
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-zinc-950">Access</legend>
+            <Field label="Entry instructions" htmlFor="pf-access">
+              <Input id="pf-access" value={accessNotes} onChange={(e) => setAccessNotes(e.target.value)} placeholder="e.g. Visitor pass at gate 2" />
+            </Field>
+            <Field label="Parking" htmlFor="pf-parking">
+              <Input id="pf-parking" value={parking} onChange={(e) => setParking(e.target.value)} placeholder="e.g. Basement 2 visitor parking" />
+            </Field>
+            <Field label="Preferred time" htmlFor="pf-time">
+              <Input id="pf-time" value={preferredTime} onChange={(e) => setPreferredTime(e.target.value)} placeholder="e.g. Mornings after 10 AM" />
+            </Field>
+          </fieldset>
 
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Bathrooms</label>
-              <Input
-                type="number"
-                value={bathrooms}
-                onFocus={(e) => e.target.select()}
-                onChange={(e) => setBathrooms(e.target.value === "" ? 0 : Number(e.target.value))}
-                className="text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label className="font-semibold text-slate-700">Full Postal Address *</label>
-            <Input
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="Flat / Unit, Tower, Community, Locality..."
-              required
-              className="text-xs"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">City</label>
-              <Input
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="Bengaluru"
-                className="text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Area (sq ft)</label>
-              <Input
-                type="number"
-                value={sqFt}
-                onFocus={(e) => e.target.select()}
-                onChange={(e) => setSqFt(e.target.value === "" ? 0 : Number(e.target.value))}
-                className="text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Access Instructions</label>
-              <Input
-                value={accessNotes}
-                onChange={(e) => setAccessNotes(e.target.value)}
-                placeholder="E.g., Visitor pass code at gate 2"
-                className="text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Parking Instructions</label>
-              <Input
-                value={parking}
-                onChange={(e) => setParking(e.target.value)}
-                placeholder="E.g., Basement 2 visitor parking"
-                className="text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Preferred Service Time</label>
-              <Input
-                value={preferredTime}
-                onChange={(e) => setPreferredTime(e.target.value)}
-                placeholder="E.g., Mornings after 10 AM"
-                className="text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Postal Code</label>
-              <Input
-                value={postalCode}
-                onChange={(e) => setPostalCode(e.target.value)}
-                placeholder="560102"
-                className="text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4 pt-1">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="prop-recurring"
-                checked={recurring}
-                onChange={(e) => setRecurring(e.target.checked)}
-              />
-              <label htmlFor="prop-recurring" className="text-slate-700 font-medium">
-                Recurring deep cleaning agreement
-              </label>
-            </div>
+          <div className="rounded-xl border border-zinc-200 p-4 space-y-3">
+            <label className="flex items-center gap-3 text-sm font-medium text-zinc-900 min-h-6">
+              <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} className="h-5 w-5 accent-rose-500" />
+              Regular cleaning
+            </label>
             {recurring && (
-              <select
-                value={recurringFrequency}
-                onChange={(e) =>
-                  setRecurringFrequency(e.target.value as PropertyFormPayload["recurringFrequency"])
-                }
-                className="h-8 rounded-md border border-slate-200 px-2 bg-white"
-              >
-                <option value="weekly">Weekly</option>
-                <option value="biweekly">Biweekly</option>
-                <option value="monthly">Monthly</option>
-                <option value="quarterly">Quarterly</option>
-              </select>
+              <Field label="How often" htmlFor="pf-freq">
+                <select id="pf-freq" value={recurringFrequency} onChange={(e) => setRecurringFrequency(e.target.value as PropertyFormPayload["recurringFrequency"])} className="w-full h-11 rounded-xl border border-zinc-300 px-3 bg-white text-sm">
+                  <option value="weekly">Weekly</option>
+                  <option value="biweekly">Every 2 weeks</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Every 3 months</option>
+                </select>
+              </Field>
             )}
           </div>
 
-          {error && (
-            <p className="text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
-              {error}
-            </p>
-          )}
-
-          <DialogFooter className="pt-3 border-t border-slate-100">
-            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" className="" disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Saving...
-                </>
-              ) : isEditing ? (
-                "Save Changes"
-              ) : (
-                "Save Property"
-              )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" loading={isSubmitting} disabled={!title.trim() || !address.trim() || !customerId}>
+              {isSubmitting ? "Saving…" : isEditing ? "Save changes" : "Add property"}
             </Button>
           </DialogFooter>
         </form>

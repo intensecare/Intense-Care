@@ -114,26 +114,26 @@ export default function UsersPage() {
                       <div className="flex-1 min-w-[10rem]">
                         <div className="text-sm font-semibold text-zinc-900 flex items-center gap-2">
                           {u.name}
-                          {!u.active && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-zinc-100 text-zinc-500">Disabled</span>}
+                          {!u.active && <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-zinc-100 text-zinc-500">Disabled</span>}
                         </div>
                         <div className="text-xs text-zinc-500 break-all">{u.email} · {u.phone || "no phone"}</div>
                       </div>
                       <span className={cn("px-2.5 py-1 rounded-lg text-xs font-semibold", ROLE_TONE[normalizeRole(u.role)])}>{ROLE_LABELS[normalizeRole(u.role)]}</span>
                       {u.id !== currentUser?.id && (
                         <div className="flex items-center gap-1.5">
-                          <Button variant="outline" size="sm" className="h-9 rounded-lg text-xs" onClick={() => void toggleUserStatus(u.id)}>
+                          <Button variant="outline" size="sm" className="" onClick={() => void toggleUserStatus(u.id)}>
                             {u.active ? "Disable" : "Enable"}
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-9 w-9 p-0 rounded-lg"
+                            className="w-9 p-0"
                             title="Edit"
                             onClick={() => { setError(null); setForm({ id: u.id, name: u.name, email: u.email, phone: u.phone, role: normalizeRole(u.role), password: "" }); }}
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button variant="outline" size="sm" className="h-9 w-9 p-0 rounded-lg text-red-600" title="Delete" onClick={() => setDeleteTarget(u)}>
+                          <Button variant="outline" size="sm" className="w-9 p-0 text-red-600" title="Delete" onClick={() => setDeleteTarget(u)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>

@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
+import { DataTable } from "@/components/ui/data-table";
 import { PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
@@ -21,6 +22,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+
+const METHOD: Record<string, string> = { upi: "UPI", card: "Card", bank_transfer: "Bank transfer", cash: "Cash", online_link: "Online" };
 
 export default function FinancePage() {
   const { invoices, payments, customers, jobs, recordPayment } = useApp();
@@ -87,148 +90,48 @@ export default function FinancePage() {
         {/* 1. INVOICES TAB */}
         <TabsContent value="invoices" className="space-y-4">
           {invoices.length === 0 ? (
-            <EmptyState
-              icon={FileText}
-              title="No tax invoices generated yet"
-              description="Tax invoices are created upon booking scheduling with itemized GST breakdown."
-            />
+            <EmptyState icon={FileText} title="No invoices yet" description="An invoice is created automatically when a job is booked." />
           ) : (
-            <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
-                    <tr>
-                      <th className="py-3 px-4">Invoice #</th>
-                      <th className="py-3 px-4">Job ID</th>
-                      <th className="py-3 px-4">Customer</th>
-                      <th className="py-3 px-4">Subtotal + GST</th>
-                      <th className="py-3 px-4">Total Amount</th>
-                      <th className="py-3 px-4">Paid / Balance Due</th>
-                      <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {invoices.map((inv) => {
-                      const cust = customers.find((c) => c.id === inv.customerId);
-
-                      return (
-                        <tr
-                          key={inv.id}
-                          onClick={() => setDetailInvoiceId(inv.id)}
-                          className="hover:bg-slate-50/60 transition-colors cursor-pointer"
-                          title="Open invoice details"
-                        >
-                          <td className="py-3 px-4 font-mono font-semibold text-slate-900">
-                            {inv.invoiceNumber}
-                          </td>
-                          <td className="py-3 px-4 font-mono">
-                            <Link href={`/jobs/${inv.jobId}`} className="text-blue-600 hover:underline">
-                              {jobNo(inv.jobId)}
-                            </Link>
-                          </td>
-                          <td className="py-3 px-4 font-medium text-slate-900">
-                            {cust?.name}
-                          </td>
-                          <td className="py-3 px-4 text-slate-500">
-                            {formatCurrency(inv.subtotal)} + {formatCurrency(inv.tax)}
-                          </td>
-                          <td className="py-3 px-4 font-semibold text-slate-900">
-                            {formatCurrency(inv.total)}
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className="text-emerald-700 font-semibold">{formatCurrency(inv.amountPaid)}</span> /{" "}
-                            <span className={inv.balanceDue > 0 ? "text-red-600 font-semibold" : "text-slate-400"}>
-                              {formatCurrency(inv.balanceDue)}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <PaymentStatusBadge status={inv.status} />
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            {inv.balanceDue > 0 && (
-                              <Button
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenPaymentModal(inv);
-                                }}
-                                className="h-7 text-xs bg-rose-500 text-white font-medium"
-                              >
-                                Collect Payment
-                              </Button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <DataTable
+              caption="Invoices"
+              rows={invoices}
+              rowKey={(i) => i.id}
+              columns={[
+                { key: "no", header: "Invoice", mobile: "title", cell: (i) => <button onClick={() => setDetailInvoiceId(i.id)} className="font-semibold text-zinc-950 hover:text-rose-600">{i.invoiceNumber}</button> },
+                { key: "cust", header: "Customer", mobile: "subtitle", cell: (i) => customers.find((c) => c.id === i.customerId)?.name ?? "—" },
+                { key: "status", header: "Status", mobile: "badge", cell: (i) => <PaymentStatusBadge status={i.status} /> },
+                { key: "job", header: "Job", cell: (i) => <Link href={`/jobs/${i.jobId}`} className="text-rose-600 font-medium">{jobNo(i.jobId)}</Link> },
+                { key: "total", header: "Total", align: "right", cell: (i) => <span className="font-semibold">{formatCurrency(i.total)}</span> },
+                { key: "due", header: "Due", align: "right", cell: (i) => (i.balanceDue > 0 ? <span className="font-semibold text-amber-700">{formatCurrency(i.balanceDue)}</span> : <span className="text-zinc-400">—</span>) },
+              ]}
+              actions={(i) => (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setDetailInvoiceId(i.id)}>View</Button>
+                  {i.balanceDue > 0 && <Button size="sm" onClick={() => handleOpenPaymentModal(i)}>Record payment</Button>}
+                </>
+              )}
+            />
           )}
         </TabsContent>
 
-        {/* 2. PAYMENTS TAB */}
         <TabsContent value="payments" className="space-y-4">
           {payments.length === 0 ? (
-            <EmptyState
-              icon={CreditCard}
-              title="No payments recorded yet"
-              description="Record bank transfers, UPI transactions, or card receipts against outstanding invoices."
-            />
+            <EmptyState icon={CreditCard} title="No payments yet" description="Payments you record against invoices appear here." />
           ) : (
-            <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
-                    <tr>
-                      <th className="py-3 px-4">Payment ID</th>
-                      <th className="py-3 px-4">Job ID</th>
-                      <th className="py-3 px-4">Amount</th>
-                      <th className="py-3 px-4">Method</th>
-                      <th className="py-3 px-4">Transaction Reference</th>
-                      <th className="py-3 px-4">Date</th>
-                      <th className="py-3 px-4">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {payments.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-4 font-mono font-semibold text-slate-900">
-                          {p.id}
-                        </td>
-                        <td className="py-3 px-4 font-mono">
-                          <Link href={`/jobs/${p.jobId}`} className="text-blue-600 hover:underline">
-                            {jobNo(p.jobId)}
-                          </Link>
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-emerald-700">
-                          {formatCurrency(p.amount)}
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-[11px] text-slate-700">
-                          {p.paymentMethod}
-                        </td>
-                        <td className="py-3 px-4 font-mono text-slate-600 text-[11px]">
-                          {p.transactionReference}
-                        </td>
-                        <td className="py-3 px-4 text-slate-500">
-                          {formatDateTime(p.paidAt)}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
-                            {p.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <DataTable
+              caption="Payments"
+              rows={payments}
+              rowKey={(p) => p.id}
+              columns={[
+                { key: "amount", header: "Amount", mobile: "title", cell: (p) => <span className="font-semibold text-emerald-700">{formatCurrency(p.amount)}</span> },
+                { key: "date", header: "Date", mobile: "subtitle", cell: (p) => formatDateTime(p.paidAt) },
+                { key: "job", header: "Job", cell: (p) => <Link href={`/jobs/${p.jobId}`} className="text-rose-600 font-medium">{jobNo(p.jobId)}</Link> },
+                { key: "method", header: "Method", cell: (p) => METHOD[p.paymentMethod] ?? p.paymentMethod },
+                { key: "ref", header: "Reference", cell: (p) => <span className="break-all">{p.transactionReference || "—"}</span> },
+              ]}
+            />
           )}
         </TabsContent>
-
       </Tabs>
 
       {/* Invoice Detail Dialog */}
@@ -251,7 +154,7 @@ export default function FinancePage() {
                 <div className="space-y-3 py-2 text-xs">
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400">Customer</span>
+                      <span className="text-xs text-slate-400">Customer</span>
                       {cust ? (
                         <Link href={`/customers/${cust.id}`} className="block font-semibold text-slate-800 hover:underline">
                           {cust.name}
@@ -261,17 +164,17 @@ export default function FinancePage() {
                       )}
                     </div>
                     <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400">Job</span>
+                      <span className="text-xs text-slate-400">Job</span>
                       <Link href={`/jobs/${detailInvoice.jobId}`} className="block font-mono font-semibold text-blue-600 hover:underline">
                         {jobNo(detailInvoice.jobId)}
                       </Link>
                     </div>
                     <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400">Issued</span>
+                      <span className="text-xs text-slate-400">Issued</span>
                       <div className="font-semibold text-slate-800">{formatDate(detailInvoice.issuedAt)}</div>
                     </div>
                     <div className="p-2.5 rounded bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400">Due date</span>
+                      <span className="text-xs text-slate-400">Due date</span>
                       <div className="font-semibold text-slate-800">{formatDate(detailInvoice.dueDate)}</div>
                     </div>
                   </div>
@@ -308,20 +211,20 @@ export default function FinancePage() {
                   </div>
 
                   <div className="space-y-1">
-                    <h4 className="text-[11px] font-semibold text-slate-500">
+                    <h4 className="text-xs font-semibold text-slate-500">
                       Settlements ({invoicePayments.length})
                     </h4>
                     {invoicePayments.length === 0 ? (
-                      <p className="text-[11px] text-slate-400">No payments recorded against this invoice yet.</p>
+                      <p className="text-xs text-slate-400">No payments recorded against this invoice yet.</p>
                     ) : (
                       <div className="divide-y divide-slate-100 rounded-lg border border-slate-100">
                         {invoicePayments.map((p) => (
                           <div key={p.id} className="p-2.5 flex items-center justify-between">
                             <div>
                               <div className="font-semibold text-emerald-700">{formatCurrency(p.amount)}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">{p.transactionReference}</div>
+                              <div className="text-xs text-slate-400 font-mono">{p.transactionReference}</div>
                             </div>
-                            <div className="text-right text-[10px] text-slate-500">
+                            <div className="text-right text-xs text-slate-500">
                               <div className="capitalize">{p.paymentMethod.replace("_", " ")}</div>
                               <div>{formatDateTime(p.paidAt)}</div>
                             </div>
@@ -336,7 +239,7 @@ export default function FinancePage() {
                   {detailInvoice.balanceDue > 0 && (
                     <Button
                       size="sm"
-                      className="text-xs bg-rose-500 text-white"
+                      className="bg-rose-500 text-white"
                       onClick={() => {
                         const target = detailInvoice;
                         setDetailInvoiceId(null);
@@ -370,7 +273,7 @@ export default function FinancePage() {
 
           <form onSubmit={handleSubmitPayment} className="space-y-4 py-2 text-xs">
             <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Settlement Amount (₹) *</label>
+              <label className="text-sm font-medium text-zinc-800">Settlement Amount (₹) *</label>
               <Input
                 type="number"
                 value={payAmount}
@@ -382,11 +285,11 @@ export default function FinancePage() {
             </div>
 
             <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Payment Instrument</label>
+              <label className="text-sm font-medium text-zinc-800">Payment Instrument</label>
               <select
                 value={payMethod}
                 onChange={(e) => setPayMethod(e.target.value)}
-                className="w-full h-9 rounded-md border border-slate-200 px-3 bg-white"
+                className="w-full h-11 rounded-xl border border-zinc-300 px-3 bg-white text-sm"
               >
                 <option value="upi">UPI (GPay / PhonePe / Paytm)</option>
                 <option value="card">Credit / Debit Card</option>
@@ -396,7 +299,7 @@ export default function FinancePage() {
             </div>
 
             <div className="space-y-1">
-              <label className="font-semibold text-slate-700">Transaction Reference ID *</label>
+              <label className="text-sm font-medium text-zinc-800">Transaction Reference ID *</label>
               <Input
                 value={payRef}
                 onChange={(e) => setPayRef(e.target.value)}

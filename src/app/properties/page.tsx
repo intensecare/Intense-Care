@@ -28,6 +28,8 @@ import {
   PropertyFormDialog,
   type PropertyFormPayload,
 } from "@/components/common/PropertyFormDialog";
+import { DataTable } from "@/components/ui/data-table";
+import { Notice, SkeletonList } from "@/components/ui/states";
 import { PropertyQrCard } from "@/components/common/PropertyQrCard";
 import type { Property } from "@/lib/types";
 import {
@@ -40,7 +42,7 @@ import {
 } from "@/components/ui/dialog";
 
 export default function PropertiesPage() {
-  const { properties, customers, jobs, createProperty, updateProperty, deleteProperty } = useApp();
+  const { properties, customers, jobs, createProperty, updateProperty, deleteProperty, loading } = useApp();
   const { can } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -94,350 +96,117 @@ export default function PropertiesPage() {
     }
   };
 
+  const ownerOf = (id: string) => customers.find((c) => c.id === id);
+
   return (
     <AdminLayout>
       <PageHeader
-        title="Managed Properties Directory"
-        description="Comprehensive facility register: villas, apartments, duplexes, and commercial spaces with gate security access instructions, GPS telemetry, and recurring schedules."
-        breadcrumbs={[
-          { label: "Operations", href: "/" },
-          { label: "Properties" },
-        ]}
-        actions={
-          <Button
-            onClick={openCreate}
-            size="sm"
-            className="h-9 gap-1.5 bg-rose-500 text-white font-medium"
-          >
-            <Plus className="h-4 w-4" />
-            Register Property
-          </Button>
-        }
+        title="Properties"
+        description={`${properties.length} propert${properties.length === 1 ? "y" : "ies"} · tap one for access notes, history and the optional property QR`}
+        actions={can("properties.create") ? <Button onClick={openCreate}><Plus className="h-5 w-5" aria-hidden /> Add Property</Button> : undefined}
       />
-
-      {/* Search Bar */}
-      <div className="bg-white border border-slate-200 rounded-lg p-3.5 mb-5 shadow-xs">
-        <div className="relative max-w-md">
-          <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <Input
-            type="text"
-            placeholder="Search by property title, address, or locality..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 text-xs h-9 bg-slate-50 border-slate-200"
-          />
-        </div>
-        {actionError && (
-          <p className="mt-2 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5 max-w-md">
-            {actionError}
-          </p>
-        )}
+      <div className="relative mb-5 max-w-md">
+        <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" aria-hidden />
+        <Input type="search" placeholder="Search name, address or city" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" aria-label="Search properties" />
       </div>
+      {actionError && <Notice tone="error" className="mb-4">{actionError}</Notice>}
 
-      {filteredProperties.length === 0 ? (
-        <EmptyState
-          icon={Building2}
-          title={properties.length === 0 ? "No properties registered yet" : "No properties match your search"}
-          description={
-            properties.length === 0
-              ? "Register residences, villas, apartments, or commercial facilities to store gate access codes, GPS telemetry, and parking notes for field workers."
-              : "Try refining your search keywords or register a new property."
-          }
-          actionLabel="Register Property"
-          onAction={openCreate}
-        />
+      {loading && properties.length === 0 ? (
+        <SkeletonList rows={4} />
+      ) : properties.length === 0 ? (
+        <EmptyState icon={Building2} title="No properties yet" description="Add a property for a customer before booking a job." actionLabel={can("properties.create") ? "Add property" : undefined} onAction={openCreate} />
+      ) : filteredProperties.length === 0 ? (
+        <EmptyState icon={Search} title="No matching properties" description="Try a different name or address." />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredProperties.map((p) => {
-            const owner = customers.find((c) => c.id === p.customerId);
-
-            return (
-              <div
-                key={p.id}
-                onClick={() => setDetailPropertyId(p.id)}
-                className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all space-y-3 cursor-pointer"
-                title="Open property details"
-              >
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-slate-900 text-sm">{p.title}</span>
-                    <span className="capitalize px-2 py-0.2 rounded text-[10px] font-semibold bg-blue-50 text-blue-700">
-                      {p.propertyType}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {p.recurringService && (
-                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                        Recurring Clean: {p.recurringFrequency || "Monthly"}
-                      </span>
-                    )}
-                    {(canEdit || canDelete) && (
-                      <>
-                        {canEdit && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEdit(p);
-                            }}
-                            title="Edit property"
-                          >
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActionError("");
-                              setDeleteTarget({ id: p.id, title: p.title });
-                            }}
-                            title="Delete property"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-1 text-xs">
-                  <div className="flex items-start gap-1.5 text-slate-600">
-                    <MapPin className="h-3.5 w-3.5 text-zinc-400 shrink-0 mt-0.5" />
-                    <span>{p.address} ({p.city})</span>
-                  </div>
-
-                  <div className="text-[11px] text-slate-400">
-                    Owner / Client: <strong className="text-slate-800">{owner?.name || "Client"}</strong> ({owner?.phone})
-                  </div>
-
-                  <div className="text-[11px] text-slate-500 flex items-center gap-3 pt-1">
-                    <span>{p.bedrooms || 3} Bedrooms</span>
-                    <span>•</span>
-                    <span>{p.carpetAreaSqFt || 2000} sq ft</span>
-                    <span>•</span>
-                    <span className="font-mono text-slate-400">GPS: {p.gpsCoordinates.lat}, {p.gpsCoordinates.lng}</span>
-                  </div>
-                </div>
-
-                {/* Access & Parking notes for on-site staff */}
-                <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                  {p.accessNotes && (
-                    <div className="p-2 rounded bg-slate-50 border border-slate-100 text-slate-600">
-                      <strong className="text-slate-800 flex items-center gap-1">
-                        <KeyRound className="h-3 w-3 text-amber-500" />
-                        Access:
-                      </strong>
-                      {p.accessNotes}
-                    </div>
-                  )}
-                  {p.parkingInstructions && (
-                    <div className="p-2 rounded bg-slate-50 border border-slate-100 text-slate-600">
-                      <strong className="text-slate-800 flex items-center gap-1">
-                        <Car className="h-3 w-3 text-blue-500" />
-                        Parking:
-                      </strong>
-                      {p.parkingInstructions}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <DataTable
+          caption="Properties"
+          rows={filteredProperties}
+          rowKey={(p) => p.id}
+          columns={[
+            { key: "title", header: "Property", mobile: "title", cell: (p) => <button onClick={() => setDetailPropertyId(p.id)} className="font-semibold text-zinc-950 hover:text-rose-600 text-left">{p.title}</button> },
+            { key: "address", header: "Address", mobile: "subtitle", cell: (p) => <span className="break-words">{p.address}{p.city ? `, ${p.city}` : ""}</span> },
+            { key: "owner", header: "Customer", cell: (p) => { const o = ownerOf(p.customerId); return o ? <Link href={`/customers/${o.id}`} className="text-rose-600 font-medium">{o.name}</Link> : "—"; } },
+            { key: "type", header: "Type", cell: (p) => <span className="capitalize">{p.propertyType}</span> },
+            { key: "jobs", header: "Jobs", cell: (p) => jobs.filter((j) => j.propertyId === p.id).length },
+          ]}
+          actions={(p) => <Button variant="outline" size="sm" onClick={() => setDetailPropertyId(p.id)}>Details</Button>}
+        />
       )}
 
-      {/* Register / Edit Property (shared dialog) */}
-      <PropertyFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        customers={customers}
-        editing={editingProperty}
-        onSubmit={handleFormSubmit}
-      />
+      <PropertyFormDialog open={formOpen} onOpenChange={setFormOpen} customers={customers} editing={editingProperty} onSubmit={handleFormSubmit} />
 
-      {/* Property Detail Dialog */}
       <Dialog open={detailProperty !== null} onOpenChange={(open) => !open && setDetailPropertyId(null)}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-lg">
           {detailProperty && (
             <>
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 text-base">
-                  <Building2 className="h-4 w-4 text-blue-600" />
-                  {detailProperty.title}
-                  <span className="capitalize px-2 py-0.2 rounded text-[10px] font-semibold bg-blue-50 text-blue-700">
-                    {detailProperty.propertyType}
-                  </span>
-                </DialogTitle>
-                <DialogDescription>
-                  Full property record: owner, access instructions and booking history.
-                </DialogDescription>
+                <DialogTitle>{detailProperty.title}</DialogTitle>
+                <DialogDescription>{detailProperty.address}{detailProperty.city ? `, ${detailProperty.city}` : ""}</DialogDescription>
               </DialogHeader>
-
-              <div className="space-y-3 py-2 text-xs max-h-[60vh] overflow-y-auto">
-                <div className="flex items-start gap-1.5 text-slate-600">
-                  <MapPin className="h-3.5 w-3.5 text-zinc-400 shrink-0 mt-0.5" />
-                  <span>
-                    {detailProperty.address}
-                    {detailProperty.city ? ` (${detailProperty.city})` : ""}
-                    {detailProperty.postalCode ? ` ${detailProperty.postalCode}` : ""}
-                  </span>
-                </div>
-
+              <div className="space-y-4">
                 {(() => {
-                  const owner = customers.find((c) => c.id === detailProperty.customerId);
+                  const owner = ownerOf(detailProperty.customerId);
                   return owner ? (
-                    <Link
-                      href={`/customers/${owner.id}`}
-                      className="block p-2.5 rounded-lg border border-slate-100 bg-slate-50/70 hover:border-slate-300 transition-colors"
-                    >
-                      <span className="text-[11px] text-slate-400">Owner / Client</span>
-                      <div className="font-semibold text-slate-800">
-                        {owner.name} <span className="font-mono text-slate-500">({owner.phone})</span>
-                      </div>
+                    <Link href={`/customers/${owner.id}`} className="flex items-center justify-between rounded-xl border border-zinc-200 px-4 py-3">
+                      <span><span className="block text-xs text-zinc-500">Customer</span><span className="block text-sm font-semibold text-zinc-950">{owner.name}</span></span>
+                      <span className="text-sm text-zinc-500">{owner.phone}</span>
                     </Link>
                   ) : null;
                 })()}
-
-                <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-500">
-                  <div className="p-2 rounded bg-slate-50 border border-slate-100">
-                    <strong className="text-slate-800">{detailProperty.bedrooms ?? 3}</strong> Bedrooms
-                  </div>
-                  <div className="p-2 rounded bg-slate-50 border border-slate-100">
-                    <strong className="text-slate-800">{detailProperty.bathrooms ?? 2}</strong> Bathrooms
-                  </div>
-                  <div className="p-2 rounded bg-slate-50 border border-slate-100">
-                    <strong className="text-slate-800">{detailProperty.carpetAreaSqFt ?? 1000}</strong> sq ft
-                  </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  {[["Bedrooms", detailProperty.bedrooms ?? 0], ["Bathrooms", detailProperty.bathrooms ?? 0], ["Sq ft", detailProperty.carpetAreaSqFt ?? 0]].map(([l, v]) => (
+                    <div key={String(l)} className="rounded-xl bg-zinc-50 py-3"><div className="text-lg font-semibold text-zinc-950">{v}</div><div className="text-xs text-zinc-500">{l}</div></div>
+                  ))}
                 </div>
-
-                <div className="grid grid-cols-1 gap-2 text-[11px]">
-                  {detailProperty.accessNotes && (
-                    <div className="p-2 rounded bg-slate-50 border border-slate-100 text-slate-600">
-                      <strong className="text-slate-800 flex items-center gap-1">
-                        <KeyRound className="h-3 w-3 text-amber-500" />
-                        Access:
-                      </strong>
-                      {detailProperty.accessNotes}
-                    </div>
-                  )}
-                  {detailProperty.parkingInstructions && (
-                    <div className="p-2 rounded bg-slate-50 border border-slate-100 text-slate-600">
-                      <strong className="text-slate-800 flex items-center gap-1">
-                        <Car className="h-3 w-3 text-blue-500" />
-                        Parking:
-                      </strong>
-                      {detailProperty.parkingInstructions}
-                    </div>
-                  )}
-                  {detailProperty.preferredTime && (
-                    <div className="p-2 rounded bg-slate-50 border border-slate-100 text-slate-600 flex items-center gap-1">
-                      <Clock className="h-3 w-3 text-slate-400" />
-                      <strong className="text-slate-800">Preferred time:</strong>
-                      {detailProperty.preferredTime}
-                    </div>
-                  )}
-                  {detailProperty.recurringService && (
-                    <div className="p-2 rounded bg-emerald-50 border border-emerald-200 text-emerald-800">
-                      <strong>Recurring clean:</strong> {detailProperty.recurringFrequency || "monthly"}
-                    </div>
-                  )}
-                </div>
-
-                <div className="pt-2 border-t border-slate-100 space-y-2">
-                  <h4 className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
-                    <History className="h-3 w-3" />
-                    Booking History
-                  </h4>
+                {[["Access", detailProperty.accessNotes], ["Parking", detailProperty.parkingInstructions], ["Preferred time", detailProperty.preferredTime]].filter(([, v]) => v).map(([l, v]) => (
+                  <div key={String(l)} className="rounded-xl bg-zinc-50 px-4 py-3 text-sm"><span className="font-semibold text-zinc-900">{l}: </span><span className="text-zinc-700">{v}</span></div>
+                ))}
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-950 mb-2">Jobs at this property</h3>
                   {(() => {
-                    const propertyJobs = jobs.filter((j) => j.propertyId === detailProperty.id);
-                    if (propertyJobs.length === 0) {
-                      return (
-                        <p className="text-[11px] text-slate-400">
-                          No bookings recorded for this property yet.
-                        </p>
-                      );
-                    }
-                    return (
-                      <div className="divide-y divide-slate-100 rounded-lg border border-slate-100">
-                        {propertyJobs.map((j) => (
-                          <div key={j.id} className="p-2.5 flex items-center justify-between gap-2">
-                            <div>
-                              <div className="font-semibold text-slate-800">
-                                {formatDate(j.scheduledDate)}
-                              </div>
-                              <div className="text-[10px] text-slate-400">{j.scheduledTimeSlot}</div>
-                            </div>
-                            <JobStatusBadge status={j.status} />
-                          </div>
+                    const list = jobs.filter((j) => j.propertyId === detailProperty.id);
+                    return list.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No jobs yet.</p>
+                    ) : (
+                      <ul className="rounded-xl border border-zinc-200 divide-y divide-zinc-100">
+                        {list.map((j) => (
+                          <li key={j.id}>
+                            <Link href={`/jobs/${j.id}`} className="flex items-center justify-between gap-2 px-4 py-3">
+                              <span className="text-sm text-zinc-900">{formatDate(j.scheduledDate)}</span>
+                              <JobStatusBadge status={j.status} size="sm" />
+                            </Link>
+                          </li>
                         ))}
-                      </div>
+                      </ul>
                     );
                   })()}
                 </div>
-
-                <div className="text-[10px] text-slate-400">
-                  Registered: {formatDate(detailProperty.createdAt)}
-                </div>
-
                 {canEdit && <PropertyQrCard propertyId={detailProperty.id} propertyTitle={detailProperty.title} />}
               </div>
-
-              <DialogFooter className="pt-3 border-t border-slate-100">
-                {canEdit && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs"
-                    onClick={() => {
-                      const target = detailProperty;
-                      setDetailPropertyId(null);
-                      openEdit(target);
-                    }}
-                  >
-                    <Edit2 className="h-3.5 w-3.5 mr-1" />
-                    Edit Property
-                  </Button>
-                )}
+              <DialogFooter>
                 {canDelete && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
-                    onClick={() => {
-                      const target = detailProperty;
-                      setDetailPropertyId(null);
-                      setActionError("");
-                      setDeleteTarget({ id: target.id, title: target.title });
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1" />
-                    Delete
+                  <Button variant="ghost" className="text-red-700" onClick={() => { const t = detailProperty; setDetailPropertyId(null); setActionError(""); setDeleteTarget({ id: t.id, title: t.title }); }}>
+                    <Trash2 className="h-4 w-4" aria-hidden /> Delete
                   </Button>
                 )}
-                <Button variant="outline" size="sm" onClick={() => setDetailPropertyId(null)}>
-                  Close
-                </Button>
+                {canEdit && (
+                  <Button variant="outline" onClick={() => { const t = detailProperty; setDetailPropertyId(null); openEdit(t); }}>
+                    <Edit2 className="h-4 w-4" aria-hidden /> Edit
+                  </Button>
+                )}
               </DialogFooter>
             </>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Delete Property Confirmation */}
       <ConfirmModal
         isOpen={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
-        title="Delete Property"
-        description={`Permanently delete "${deleteTarget?.title ?? "this property"}"? Properties linked to booked jobs cannot be deleted.`}
-        confirmText="Delete Property"
+        title="Delete property?"
+        description={`"${deleteTarget?.title ?? "This property"}" will be removed. Properties with jobs can't be deleted.`}
+        confirmText="Delete"
       />
     </AdminLayout>
   );

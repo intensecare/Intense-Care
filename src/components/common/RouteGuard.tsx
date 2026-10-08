@@ -77,10 +77,10 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
               </p>
             </div>
             <div className="pt-2 flex flex-col gap-2">
-              <Button className="w-full text-white text-xs h-9" onClick={() => router.push(home)}>
+              <Button className="w-full text-white" onClick={() => router.push(home)}>
                 Go to my workspace
               </Button>
-              <Button variant="outline" className="w-full text-xs h-9 text-slate-600" onClick={logout}>
+              <Button variant="outline" className="w-full text-slate-600" onClick={logout}>
                 <LogOut className="h-3.5 w-3.5 mr-1.5" /> Sign out
               </Button>
             </div>
