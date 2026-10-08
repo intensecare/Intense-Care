@@ -6,6 +6,7 @@ const nextConfig = {
       { source: "/customer/job/:token", destination: "/customer/service/:token", permanent: true },
       { source: "/operations", destination: "/", permanent: false },
       { source: "/quality", destination: "/quality-queue", permanent: false },
+      { source: "/finance", destination: "/invoices", permanent: false },
     ];
   },
   async headers() {

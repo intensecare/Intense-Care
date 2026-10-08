@@ -24,13 +24,15 @@ import {
   type Principal,
 } from "../src/lib/rbac";
 import { validateTransition } from "../src/lib/state-machine";
+import { computeInvoiceFigures, isValidGstin } from "../src/lib/tax";
+import { jobIdPrefix } from "../src/lib/server/job-serial";
 import type { Job } from "../src/lib/types";
 
 const principal = (role: Principal["role"], extra: Partial<Principal> = {}): Principal => ({ id: "u1", role, ...extra });
 
-test("exactly four user types; only three sign in", () => {
-  assert.deepEqual([...ROLES].sort(), ["admin", "customer", "field_manager", "qc_inspector"]);
-  assert.deepEqual([...SIGN_IN_ROLES].sort(), ["admin", "field_manager", "qc_inspector"]);
+test("exactly five user types; four sign in (the customer uses the job QR / link)", () => {
+  assert.deepEqual([...ROLES].sort(), ["admin", "customer", "field_manager", "qc_inspector", "tax_officer"]);
+  assert.deepEqual([...SIGN_IN_ROLES].sort(), ["admin", "field_manager", "qc_inspector", "tax_officer"]);
   assert.equal(canSignIn("customer"), false, "customers use the secure link, never a login");
   assert.equal(canSignIn("referral_partner"), false);
 });
@@ -39,6 +41,7 @@ test("legacy roles map onto the four types; unknown values never widen access", 
   for (const r of ["super_admin", "ops_manager", "scheduler", "accounts", "admin"]) assert.equal(normalizeRole(r), "admin", r);
   for (const r of ["staff", "field_staff", "field_manager"]) assert.equal(normalizeRole(r), "field_manager", r);
   assert.equal(normalizeRole("qc_inspector"), "qc_inspector");
+  assert.equal(normalizeRole("tax_officer"), "tax_officer");
   assert.equal(normalizeRole("referral_partner"), "customer");
   assert.equal(normalizeRole("hacker"), "customer");
   assert.equal(normalizeRole(undefined), "customer");
@@ -107,7 +110,13 @@ test("customer vocabulary: confirm → view progress → approve → rate", () =
   assert.equal(getNextAction("customer", { status: "COMPLETED" })?.kind, "feedback");
 });
 
-test("workspaces: four separate experiences, each with its own home", () => {
+test("workspaces: five separate experiences, each with its own home", () => {
+  assert.equal(homePathFor("tax_officer"), "/gst");
+  assert.deepEqual(navFor("tax_officer").map((n) => n.label), ["GST Dashboard", "GST Invoices", "GST Reports"]);
+  assert.deepEqual(
+    navFor("admin").filter((n) => !n.secondary).map((n) => n.label),
+    ["Dashboard", "Jobs", "Customers", "Invoices", "QC", "Reports", "Users"]
+  );
   assert.equal(homePathFor("admin"), "/");
   assert.equal(homePathFor("field_manager"), "/my-jobs");
   assert.equal(homePathFor("qc_inspector"), "/quality-queue");
@@ -126,8 +135,46 @@ test("routing: Field Manager and QC can't open the Operations desk; customer pag
   assert.equal(routeAllowed("qc_inspector", "/quality-queue/JOB-1"), true);
   assert.equal(routeAllowed("admin", "/my-jobs"), false, "Admin manages jobs from the job page");
   assert.equal(isPublicPath("/customer/service/abc"), true);
-  assert.equal(isPublicPath("/customer/property/abc"), true);
   assert.equal(isPublicPath("/partner-portal/x"), false, "referral portal removed");
+});
+
+test("Tax Officer: GST invoices and GST reports only — nothing else, read-only", () => {
+  const grants = Object.entries(ROLE_PERMISSIONS.tax_officer).filter(([, s]) => s !== "NONE").map(([p]) => p).sort();
+  assert.deepEqual(grants, ["gst.reports", "gst.view"]);
+  for (const p of ["finance.view", "invoice.view", "invoice.create", "invoice.update", "jobs.view", "jobs.update", "users.manage", "customers.view", "qc.view", "settings.manage", "links.manage"] as const) {
+    assert.equal(scopeOf("tax_officer", p), "NONE", p);
+  }
+  for (const path of ["/gst", "/gst/invoices", "/gst/invoices/abc", "/gst/reports"]) assert.equal(routeAllowed("tax_officer", path), true, path);
+  for (const path of ["/", "/jobs", "/jobs/x", "/invoices", "/invoices/x", "/customers", "/users", "/settings", "/reports", "/my-jobs", "/quality-queue"]) {
+    assert.equal(routeAllowed("tax_officer", path), false, path);
+  }
+  for (const role of ["field_manager", "qc_inspector"] as const) {
+    for (const path of ["/gst", "/gst/invoices/abc", "/invoices", "/invoices/abc"]) assert.equal(routeAllowed(role, path), false, `${role} ${path}`);
+  }
+  assert.equal(routeAllowed("admin", "/invoices/abc"), true);
+  assert.equal(routeAllowed("admin", "/gst/reports"), true);
+});
+
+test("GST / Non-GST invoice maths", () => {
+  const intra = computeInvoiceFigures({ invoiceType: "GST", subtotal: 4999, gstRatePercent: 18 });
+  assert.deepEqual([intra.cgst, intra.sgst, intra.igst, intra.tax, intra.total], [449.91, 449.91, 0, 899.82, 5898.82]);
+  const inter = computeInvoiceFigures({ invoiceType: "GST", subtotal: 4999, gstRatePercent: 18, interState: true });
+  assert.deepEqual([inter.cgst, inter.sgst, inter.igst, inter.tax, inter.total], [0, 0, 899.82, 899.82, 5898.82]);
+  const disc = computeInvoiceFigures({ invoiceType: "GST", subtotal: 10000, discount: 1000, gstRatePercent: 18 });
+  assert.deepEqual([disc.taxable, disc.tax, disc.total], [9000, 1620, 10620]);
+  const non = computeInvoiceFigures({ invoiceType: "NON_GST", subtotal: 4999, discount: 99, gstRatePercent: 18 });
+  assert.deepEqual([non.gstRate, non.cgst, non.sgst, non.igst, non.tax, non.total], [0, 0, 0, 0, 0, 4900]);
+  assert.equal(isValidGstin("29ABCDE1234F1Z5"), true);
+  assert.equal(isValidGstin("29abcde1234f1z5"), true);
+  assert.equal(isValidGstin("12345"), false);
+});
+
+test("Job ID: CUSTOMER-NAME-DDMMYYYY prefix", () => {
+  assert.equal(jobIdPrefix("Rahul Sharma", "2026-10-08"), "RAHUL-SHARMA-08102026");
+  assert.equal(jobIdPrefix("  ABC  Cleaning ", "2026-10-08"), "ABC-CLEANING-08102026");
+  assert.equal(jobIdPrefix("Dr. A.  O'Brien & Sons!", "2026-01-02"), "DR-A-O-BRIEN-AND-SONS-02012026");
+  assert.equal(jobIdPrefix("José Núñez", "2026-10-08"), "JOSE-NUNEZ-08102026");
+  assert.equal(jobIdPrefix("गणेश", "2026-10-08"), "CUSTOMER-08102026");
 });
 
 test("approvals and notification deep links follow the four roles", () => {

@@ -21,7 +21,7 @@ import {
  * POST get           → the job's single link; mints it on first use.
  * POST regen         → replace: new link, old dies instantly.
  * POST revoke        → kill switch.
- * (No per-job QR: the only QR is the optional property QR.)
+ * The job's ONE QR encodes this same link — there are no other QR codes.
  * POST purge-job     → revoke the job's link (compromise response).
  */
 

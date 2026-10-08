@@ -7,6 +7,15 @@ import { can } from "@/lib/rbac";
 import { errorResponse } from "@/lib/server/http";
 import { serializeCustomer, ok, fail, readJson } from "@/lib/server/serialize";
 import { logger } from "@/lib/server/logger";
+import { GSTIN_PATTERN } from "@/lib/tax";
+
+/** Optional GSTIN: "" clears it; otherwise it must be a valid 15-character GSTIN. */
+const GstinSchema = z
+  .string()
+  .max(20)
+  .transform((v) => v.trim().toUpperCase())
+  .refine((v) => v === "" || GSTIN_PATTERN.test(v), "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5.")
+  .transform((v) => (v === "" ? null : v));
 
 const CreateSchema = z.object({
   name: z.string().min(2).max(160),
@@ -17,6 +26,7 @@ const CreateSchema = z.object({
   notes: z.string().max(2000).optional(),
   source: z.string().max(40).optional().default("direct"),
   referralPartnerId: z.string().max(64).optional(),
+  gstin: GstinSchema.optional(),
 });
 
 const UpdateSchema = z.object({
@@ -29,6 +39,7 @@ const UpdateSchema = z.object({
   source: z.string().max(40).optional(),
   status: z.enum(["active", "inactive"]).optional(),
   referralPartnerId: z.string().max(64).nullable().optional(),
+  gstin: GstinSchema.optional(),
 });
 
 /**
@@ -70,7 +81,7 @@ export async function POST(request: Request) {
     const parsed = CreateSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json(
-        { success: false, error: "Invalid customer payload.", details: parsed.error.flatten() },
+        { success: false, error: parsed.error.issues.find((i) => i.path[0] === "gstin")?.message ?? "Invalid customer payload.", details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -93,6 +104,7 @@ export async function POST(request: Request) {
         source: data.source || "direct",
         referralPartnerId: data.referralPartnerId,
         referralCode,
+        gstin: data.gstin ?? null,
       },
     });
 
@@ -118,7 +130,7 @@ export async function PATCH(request: Request) {
     const parsed = UpdateSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json(
-        { success: false, error: "Invalid customer update." },
+        { success: false, error: parsed.error.issues.find((i) => i.path[0] === "gstin")?.message ?? "Invalid customer update." },
         { status: 400 }
       );
     }

@@ -81,7 +81,7 @@ interface AppContextType {
   /** Re-fetches invoices, payments, refunds, expenses and quotes (finance.view / invoice.view). */
   refreshFinance: () => Promise<void>;
   finalizeInvoice: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
-  updateInvoice: (invoiceId: string, updates: { discount?: number; dueDate?: string; reason?: string }) => Promise<{ success: boolean; message: string }>;
+  updateInvoice: (invoiceId: string, updates: { discount?: number; dueDate?: string; reason?: string; invoiceType?: "GST" | "NON_GST"; interState?: boolean; customerGstin?: string }) => Promise<{ success: boolean; message: string }>;
   createRefund: (invoiceId: string, amount: number, reason: string, method?: Refund["method"]) => Promise<{ success: boolean; message: string; refund?: Refund }>;
   decideRefund: (refundId: string, decision: "approve" | "reject", reason?: string) => Promise<{ success: boolean; message: string }>;
   transitionJobStatus: (
@@ -172,6 +172,9 @@ interface AppContextType {
     assignedStaffIds?: string[];
     notes?: string;
     referralPartnerId?: string;
+    /** The invoice created with the job: GST or Non-GST. */
+    invoiceType?: "GST" | "NON_GST";
+    interState?: boolean;
   }) => Promise<{ success: boolean; message: string; job?: Job }>;
 
   createCustomer: (customerData: Partial<Customer>) => Promise<{ success: boolean; message: string; customer?: Customer }>;
@@ -372,18 +375,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
 
     // Services: staff see active only; managers/admins all.
-    parallel.push(
-      api<Service[]>("/api/services").then((r) => {
-        if (r.ok && r.data) setServices(r.data);
-      })
-    );
+    if (allowed("services.view")) {
+      parallel.push(
+        api<Service[]>("/api/services").then((r) => {
+          if (r.ok && r.data) setServices(r.data);
+        })
+      );
+    }
 
     // Jobs: role-scoped server-side (staff → assigned only).
-    parallel.push(
-      api<Job[]>("/api/jobs").then((r) => {
-        if (r.ok && r.data) setJobs(r.data);
-      })
-    );
+    if (allowed("jobs.view")) {
+      parallel.push(
+        api<Job[]>("/api/jobs").then((r) => {
+          if (r.ok && r.data) setJobs(r.data);
+        })
+      );
+    }
 
     if (allowed("customers.view")) {
       parallel.push(
@@ -438,14 +445,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Photos: hydrated from the DB (Cloudinary-backed).
-    parallel.push(
-      api<JobPhoto[]>("/api/photos").then((r) => {
-        if (r.ok && r.data) setPhotos(r.data);
-      })
-    );
+    if (allowed("photos.view")) {
+      parallel.push(
+        api<JobPhoto[]>("/api/photos").then((r) => {
+          if (r.ok && r.data) setPhotos(r.data);
+        })
+      );
+    }
 
     // Quality records (staff-scoped server-side).
-    parallel.push(
+    if (allowed("jobs.view")) parallel.push(
       api<{
         qualityChecks: QualityCheck[];
         qualityIssues: QualityIssue[];
@@ -471,7 +480,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Checklist items hydrate once per session from the DB (role-scoped).
   useEffect(() => {
-    if (!authUser) return;
+    if (!authUser || !rbacCan({ role: authUser.role }, "checklist.view")) return;
     let cancelled = false;
     (async () => {
       const r = await api<JobChecklistItem[]>("/api/checklist");
@@ -584,7 +593,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Invoice finalized and sent." };
   };
 
-  const updateInvoice = async (invoiceId: string, updates: { discount?: number; dueDate?: string; reason?: string }) => {
+  const updateInvoice = async (invoiceId: string, updates: { discount?: number; dueDate?: string; reason?: string; invoiceType?: "GST" | "NON_GST"; interState?: boolean; customerGstin?: string }) => {
     const r = await api<Invoice>("/api/finance", { method: "POST", body: JSON.stringify({ action: "update-invoice", invoiceId, ...updates }) });
     if (!r.ok) return { success: false, message: r.error || "Could not update the invoice." };
     await refreshFinance();
@@ -909,6 +918,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     assignedStaffIds?: string[];
     notes?: string;
     referralPartnerId?: string;
+    /** The invoice created with the job: GST or Non-GST. */
+    invoiceType?: "GST" | "NON_GST";
+    interState?: boolean;
   }): Promise<{ success: boolean; message: string; job?: Job }> => {
     const r = await api<{
       job: Job & { customerName?: string; customerPhone?: string; propertyTitle?: string; service?: Job extends never ? never : { id: string; name: string; basePrice: number; estimatedDurationHours: number } };
@@ -1016,6 +1028,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         notes: customerData.notes,
         source: customerData.source || "direct",
         referralPartnerId: customerData.referralPartnerId,
+        gstin: customerData.gstin ?? "",
       }),
     });
     if (!r.ok || !r.data) return { success: false, message: r.error || "Could not create the customer." };

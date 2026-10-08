@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { nextJobSerial } from "@/lib/server/job-serial";
+import { nextInvoiceNumber } from "@/lib/server/invoices";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, requireAnyPermission, requireApproval, HttpError } from "@/lib/server/authz";
@@ -15,7 +16,7 @@ import {
   readJson,
   nextDocNumber,
 } from "@/lib/server/serialize";
-import { getTaxRate } from "@/lib/tax";
+import { getTaxRate, computeInvoiceFigures, GSTIN_PATTERN } from "@/lib/tax";
 import { getSystemSettings } from "@/lib/server/settings";
 import { logger } from "@/lib/server/logger";
 import { recordAudit } from "@/lib/server/audit";
@@ -69,6 +70,10 @@ const UpdateInvoiceSchema = z.object({
   discount: z.number().min(0).max(100000000).optional(),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   reason: z.string().max(300).optional(),
+  /** Switch between a GST and a Non-GST invoice (only before it is finalized). */
+  invoiceType: z.enum(["GST", "NON_GST"]).optional(),
+  interState: z.boolean().optional(),
+  customerGstin: z.string().max(20).optional(),
 });
 
 const RefundSchema = z.object({
@@ -225,21 +230,49 @@ export async function POST(request: Request) {
 
       const data: Record<string, unknown> = {};
       if (d.dueDate) data.dueDate = d.dueDate;
+      const settings = await getSystemSettings();
       if (d.discount !== undefined) {
-        const settings = await getSystemSettings();
         const percent = invoice.subtotal > 0 ? (d.discount / invoice.subtotal) * 100 : 0;
         if (discountNeedsApproval(percent, settings)) {
           // High-value discount: approval authority (§17).
           requireApproval(user, "discount.high_value");
           if (!d.reason) return fail("A reason is required for a discount above the configured limit.", 400);
         }
-        const total = Math.max(0, invoice.subtotal + invoice.tax - d.discount);
-        data.discount = d.discount;
-        data.total = total;
-        data.balanceDue = Math.max(0, total - invoice.amountPaid);
+      }
+      if (d.discount !== undefined || d.invoiceType !== undefined || d.interState !== undefined || d.customerGstin !== undefined) {
+        const type = d.invoiceType ?? (invoice.invoiceType === "NON_GST" ? "NON_GST" : "GST");
+        const gstin = (d.customerGstin ?? invoice.customerGstin ?? "").trim().toUpperCase();
+        if (type === "GST" && gstin && !GSTIN_PATTERN.test(gstin)) return fail("Customer GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5.", 400);
+        // Keep the rate the invoice was issued with; a Non-GST invoice turning
+        // into GST takes today's configured rate.
+        const rate = invoice.invoiceType === "GST" && invoice.gstRate > 0 ? invoice.gstRate : settings.taxRatePercent;
+        const f = computeInvoiceFigures({
+          invoiceType: type,
+          subtotal: invoice.subtotal,
+          discount: d.discount ?? invoice.discount,
+          gstRatePercent: rate,
+          interState: d.interState ?? invoice.interState,
+        });
+        if (f.total < invoice.amountPaid) return fail("The new total would be less than what the customer already paid.", 409);
+        Object.assign(data, {
+          invoiceType: f.invoiceType,
+          discount: f.discount,
+          tax: f.tax,
+          gstRate: f.gstRate,
+          cgst: f.cgst,
+          sgst: f.sgst,
+          igst: f.igst,
+          interState: f.invoiceType === "GST" && (d.interState ?? invoice.interState),
+          customerGstin: f.invoiceType === "GST" ? gstin || null : null,
+          supplierGstin: f.invoiceType === "GST" ? invoice.supplierGstin ?? (settings.gstin?.trim() || null) : null,
+          total: f.total,
+          balanceDue: Math.max(0, Math.round((f.total - invoice.amountPaid) * 100) / 100),
+        });
+        // GST and Non-GST invoices never share a number series.
+        if (f.invoiceType !== invoice.invoiceType) data.invoiceNumber = await nextInvoiceNumber(prisma, f.invoiceType);
       }
       const updated = await prisma.invoice.update({ where: { id: invoice.id }, data });
-      void recordAudit({ actor: user, action: "INVOICE_UPDATED", entityType: "invoice", entityId: invoice.id, jobId: invoice.jobId, previousState: `total=${invoice.total}`, newState: `total=${updated.total}`, reason: d.reason, request });
+      void recordAudit({ actor: user, action: "INVOICE_UPDATED", entityType: "invoice", entityId: invoice.id, jobId: invoice.jobId, previousState: `${invoice.invoiceType} total=${invoice.total}`, newState: `${updated.invoiceType} total=${updated.total}`, reason: d.reason, request });
       return ok(serializeInvoice(updated));
     }
 
@@ -369,10 +402,17 @@ export async function POST(request: Request) {
       const scheduledDate = parsed.data.scheduledDate ?? tomorrow.toISOString().slice(0, 10);
       const scheduledTimeSlot = parsed.data.scheduledTimeSlot ?? "09:00 - 13:30";
 
+      const customer = await prisma.customer.findUnique({ where: { id: quote.customerId }, select: { name: true, gstin: true } });
+      const settings = await getSystemSettings();
+      // A quote that carried tax becomes a GST invoice (intra-state split);
+      // a quote without tax becomes a Non-GST invoice.
+      const isGst = quote.tax > 0;
+      const cgst = isGst ? Math.round((quote.tax / 2) * 100) / 100 : 0;
+      const taxable = quote.subtotal - quote.discount;
       const { job, invoice } = await prisma.$transaction(async (tx) => {
         const createdJob = await tx.job.create({
           data: {
-            jobSerial: await nextJobSerial(tx),
+            jobSerial: await nextJobSerial(tx, customer?.name ?? "Customer", scheduledDate),
             customerId: quote.customerId,
             propertyId: quote.propertyId,
             serviceId: quote.serviceId,
@@ -385,7 +425,13 @@ export async function POST(request: Request) {
         });
         const createdInvoice = await tx.invoice.create({
           data: {
-            invoiceNumber: nextDocNumber("INV"),
+            invoiceNumber: await nextInvoiceNumber(tx, isGst ? "GST" : "NON_GST"),
+            invoiceType: isGst ? "GST" : "NON_GST",
+            gstRate: isGst && taxable > 0 ? Math.round((quote.tax * 10000) / taxable) / 100 : 0,
+            cgst,
+            sgst: isGst ? Math.round((quote.tax - cgst) * 100) / 100 : 0,
+            customerGstin: isGst ? customer?.gstin ?? null : null,
+            supplierGstin: isGst ? settings.gstin?.trim() || null : null,
             jobId: createdJob.id,
             customerId: quote.customerId,
             subtotal: quote.subtotal,

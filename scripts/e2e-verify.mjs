@@ -1,5 +1,6 @@
 // End-to-end check against a running server and an EMPTY test database:
-// four user types, one Job ID from booking to feedback, rework loop, security.
+// five user types, one Job ID and ONE QR/link from booking to feedback,
+// rework loop, GST / Non-GST invoices, Tax Officer limits, logout, security.
 //
 //   DATABASE_URL=… npx prisma migrate deploy
 //   SEED_SUPERADMIN_EMAIL=admin@test.local SEED_SUPERADMIN_PASSWORD=adminpass123 npm run db:seed
@@ -53,8 +54,87 @@ sql(`update "Property" set lat=12.9716, lng=77.5946 where id='${prop.id}'`);
 const today = new Date().toISOString().slice(0, 10);
 const jobR = await admin("/api/jobs", { method: "POST", body: { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: today, scheduledTimeSlot: "09:00 - 13:00" } });
 const job = jobR.json?.data?.job;
-ok(/^JOB-\d{5}$/.test(job?.jobNumber ?? ""), `job created with ONE readable Job ID ${job?.jobNumber}`);
+const ddmmyyyy = `${today.slice(8, 10)}${today.slice(5, 7)}${today.slice(0, 4)}`;
+ok(job?.jobNumber === `ASHA-RAO-${ddmmyyyy}-001`, `Job ID = CUSTOMER-NAME-DDMMYYYY-001 (${job?.jobNumber})`);
 const job2 = (await admin("/api/jobs", { method: "POST", body: { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: today, scheduledTimeSlot: "14:00 - 18:00" } })).json?.data?.job;
+ok(job2?.jobNumber === `ASHA-RAO-${ddmmyyyy}-002`, `same customer, same date → next sequence (${job2?.jobNumber})`);
+
+// Job IDs: special characters, other dates, concurrent bookings, DB uniqueness
+const cust3 = (await admin("/api/customers", { method: "POST", body: { name: "  ABC  Cleaning & Co. (Pvt) ", phone: "+919811111111" } })).json?.data;
+const prop3 = (await admin("/api/properties", { method: "POST", body: { customerId: cust3.id, title: "Office", address: "MG Road" } })).json?.data;
+const burst = await Promise.all([0, 1, 2, 3, 4].map((i) => admin("/api/jobs", { method: "POST", body: { customerId: cust3.id, propertyId: prop3.id, serviceId: svc.id, scheduledDate: "2026-12-24", scheduledTimeSlot: `${String(8 + i).padStart(2, "0")}:00 - ${String(9 + i).padStart(2, "0")}:00`, invoiceType: "NON_GST" } })));
+const burstIds = burst.map((r) => r.json?.data?.job?.jobNumber).filter(Boolean).sort();
+ok(burstIds.length === 5 && new Set(burstIds).size === 5 && burstIds[0] === "ABC-CLEANING-AND-CO-PVT-24122026-001" && burstIds[4] === "ABC-CLEANING-AND-CO-PVT-24122026-005", `5 simultaneous bookings → 5 unique Job IDs (${burstIds[0]} … ${burstIds[4]})`);
+let dupBlocked = false;
+try { sql(`update "Job" set "jobSerial"='${job.jobNumber}' where id='${job2.id}'`); } catch { dupBlocked = true; }
+ok(dupBlocked, "database refuses a duplicate Job ID (unique constraint)");
+
+// Invoices: GST (default) vs Non-GST, separate number series, correct GST maths
+const invOf = async (jobId) => (await admin("/api/finance")).json?.data?.invoices.find((i) => i.jobId === jobId);
+const gstInv = await invOf(job.id);
+ok(gstInv?.invoiceType === "GST" && /^GST-\d{4}-\d{5}$/.test(gstInv.invoiceNumber), `GST invoice created with the job (${gstInv?.invoiceNumber})`);
+ok(gstInv.cgst === 449.91 && gstInv.sgst === 449.91 && gstInv.igst === 0 && gstInv.tax === 899.82 && gstInv.total === 5898.82 && gstInv.gstRate === 18, "GST 18% intra-state: CGST 449.91 + SGST 449.91 = 899.82, total 5898.82");
+const nonGstInv = await invOf(burst[0].json.data.job.id);
+ok(nonGstInv?.invoiceType === "NON_GST" && /^INV-\d{4}-\d{5}$/.test(nonGstInv.invoiceNumber) && nonGstInv.tax === 0 && nonGstInv.cgst === 0 && nonGstInv.total === 4999, `Non-GST invoice: no GST at all, total = amount (${nonGstInv?.invoiceNumber})`);
+const igstJob = (await admin("/api/jobs", { method: "POST", body: { customerId: cust3.id, propertyId: prop3.id, serviceId: svc.id, scheduledDate: "2026-12-26", scheduledTimeSlot: "10:00 - 12:00", invoiceType: "GST", interState: true } })).json?.data?.job;
+const igstInv = await invOf(igstJob.id);
+ok(igstInv?.igst === 899.82 && igstInv.cgst === 0 && igstInv.sgst === 0 && igstInv.interState === true, "inter-state GST → IGST 899.82, no CGST/SGST");
+let constraintHeld = false;
+try { sql(`update "Invoice" set tax=10 where id='${nonGstInv.id}'`); } catch { constraintHeld = true; }
+ok(constraintHeld, "database refuses GST on a Non-GST invoice (check constraint)");
+const toGst = await admin("/api/finance", { method: "POST", body: { action: "update-invoice", invoiceId: nonGstInv.id, invoiceType: "GST", customerGstin: "29ABCDE1234F1Z5" } });
+ok(toGst.json?.data?.invoiceType === "GST" && toGst.json.data.invoiceNumber.startsWith("GST-") && toGst.json.data.customerGstin === "29ABCDE1234F1Z5" && toGst.json.data.total === 5898.82, "admin switches a draft to GST: GST number series + GSTIN + recalculated");
+ok((await admin("/api/finance", { method: "POST", body: { action: "update-invoice", invoiceId: nonGstInv.id, invoiceType: "GST", customerGstin: "NOT-A-GSTIN" } })).status === 400, "invalid customer GSTIN refused");
+await admin("/api/finance", { method: "POST", body: { action: "update-invoice", invoiceId: nonGstInv.id, invoiceType: "NON_GST" } });
+const backNon = await invOf(burst[0].json.data.job.id);
+ok(backNon.invoiceType === "NON_GST" && backNon.tax === 0 && !backNon.customerGstin && backNon.invoiceNumber.startsWith("INV-"), "switching back to Non-GST removes every GST field");
+const adminAll = (await admin("/api/invoices?type=ALL")).json?.data?.invoices ?? [];
+const adminGst = (await admin("/api/invoices?type=GST")).json?.data?.invoices ?? [];
+const adminNon = (await admin("/api/invoices?type=NON_GST")).json?.data?.invoices ?? [];
+ok(adminAll.length === adminGst.length + adminNon.length && adminGst.every((i) => i.invoiceType === "GST") && adminNon.every((i) => i.invoiceType === "NON_GST") && adminNon.length >= 4, `admin filters: All ${adminAll.length} = GST ${adminGst.length} + Non-GST ${adminNon.length}`);
+await admin("/api/finance", { method: "POST", body: { action: "finalize-invoice", invoiceId: gstInv.id } });
+ok((await admin("/api/finance", { method: "POST", body: { action: "update-invoice", invoiceId: gstInv.id, invoiceType: "NON_GST" } })).status === 409, "a finalized invoice cannot change type");
+
+// Tax Officer: GST invoices + GST reports ONLY, enforced by the server
+const taxU = await mk("Tara Tax", "tax@test.local", "tax_officer");
+ok(taxU?.role === "tax_officer", "admin creates a Tax Officer");
+const taxc = (await login("tax@test.local", "password123")).c;
+const taxSess = (await taxc("/api/auth/session")).json?.data;
+ok(taxSess?.role === "tax_officer" && taxSess.workspace.home === "/gst" && taxSess.workspace.nav.map((n) => n.label).join("|") === "GST Dashboard|GST Invoices|GST Reports", "Tax Officer lands on the GST workspace (3 pages)");
+const taxList = (await taxc("/api/invoices")).json?.data?.invoices ?? [];
+ok(taxList.length === adminGst.length && taxList.every((i) => i.invoiceType === "GST"), `Tax Officer list = GST invoices only (${taxList.length})`);
+ok((await taxc("/api/invoices?type=NON_GST")).status === 403, "Tax Officer asking for Non-GST invoices → 403");
+ok(((await taxc("/api/invoices?type=ALL")).json?.data?.invoices ?? []).every((i) => i.invoiceType === "GST"), "type=ALL still returns GST only for a Tax Officer");
+ok((await taxc(`/api/invoices/${backNon.id}`)).status === 404, "Non-GST invoice id typed by hand → 404");
+const taxDetail = (await taxc(`/api/invoices/${gstInv.id}`)).json?.data;
+ok(taxDetail?.invoice?.cgst === 449.91 && taxDetail.customer.name === "Asha Rao" && taxDetail.customer.phone === undefined && taxDetail.job.id === undefined, "Tax Officer GST invoice detail: GST breakdown, no phone, no job link");
+ok(((await taxc(`/api/invoices?customerId=${cust3.id}`)).json?.data?.invoices ?? []).every((i) => i.customerId === cust3.id && i.invoiceType === "GST"), "Tax Officer customer filter stays GST-only");
+ok(((await taxc(`/api/invoices?from=2026-12-25&to=2026-12-31`)).json?.data?.invoices ?? []).every((i) => i.invoiceType === "GST"), "Tax Officer date filter stays GST-only");
+const rep0 = (await taxc("/api/invoices/report")).json?.data;
+ok(rep0?.totals?.invoices === taxList.length && Math.abs(rep0.totals.totalGst - taxList.reduce((a, i) => a + i.tax, 0)) < 0.01, "GST report totals = GST invoices only");
+for (const [path, method, body] of [["/api/finance", "GET"], ["/api/jobs", "GET"], ["/api/customers", "GET"], ["/api/users", "GET"], ["/api/photos", "GET"], ["/api/services", "GET"], [`/api/jobs/${job.id}`, "GET"], [`/api/feedback?jobId=${job.id}`, "GET"], ["/api/finance", "POST", { action: "update-invoice", invoiceId: gstInv.id, discount: 1 }], ["/api/finance", "POST", { action: "record-payment", invoiceId: gstInv.id, amount: 1, paymentMethod: "cash", reference: "x" }], ["/api/users", "POST", { name: "Y", email: "y@test.local", phone: "1234567", role: "admin", password: "password123" }], [`/api/jobs/${job.id}`, "PATCH", { status: "CANCELLED" }], ["/api/qr-links", "POST", { action: "get", jobId: job.id }], ["/api/settings", "PATCH", {}]]) {
+  const r = await taxc(path, { method, body });
+  ok(r.status === 403, `Tax Officer blocked: ${method} ${path.split("?")[0]} (${r.status})`);
+}
+const taxQ = (await taxc("/api/quality")).json?.data;
+ok(taxQ && taxQ.qualityChecks.length === 0 && taxQ.reworkTasks.length === 0, "Tax Officer sees no QC / rework data");
+
+// Logout: server-side revocation, cookie cleared, protected pages redirect
+const logoutC = client();
+await logoutC("/api/auth/login", { method: "POST", body: { email: "tax@test.local", password: "password123" } });
+const loginCookie = await (async () => { const r = await fetch(BASE + "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "tax@test.local", password: "password123" }) }); return r.headers.get("set-cookie").split(";")[0]; })();
+const pageBefore = await fetch(BASE + "/gst", { headers: { cookie: loginCookie }, redirect: "manual" });
+ok(pageBefore.status === 200 && /no-store/.test(pageBefore.headers.get("cache-control") || ""), "signed in: protected page served with Cache-Control no-store");
+const out = await fetch(BASE + "/api/auth/session", { method: "DELETE", headers: { cookie: loginCookie } });
+const cleared = out.headers.get("set-cookie") || "";
+ok(out.status === 200 && /erp_session=;/.test(cleared) && /(Max-Age=0|Expires=Thu, 01 Jan 1970)/i.test(cleared) && /storage/.test(out.headers.get("clear-site-data") || ""), "logout expires the cookie and clears site storage");
+ok((await fetch(BASE + "/api/auth/session", { headers: { cookie: loginCookie } })).status === 401, "the old cookie no longer works (session revoked server-side)");
+ok((await fetch(BASE + "/api/invoices", { headers: { cookie: loginCookie } })).status === 401, "revoked cookie cannot read GST invoices");
+for (const page of ["/", "/jobs", "/gst", "/gst/invoices", "/my-jobs", "/quality-queue", "/invoices"]) {
+  const r = await fetch(BASE + page, { redirect: "manual" });
+  ok([307, 308].includes(r.status) && (r.headers.get("location") || "").endsWith("/login"), `signed out: ${page} → /login`);
+}
+ok((await fetch(BASE + "/login", { redirect: "manual" })).status === 200, "login page stays public");
 
 // Dashboard
 let ws = (await admin("/api/me/workspace")).json?.data;
@@ -81,7 +161,7 @@ for (const p of ["/api/finance", "/api/users", "/api/settings"]) {
 sql(`insert into "Customer"(id,name,phone,"updatedAt") values ('other_c','Other Customer','+910000000000',now())`);
 const fmCust = (await fmc("/api/customers")).json?.data ?? [];
 ok(fmCust.length === 1 && fmCust[0].id === cust.id, "FM sees only the customer of their assigned job (not the directory)");
-ok((await admin("/api/customers")).json?.data?.length === 2, "Admin sees the full customer directory");
+ok((await admin("/api/customers")).json?.data?.length === 3, "Admin sees the full customer directory (all 3)");
 
 // Customer link before arrival
 const link = (await admin("/api/qr-links", { method: "POST", body: { action: "get", jobId: job.id } })).json?.data;
@@ -92,7 +172,7 @@ ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: 
 const oldPath = await fetch(`${BASE}/customer/job/${token}`, { redirect: "manual" });
 ok([301, 308].includes(oldPath.status) && oldPath.headers.get("location")?.includes(`/customer/service/${token}`), "old /customer/job link redirects to /customer/service");
 const qrOff = await admin("/api/qr-links", { method: "POST", body: { action: "qr", tokenId: link.tokenId } });
-ok(qrOff.status === 400, "no per-job QR any more");
+ok(qrOff.status === 400, "no separate QR tokens — the job QR is drawn from the one customer link");
 
 // Arrival: far away → 409, at the property → GPS verified
 ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { lat: 13.5, lng: 77.5, accuracy: 10 } } })).status === 409, "I'm Here far from the property is refused");
@@ -103,7 +183,10 @@ ok(sql(`select "arrivalVerification" from "Job" where id='${job.id}'`) === "gps"
 ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "IN_PROGRESS" } })).status >= 400, "FM cannot start before customer confirms");
 let cv = (await cust1(`/api/customer/job/${token}`)).json?.data;
 ok(cv?.job?.status === "ARRIVED", "customer page shows ARRIVED");
-ok(JSON.stringify(cv).includes("amount") === false && cv.qualityCheck === null, "customer payload has no amounts / QC internals");
+ok(cv.job.amount === undefined && cv.qualityCheck === null && cv.qualityResult === null, "customer payload has no internal amount / QC internals");
+ok(cv.invoice?.invoiceType === "GST" && cv.invoice.cgst === 449.91 && cv.invoice.total === 5898.82 && cv.invoice.invoiceNumber === gstInv.invoiceNumber, "customer portal shows their own GST invoice");
+const cvNon = (await cust1(`/api/customer/job/${(await admin("/api/qr-links", { method: "POST", body: { action: "get", jobId: burst[0].json.data.job.id } })).json.data.linkUrl.split("/").pop()}`)).json?.data;
+ok(cvNon?.invoice?.invoiceType === "NON_GST" && !("cgst" in cvNon.invoice) && !("customerGstin" in cvNon.invoice) && !("totalGst" in cvNon.invoice), "Non-GST invoice on the portal carries no GST fields");
 ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "confirm" } })).json?.data?.status === "CUSTOMER_VERIFIED", "customer CONFIRM & START");
 ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "confirm" } })).json?.data?.alreadyConfirmed === true, "confirm is idempotent");
 
@@ -121,6 +204,7 @@ ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "WORK_CO
 ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "WORK_COMPLETED" } })).status >= 400, "double tap does not re-complete");
 cv = (await cust1(`/api/customer/job/${token}`)).json?.data;
 ok(cv.photos.length === 2 && cv.photos.every((p) => p.photoType !== "qc"), "customer sees before/after only — QC evidence hidden");
+ok(cv.qualityResult === "checking", "customer QC result: being checked");
 ok((await fetch(`${BASE}/api/secure-photo/ph_qc?t=${token}`)).status === 404, "secure-photo refuses QC evidence on the customer link");
 
 // QC round 1: rework
@@ -131,7 +215,7 @@ ok(r1.status === 201, "QC REWORK REQUIRED with area/issue/comment");
 ok(sql(`select status from "Job" where id='${job.id}'`) === "REWORK_ASSIGNED", "rework goes straight to the Field Manager (same job)");
 ok(sql(`select count(*) from "Job" where "propertyId"='${prop.id}'`) === "2", "no duplicate job created for rework");
 cv = (await cust1(`/api/customer/job/${token}`)).json?.data;
-ok(cv.qualityCheck === null && !JSON.stringify(cv).includes("streaks"), "customer never sees QC findings");
+ok(cv.qualityCheck === null && !JSON.stringify(cv).includes("streaks") && cv.qualityResult === "improving", "customer never sees QC findings (just 'finishing touches')");
 ws = (await admin("/api/me/workspace")).json?.data;
 ok(ws.counts.rework === 1 && ws.attention.some((a) => a.jobId === job.id && a.reason === "Rework pending"), "Operations: Rework Pending count + attention");
 
@@ -151,7 +235,7 @@ ok(sql(`select count(*) from "QualityIssue" where "jobId"='${job.id}'`) === "2",
 
 // Customer approves + rates
 cv = (await cust1(`/api/customer/job/${token}`)).json?.data;
-ok(cv.job.status === "CUSTOMER_APPROVAL" && cv.qualityCheck?.passed === true, "customer page: QC PASSED → approve");
+ok(cv.job.status === "CUSTOMER_APPROVAL" && cv.qualityCheck?.passed === true && cv.qualityResult === "passed", "customer page: QC PASSED → approve");
 ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "approve", signatoryName: "Asha Rao", confirmChecked: true } })).json?.data?.status === "COMPLETED", "APPROVE SERVICE → COMPLETED");
 ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "approve", signatoryName: "Asha Rao", confirmChecked: true } })).json?.data?.alreadyApproved === true, "approve is idempotent");
 ok((await cust1(`/api/customer/job/${token}`, { method: "POST", body: { action: "feedback", rating: 5, googleReviewClicked: true } })).status === 200, "star rating + Google review recorded");
@@ -168,20 +252,14 @@ ok((await admin("/api/quality", { method: "POST", body: { action: "resolve-compl
 ws = (await admin("/api/me/workspace")).json?.data;
 ok(!ws.attention.some((a) => a.key === comp.key), "resolved issue leaves Attention Required");
 
-// Property QR
-const pq = (await admin(`/api/properties/${prop.id}/access-link`, { method: "POST" })).json?.data;
-ok(pq?.url?.startsWith("https://example.test/customer/property/"), "property QR link created (APP_BASE_URL)");
-ok((await fmc(`/api/properties/${prop.id}/access-link`, { method: "POST" })).status === 403, "FM cannot create property QR");
-const pt = pq.url.split("/").pop();
-const scan = await fetch(`${BASE}/customer/property/${pt}`, { redirect: "manual" });
-const loc = scan.headers.get("location") || "";
-ok([303, 307, 308].includes(scan.status) && loc.includes("/customer/service/"), `property QR opens the active/upcoming service (${scan.status})`);
-const scanTok = loc.split("/").pop();
-const scanned = (await cust1(`/api/customer/job/${scanTok}`)).json?.data;
-ok(scanned?.job?.id === job2.jobNumber, "QR picked the upcoming job (job 2), not the finished one");
-const rep = (await admin(`/api/properties/${prop.id}/access-link`, { method: "POST" })).json?.data;
-const oldScan = await fetch(`${BASE}/customer/property/${pt}`, { redirect: "manual" });
-ok(rep.url !== pq.url && oldScan.status === 404 && (await oldScan.text()).includes("not active"), "replacing the QR retires the old one");
+// ONE QR per job: the property QR is gone; the job QR is the customer link
+const oldPropQr = await admin(`/api/properties/${prop.id}/access-link`, { method: "POST" });
+ok(oldPropQr.status === 404, "no property QR endpoint any more");
+ok((await fetch(`${BASE}/customer/property/anything`, { redirect: "manual" })).status === 404, "no property QR page any more");
+const sameLink = (await admin("/api/qr-links", { method: "POST", body: { action: "get", jobId: job.id } })).json?.data;
+ok(sameLink.linkUrl === link.linkUrl, "the SAME job QR / link works for the whole lifecycle (booking → feedback)");
+const qrTok = sameLink.linkUrl.split("/customer/service/")[1];
+ok(/^[A-Za-z0-9_-]{32,}$/.test(qrTok) && ![cust.id, job.id, job.jobNumber, "9812345678", "Asha", gstInv.invoiceNumber].some((v) => qrTok.includes(v)), "QR content is only a random token — no phone, name, ids or invoice data");
 
 // Customer link isolation
 const link2 = (await admin("/api/qr-links", { method: "POST", body: { action: "get", jobId: job2.id } })).json?.data;

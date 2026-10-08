@@ -6,6 +6,8 @@ import { useParams } from "next/navigation";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { CustomerLinkCard } from "@/components/common/CustomerLinkCard";
+import { JobQrButton } from "@/components/common/JobQr";
+import { InvoiceTypeBadge } from "@/components/invoice/InvoiceDocument";
 import { JobJourney } from "@/components/job/JobJourney";
 import { NextActionCard } from "@/components/job/NextAction";
 import { Skeleton } from "@/components/ui/states";
@@ -14,7 +16,7 @@ import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { JOB_STATUS_CONFIG } from "@/lib/state-machine";
 import { getNextAction } from "@/lib/rbac";
-import { cn, formatCurrency, formatDate, formatDateTime, formatTimeSlot, timeAgo } from "@/lib/utils";
+import { cn, formatCurrency, formatMoney, formatDate, formatDateTime, formatTimeSlot, timeAgo } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   ArrowLeft,
@@ -192,7 +194,7 @@ export default function JobPage() {
         <header className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-mono font-semibold text-zinc-400">{job.jobNumber ?? job.id}</div>
+              <div className="text-sm font-mono font-semibold text-zinc-500 break-all">{job.jobNumber ?? job.id}</div>
               <h1 className="text-2xl sm:text-3xl font-semibold text-zinc-950 mt-1">{customer?.name ?? job.customerName ?? "Customer"}</h1>
             </div>
             <JobStatusBadge status={job.status} />
@@ -202,6 +204,11 @@ export default function JobPage() {
             <HeaderItem icon={<MapPin className="h-4 w-4" />} label="Property" value={property ? `${property.title}${property.address ? ` — ${property.address}` : ""}` : job.propertyTitle ?? "—"} />
             <HeaderItem icon={<CalendarDays className="h-4 w-4" />} label="Date" value={`${formatDate(job.scheduledDate)} · ${formatTimeSlot(job.scheduledTimeSlot)}`} />
           </dl>
+          {!cancelled && can("links.manage") && (
+            <div className="mt-5">
+              <JobQrButton jobId={job.id} jobNumber={job.jobNumber} customerName={customer?.name ?? job.customerName} className="w-full sm:w-auto" />
+            </div>
+          )}
         </header>
 
         {/* JOB JOURNEY */}
@@ -349,16 +356,19 @@ export default function JobPage() {
 
             {can("finance.view") && (
               <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-2">
-                <h2 className="text-base font-semibold text-zinc-900">Payment</h2>
-                <div className="text-2xl font-semibold text-zinc-950">{formatCurrency(invoice?.total ?? job.amount ?? 0)}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-base font-semibold text-zinc-900">Invoice</h2>
+                  {invoice && <InvoiceTypeBadge type={invoice.invoiceType} />}
+                </div>
+                <div className="text-2xl font-semibold text-zinc-950">{formatMoney(invoice?.total ?? job.amount ?? 0)}</div>
                 {invoice ? (
-                  <div className="text-sm text-zinc-600">
-                    {invoice.invoiceNumber} · {invoice.balanceDue > 0 ? <span className="text-amber-700 font-semibold">{formatCurrency(invoice.balanceDue)} due</span> : <span className="text-emerald-700 font-semibold">Paid</span>}
+                  <div className="text-sm text-zinc-600 break-words">
+                    <span className="font-mono">{invoice.invoiceNumber}</span> · {invoice.balanceDue > 0 ? <span className="text-amber-700 font-semibold">{formatMoney(invoice.balanceDue)} due</span> : <span className="text-emerald-700 font-semibold">Paid</span>}
                   </div>
                 ) : (
                   <div className="text-sm text-zinc-500">No invoice yet.</div>
                 )}
-                <Link href="/finance" className="inline-flex items-center gap-1 text-sm font-semibold text-rose-600">Payments <ChevronRight className="h-4 w-4" /></Link>
+                <Link href={invoice ? `/invoices/${invoice.id}` : "/invoices"} className="inline-flex items-center gap-1 text-sm font-semibold text-rose-600 min-h-10">{invoice ? "Open invoice" : "Invoices"} <ChevronRight className="h-4 w-4" /></Link>
               </section>
             )}
           </aside>

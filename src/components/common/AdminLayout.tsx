@@ -17,6 +17,9 @@ import {
   UserCog,
   MoreHorizontal,
   LogOut,
+  Receipt,
+  FileText,
+  PieChart,
   Search,
   Plus,
   X,
@@ -37,15 +40,21 @@ const ICONS: Record<string, React.ElementType> = {
   "/properties": Building2,
   "/services": Sparkles,
   "/finance": Wallet,
+  "/invoices": Receipt,
+  "/gst": PieChart,
+  "/gst/invoices": FileText,
+  "/gst/reports": BarChart3,
   "/reports": BarChart3,
   "/users": UserCog,
   "/settings": Settings,
 };
 
 /**
- * ADMIN shell — "operations control center".
- * Desktop: clean left sidebar (icon + label, clear active state).
- * Phones/tablets: compact top bar + one-handed bottom nav (Home · Jobs · More).
+ * Desk shell for Admin and Tax Officer.
+ * Desktop: clean left sidebar (icon + label, clear active state); less-used
+ * pages sit under a small "More" heading.
+ * Phones/tablets: compact top bar + one-handed bottom nav — Admin gets
+ * Home · Jobs · More; a role with 4 or fewer pages gets one tab per page.
  */
 export function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -76,9 +85,21 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         return 0;
     }
   };
-  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/"));
   const nav = workspace.nav;
-  const more = nav.filter((n) => n.href !== "/" && n.href !== "/jobs");
+  const home = workspace.home;
+  // The most specific nav item wins (/gst/invoices over /gst).
+  const activeHref = nav
+    .map((n) => n.href)
+    .filter((h) => (h === "/" ? pathname === "/" : pathname === h || pathname.startsWith(h + "/")))
+    .sort((a, b) => b.length - a.length)[0];
+  const isActive = (href: string) => href === activeHref;
+  const primaryNav = nav.filter((n) => !n.secondary);
+  const secondaryNav = nav.filter((n) => n.secondary);
+  // Phone bottom bar: every page as a tab when there are few; else Home · Jobs · More.
+  const compactRole = nav.length <= 4;
+  const tabs = compactRole ? nav : nav.filter((n) => n.href === "/" || n.href === "/jobs");
+  const more = compactRole ? [] : nav.filter((n) => n.href !== "/" && n.href !== "/jobs");
+  const canSearchJobs = can("jobs.view");
 
   const search = (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,30 +109,33 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 flex">
+    <div className="min-h-screen bg-zinc-50 flex print:block print:bg-white">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:bg-white focus:px-3 focus:py-2 focus:rounded-lg">
         Skip to content
       </a>
 
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-white h-screen sticky top-0">
-        <Link href="/" className="flex items-center gap-3 px-5 h-16 border-b border-zinc-100">
+      <aside className="print:hidden hidden lg:flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-white h-screen sticky top-0">
+        <Link href={home} className="flex items-center gap-3 px-5 h-16 border-b border-zinc-100">
           <span className="h-9 w-9 rounded-xl bg-white border border-zinc-200 p-1.5 flex items-center justify-center overflow-hidden">
             <img src="/logo.png" alt="" className="h-full w-full object-contain" />
           </span>
           <span className="leading-tight">
             <span className="block text-sm font-semibold text-zinc-950">Intense Care</span>
-            <span className="block text-xs text-zinc-500">Operations</span>
+            <span className="block text-xs text-zinc-500">{workspace.title}</span>
           </span>
         </Link>
         <nav aria-label="Main" className="flex-1 overflow-y-auto p-3 space-y-0.5">
-          {nav.map((item) => {
+          {[...primaryNav, ...secondaryNav].map((item, i) => {
             const Icon = ICONS[item.href] ?? Briefcase;
             const active = isActive(item.href);
             const count = badge(item.badge);
             return (
+              <React.Fragment key={item.href}>
+              {i === primaryNav.length && secondaryNav.length > 0 && (
+                <div className="px-3 pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">More</div>
+              )}
               <Link
-                key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
@@ -127,6 +151,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
                   </span>
                 )}
               </Link>
+              </React.Fragment>
             );
           })}
         </nav>
@@ -144,12 +169,13 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
 
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Top bar */}
-        <header className="sticky top-0 z-30 h-16 bg-white/95 backdrop-blur border-b border-zinc-200 px-4 sm:px-6 flex items-center gap-3">
-          <Link href="/" className="lg:hidden flex items-center gap-2 shrink-0" aria-label="Dashboard">
+        <header className="print:hidden sticky top-0 z-30 h-16 bg-white/95 backdrop-blur border-b border-zinc-200 px-4 sm:px-6 flex items-center gap-3">
+          <Link href={home} className="lg:hidden flex items-center gap-2 shrink-0" aria-label="Home">
             <span className="h-9 w-9 rounded-xl bg-white border border-zinc-200 p-1.5 flex items-center justify-center overflow-hidden">
               <img src="/logo.png" alt="" className="h-full w-full object-contain" />
             </span>
           </Link>
+          {canSearchJobs ? (
           <form onSubmit={search} className="hidden sm:block relative flex-1 max-w-md">
             <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" aria-hidden />
             <input
@@ -160,10 +186,15 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
               className="h-10 w-full rounded-xl bg-zinc-100 border border-transparent pl-10 pr-3 text-sm placeholder:text-zinc-400 focus:bg-white focus:border-zinc-300"
             />
           </form>
+          ) : (
+            <span className="hidden sm:block flex-1 text-base font-semibold text-zinc-900">{workspace.title}</span>
+          )}
           <div className="flex-1 sm:hidden" />
-          <button onClick={() => setSearchOpen(true)} className="sm:hidden h-10 w-10 rounded-xl inline-flex items-center justify-center text-zinc-600 hover:bg-zinc-100" aria-label="Search">
-            <Search className="h-5 w-5" />
-          </button>
+          {canSearchJobs && (
+            <button onClick={() => setSearchOpen(true)} className="sm:hidden h-10 w-10 rounded-xl inline-flex items-center justify-center text-zinc-600 hover:bg-zinc-100" aria-label="Search">
+              <Search className="h-5 w-5" />
+            </button>
+          )}
           <span className="hidden sm:inline-flex">{textSize}</span>
           {can("jobs.create") && (
             <Link href="/jobs?create=true" className="h-10 px-3 sm:px-4 rounded-xl bg-rose-500 text-white text-sm font-semibold inline-flex items-center gap-1.5 hover:bg-rose-600 shrink-0">
@@ -175,27 +206,29 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
           </span>
         </header>
 
-        <main id="main" className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-28 lg:pb-10">
+        <main id="main" className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-28 lg:pb-10 print:p-0 print:max-w-none">
           <OfflineBanner />
           {children}
         </main>
       </div>
 
       {/* Phone/tablet bottom nav */}
-      <nav aria-label="Main" className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-zinc-200 pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-3 max-w-md mx-auto">
-          {[{ href: "/", label: "Home", Icon: LayoutDashboard }, { href: "/jobs", label: "Jobs", Icon: Briefcase }].map(({ href, label, Icon }) => {
-            const active = isActive(href);
+      <nav aria-label="Main" className="print:hidden lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-zinc-200 pb-[env(safe-area-inset-bottom)]">
+        <div className={cn("grid max-w-md mx-auto", compactRole ? (tabs.length + 1 === 4 ? "grid-cols-4" : tabs.length + 1 === 3 ? "grid-cols-3" : "grid-cols-5") : "grid-cols-3")}>
+          {tabs.map((item) => {
+            const Icon = item.href === "/" ? LayoutDashboard : ICONS[item.href] ?? Briefcase;
+            const active = isActive(item.href);
+            const label = item.href === "/" ? "Home" : item.label.replace(/^GST /, "");
             return (
-              <Link key={href} href={href} aria-current={active ? "page" : undefined} className={cn("h-16 flex flex-col items-center justify-center gap-1 text-xs font-semibold", active ? "text-rose-600" : "text-zinc-500")}>
+              <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("h-16 flex flex-col items-center justify-center gap-1 text-xs font-semibold", active ? "text-rose-600" : "text-zinc-500")}>
                 <Icon className="h-6 w-6" aria-hidden />
-                {label}
+                {compactRole && item.href === home ? "Home" : label}
               </Link>
             );
           })}
           <button onClick={() => setMoreOpen(true)} className={cn("h-16 flex flex-col items-center justify-center gap-1 text-xs font-semibold", more.some((m) => isActive(m.href)) ? "text-rose-600" : "text-zinc-500")}>
-            <MoreHorizontal className="h-6 w-6" aria-hidden />
-            More
+            {compactRole ? <span className="h-6 w-6 rounded-full bg-zinc-900 text-white text-xs inline-flex items-center justify-center" aria-hidden>{currentUser?.name?.charAt(0)}</span> : <MoreHorizontal className="h-6 w-6" aria-hidden />}
+            {compactRole ? "Profile" : "More"}
           </button>
         </div>
       </nav>
@@ -203,8 +236,8 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
       {/* More — everything else, one tap away */}
       <Dialog open={moreOpen} onOpenChange={setMoreOpen}>
         <DialogContent className="sm:max-w-md">
-          <DialogTitle>More</DialogTitle>
-          <div className="grid grid-cols-3 gap-2">
+          <DialogTitle>{compactRole ? "Profile" : "More"}</DialogTitle>
+          {more.length > 0 && <div className="grid grid-cols-3 gap-2">
             {more.map((item) => {
               const Icon = ICONS[item.href] ?? Briefcase;
               const count = badge(item.badge);
@@ -221,8 +254,8 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
-          </div>
-          <div className="flex items-center gap-3 rounded-2xl bg-zinc-50 p-3">
+          </div>}
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-zinc-50 p-3">
             <span className="h-10 w-10 rounded-full bg-rose-500 text-white flex items-center justify-center font-semibold">{currentUser?.name?.charAt(0)}</span>
             <span className="flex-1 min-w-0">
               <span className="block text-sm font-semibold text-zinc-900 truncate">{currentUser?.name}</span>

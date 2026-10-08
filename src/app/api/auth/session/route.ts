@@ -10,7 +10,8 @@ import { grantsFor, workspaceFor, navFor, ROLE_LABELS } from "@/lib/rbac";
  *   - workspace: home / queue / layout / nav items the role may open
  * The client treats this as a rendering hint; every API call re-checks.
  *
- * DELETE — clears the session cookie.
+ * DELETE — signs out: revokes the session server-side, expires the cookie
+ * and tells the browser to drop this site's stored data.
  *
  * There is deliberately NO POST handler: sessions are established only by
  * POST /api/auth/login after bcrypt verification.
@@ -19,7 +20,7 @@ export async function GET() {
   try {
     const user = await getSessionUser();
     if (!user) {
-      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401, headers: { "Cache-Control": "no-store" } });
     }
     const ws = workspaceFor(user.role);
     return NextResponse.json({
@@ -38,5 +39,14 @@ export async function GET() {
 
 export async function DELETE() {
   await destroySession();
-  return NextResponse.json({ success: true });
+  return NextResponse.json(
+    { success: true },
+    {
+      headers: {
+        "Cache-Control": "no-store",
+        // Browser-side clean-up of localStorage / sessionStorage / IndexedDB.
+        "Clear-Site-Data": '"storage"',
+      },
+    }
+  );
 }

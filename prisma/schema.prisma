@@ -13,17 +13,15 @@ datasource db {
   provider = "postgresql"
 }
 
-/// Login account. `role` is one of the nine RBAC roles (src/lib/rbac/roles.ts):
-/// super_admin | ops_manager | scheduler | field_manager | field_staff |
-/// qc_inspector | accounts | referral_partner | customer.
-/// Scope attributes: teamId/branchId (TEAM/BRANCH scopes), customerId
-/// (customer login → OWN scope), referralPartnerId (partner login → OWN scope).
+/// Login account. `role` is one of the sign-in roles (src/lib/rbac/roles.ts):
+/// admin | field_manager | qc_inspector | tax_officer. Customers never sign
+/// in — they use the ONE secure link / QR of their job.
 model User {
   id                String   @id @default(cuid())
   name              String
   email             String   @unique
   phone             String
-  role              String // admin | field_manager | qc_inspector
+  role              String // admin | field_manager | qc_inspector | tax_officer
   avatar            String?
   passwordHash      String? // bcrypt hash; null = password login disabled until set
   active            Boolean  @default(true)
@@ -50,6 +48,7 @@ model Customer {
   source            String   @default("direct") // direct | referral | google | repeat
   referralPartnerId String?
   referralCode      String?
+  gstin             String? // optional — shown on GST invoices for business customers
   lifetimeRevenue   Float    @default(0)
   totalBookings     Int      @default(0)
   status            String   @default("active") // active | inactive
@@ -84,9 +83,6 @@ model Property {
   preferredTime       String?
   recurringService    Boolean  @default(false)
   recurringFrequency  String?
-  // ONE optional property QR → customer page for the current/upcoming service.
-  accessTokenHash     String?  @unique
-  accessTokenEnc      String?
   createdAt           DateTime @default(now())
 
   customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -161,7 +157,7 @@ model Job {
   customerConfirmedAt DateTime?
   // Unified QR/link workflow wiring (§3): the customer-confirmation token and
   // the current QR tokens resolve back to this single Job ID — never a copy.
-  jobSerial         String?   @unique // readable Job ID, e.g. JOB-10245
+  jobSerial         String    @unique // readable Job ID, e.g. RAHUL-SHARMA-08102026-001
   customerTokenId   String?
   approvedAt        DateTime?
   approvedBy        String?
@@ -231,6 +227,20 @@ model Invoice {
   finalizedBy   String?
   /// Running total of approved refunds against this invoice.
   refundedAmount Float   @default(0)
+  /// GST | NON_GST — chosen by Admin when the invoice is created. A Non-GST
+  /// invoice never carries GST data (enforced by a DB check constraint).
+  /// Tax Officers can only ever read GST invoices (enforced in every API).
+  invoiceType   String
+  /// GST % applied (e.g. 18). 0 on Non-GST invoices.
+  gstRate       Float    @default(0)
+  cgst          Float    @default(0)
+  sgst          Float    @default(0)
+  igst          Float    @default(0)
+  /// Inter-state supply → IGST; intra-state → CGST + SGST.
+  interState    Boolean  @default(false)
+  customerGstin String?
+  /// Company GSTIN at the time the invoice was issued.
+  supplierGstin String?
 
   job      Job       @relation(fields: [jobId], references: [id])
   payments Payment[]
@@ -238,6 +248,7 @@ model Invoice {
 
   @@index([jobId])
   @@index([customerId])
+  @@index([invoiceType, issuedAt])
 }
 
 /// Refund against an invoice. Refunds up to the configured limit are
@@ -516,6 +527,15 @@ model QrToken {
   @@index([jobId])
   @@index([purpose])
   @@index([jobId, purpose])
+}
+
+/// Sessions revoked by signing out (kept until the cookie would expire).
+model RevokedSession {
+  jti       String   @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }
 
 model SystemSettings {

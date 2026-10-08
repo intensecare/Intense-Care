@@ -16,7 +16,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "default", size = "default", loading, disabled, children, ...props }, ref) => {
     const base =
-      "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl font-semibold transition-colors select-none cursor-pointer disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98] transition-transform";
+      "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl [&_svg]:shrink-0 font-semibold transition-colors select-none cursor-pointer disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98] transition-transform";
     const variants = {
       default: "bg-rose-500 text-white hover:bg-rose-600 shadow-sm",
       success: "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm",

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { nextJobSerial } from "@/lib/server/job-serial";
+import { nextInvoiceNumber } from "@/lib/server/invoices";
+import { computeInvoiceFigures } from "@/lib/tax";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
@@ -98,6 +100,10 @@ const CreateJobSchema = z.object({
   assignedManagerId: z.string().max(64).optional(),
   notes: z.string().max(2000).optional(),
   referralPartnerId: z.string().max(64).optional(),
+  /** The Admin's choice for this job's invoice. GST unless told otherwise. */
+  invoiceType: z.enum(["GST", "NON_GST"]).default("GST"),
+  /** GST only: inter-state supply → IGST instead of CGST + SGST. */
+  interState: z.boolean().optional().default(false),
 });
 
 /**
@@ -165,6 +171,8 @@ export async function POST(request: Request) {
 
     // Customer (inline creation supported).
     let customerId = d.customerId;
+    let customerName = d.customerName ?? "Customer";
+    let customerGstin: string | null = null;
     if (!customerId) {
       if (!d.customerName || !d.customerPhone) {
         return fail("Customer name and phone are required for a new customer.", 400);
@@ -187,6 +195,8 @@ export async function POST(request: Request) {
     } else {
       const existing = await prisma.customer.findUnique({ where: { id: customerId } });
       if (!existing) return fail("Customer not found.", 404);
+      customerName = existing.name;
+      customerGstin = existing.gstin;
     }
 
     // Property (inline creation supported).
@@ -208,14 +218,19 @@ export async function POST(request: Request) {
     }
 
     const settings = await getSystemSettings();
-    const taxRate = getTaxRate(settings);
     const subtotal = service.basePrice;
-    const tax = Math.round(subtotal * taxRate * 100) / 100;
+    const figures = computeInvoiceFigures({
+      invoiceType: d.invoiceType,
+      subtotal,
+      gstRatePercent: settings.taxRatePercent,
+      interState: d.interState,
+    });
+    const isGst = figures.invoiceType === "GST";
 
     const result = await prisma.$transaction(async (tx) => {
       const job = await tx.job.create({
         data: {
-          jobSerial: await nextJobSerial(tx),
+          jobSerial: await nextJobSerial(tx, customerName, d.scheduledDate),
           customerId,
           propertyId,
           serviceId: service.id,
@@ -243,13 +258,21 @@ export async function POST(request: Request) {
 
       const invoice = await tx.invoice.create({
         data: {
-          invoiceNumber: nextDocNumber("INV"),
+          invoiceNumber: await nextInvoiceNumber(tx, figures.invoiceType),
+          invoiceType: figures.invoiceType,
           jobId: job.id,
           customerId,
-          subtotal,
-          tax,
-          total: subtotal + tax,
-          balanceDue: subtotal + tax,
+          subtotal: figures.subtotal,
+          tax: figures.tax,
+          gstRate: figures.gstRate,
+          cgst: figures.cgst,
+          sgst: figures.sgst,
+          igst: figures.igst,
+          interState: isGst && d.interState,
+          customerGstin: isGst ? customerGstin : null,
+          supplierGstin: isGst ? settings.gstin?.trim() || null : null,
+          total: figures.total,
+          balanceDue: figures.total,
           dueDate: d.scheduledDate,
         },
       });

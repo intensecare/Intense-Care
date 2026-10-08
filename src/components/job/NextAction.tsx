@@ -43,7 +43,7 @@ export function NextActionCard({
         <p className="text-sm text-zinc-600 mt-0.5">{action.hint}</p>
       </div>
       {!waiting && (
-        <Button size="lg" loading={busy} disabled={disabled} onClick={onAction} variant={action.tone === "success" ? "success" : "default"} className="w-full sm:w-auto">
+        <Button size="lg" loading={busy} disabled={disabled} onClick={onAction} variant={action.tone === "success" ? "success" : "default"} className="w-full sm:w-auto whitespace-normal text-center">
           {action.label} <ChevronRight className="h-5 w-5" aria-hidden />
         </Button>
       )}

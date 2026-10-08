@@ -147,3 +147,15 @@ html.font-scale-xl {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
   animation: ds-shimmer 1.4s infinite;
 }
+
+/* ---------------------------------------------------------------- print
+   Invoices and the job QR print as clean documents: no app chrome, no
+   shadows, black text. The QR dialog prints only the QR. */
+@media print {
+  @page { margin: 14mm; }
+  html, body { background: #fff !important; }
+  .invoice-doc { break-inside: avoid; }
+  body:has(.qr-print-area) > *:not(:has(.qr-print-area)) { display: none !important; }
+  body:has(.qr-print-area) [role="dialog"] { position: static !important; transform: none !important; box-shadow: none !important; max-height: none !important; }
+  body:has(.qr-print-area) [role="dialog"] > *:not(.qr-print-area):not(:has(.qr-print-area)) { display: none !important; }
+}
