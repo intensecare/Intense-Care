@@ -27,3 +27,8 @@ Server helpers (`src/lib/server/authz.ts`): `requirePermission(p)`, `authorizeJo
 ## Next action
 
 `getNextAction(role, job)` (`src/lib/rbac/next-action.ts`) gives ONE primary action per role per status — e.g. Field Manager: *I'm Here → Start Service → Continue Checklist → Add Photos → Complete Work → Fix Rework*; QC: *Inspect / Reinspect*; Admin: *Assign Field Manager*, *Share Customer Link*, *Close Job*. Status changes are re-validated by the state machine (`src/lib/state-machine.ts`) on the server.
+
+## Intense AI
+
+The assistant has no access of its own: `ai.use` only switches it on for a role. Every piece of data comes from a tool in `src/lib/server/ai/tools.ts` that declares a permission (e.g. `get_revenue_summary` → `finance.view`, `get_invoices` → `gst.view`, `get_my_work_summary` → `jobs.arrive`). Tools are offered to the model only when the user holds that permission, re-checked on every call, and scoped with `jobWhereFor` / `authorizeJob` / `invoiceWhereFor`. Customers get one tool (`get_my_service`) bound to the job of their QR token. Prompt wording is never relied on for security.
+
