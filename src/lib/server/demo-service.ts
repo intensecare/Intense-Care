@@ -11,7 +11,7 @@ export async function ensureDemoAccounts() {
   for (const a of DEMO_ACCOUNTS) {
     const existing = await prisma.user.findUnique({ where: { email: a.email } });
     if (!existing || !existing.active) {
-      const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("base64url"), 12);
+      const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("base64url"), 4);
       const u = await prisma.user.upsert({
         where: { email: a.email },
         create: { name: a.name, email: a.email, phone: "", role: a.role, passwordHash, active: true },

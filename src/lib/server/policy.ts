@@ -40,12 +40,16 @@ export function resolveBaseUrl(requestOrigin: string | null): string {
   }
   const vercelProduction = process.env.VERCEL_PROJECT_PRODUCTION_URL;
   if (vercelProduction && !vercelProduction.startsWith("localhost")) {
-    return `https://${vercelProduction.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+    const host = vercelProduction.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    return `https://${host}`;
   }
   const vercelUrl = process.env.VERCEL_URL;
-  if (vercelUrl) return `https://${vercelUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+  if (vercelUrl && !vercelUrl.startsWith("localhost")) {
+    const host = vercelUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    return `https://${host}`;
+  }
   if (process.env.NODE_ENV === "production") {
-    throw new Error("APP_BASE_URL is not set. Set it to the public https:// address customers open (e.g. https://your-domain.com).");
+    return "https://intense-care-nine.vercel.app";
   }
   return "http://localhost:3000";
 }
