@@ -23,6 +23,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
 
+const GST_LABEL: Record<NonNullable<Service["gstTreatment"]>, string> = { DEFAULT: "GST (default)", GST: "GST", NON_GST: "Non-GST" };
+
 export default function ServicesPage() {
   const {
     services,
@@ -50,13 +52,27 @@ export default function ServicesPage() {
   const [description, setDescription] = useState("");
   const [basePrice, setBasePrice] = useState<number | "">(5000);
   const [estimatedDurationHours, setEstimatedDurationHours] = useState<number | "">(4);
+  const [isCustom, setIsCustom] = useState(false);
+  const [gstTreatment, setGstTreatment] = useState<NonNullable<Service["gstTreatment"]>>("DEFAULT");
+  const [notes, setNotes] = useState("");
+  const [tab, setTab] = useState<"standard" | "custom">("standard");
 
   // New Checklist Item State
   const [area, setArea] = useState("Kitchen");
   const [task, setTask] = useState("");
   const [critical, setCritical] = useState(false);
 
-  const selectedService = services.find((s) => s.id === selectedServiceId) || services[0];
+  const listed = services.filter((s) => (tab === "custom") === Boolean(s.isCustom));
+  const selectedService = listed.find((s) => s.id === selectedServiceId) || listed[0];
+  const resetForm = () => {
+    setName("");
+    setDescription("");
+    setBasePrice(5000);
+    setEstimatedDurationHours(4);
+    setIsCustom(tab === "custom");
+    setGstTreatment("DEFAULT");
+    setNotes("");
+  };
 
   const handleCreateService = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,12 +86,16 @@ export default function ServicesPage() {
       description,
       basePrice: Number(basePrice) || 5000,
       estimatedDurationHours: Number(estimatedDurationHours) || 4,
+      isCustom,
+      gstTreatment,
+      notes: notes.trim(),
       // Checklist starts empty — the company authors every checklist item.
       checklistTemplate: [],
       active: true,
     });
 
     if (result.success && result.service) {
+      setTab(isCustom ? "custom" : "standard");
       setSelectedServiceId(result.service.id);
     }
     setIsCreateOpen(false);
@@ -94,7 +114,11 @@ export default function ServicesPage() {
       description,
       basePrice: Number(basePrice) || 5000,
       estimatedDurationHours: Number(estimatedDurationHours) || 4,
+      isCustom,
+      gstTreatment,
+      notes: notes.trim(),
     });
+    setTab(isCustom ? "custom" : "standard");
     setIsEditOpen(false);
     setIsUpdating(false);
   };
@@ -122,6 +146,9 @@ export default function ServicesPage() {
     setDescription(selectedService.description);
     setBasePrice(selectedService.basePrice);
     setEstimatedDurationHours(selectedService.estimatedDurationHours);
+    setIsCustom(Boolean(selectedService.isCustom));
+    setGstTreatment(selectedService.gstTreatment ?? "DEFAULT");
+    setNotes(selectedService.notes ?? "");
     setIsEditOpen(true);
   };
 
@@ -129,15 +156,12 @@ export default function ServicesPage() {
     <AdminLayout>
       <PageHeader
         title="Services"
-        description="Each service has a price, an estimated duration and a checklist by room."
+        description="Standard services from your catalogue, and custom services made for one customer. Both work in quotations, jobs, invoices and reports."
         actions={
           can("services.manage") && (
             <Button
               onClick={() => {
-                setName("");
-                setDescription("");
-                setBasePrice(5000);
-                setEstimatedDurationHours(4);
+                resetForm();
                 setIsCreateOpen(true);
               }}
               size="sm"
@@ -153,13 +177,28 @@ export default function ServicesPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Services List */}
         <div className="space-y-3">
-          <h3 className="text-xs font-semibold text-slate-500">
-            Services ({services.length})
-          </h3>
+          <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="Service type">
+            {(["standard", "custom"] as const).map((t) => (
+              <button
+                key={t}
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+                className={`min-h-11 rounded-xl border text-sm font-semibold ${tab === t ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-700"}`}
+              >
+                {t === "standard" ? "Standard" : "Custom"} ({services.filter((x) => (t === "custom") === Boolean(x.isCustom)).length})
+              </button>
+            ))}
+          </div>
+          {listed.length === 0 && (
+            <p className="text-sm text-zinc-500 px-1">
+              {tab === "custom" ? "No custom services yet. Add one for work that isn't in your catalogue — or add a custom line to a quotation." : "No standard services yet."}
+            </p>
+          )}
 
           <div className="space-y-2">
-            {services.map((srv) => {
-              const isSelected = srv.id === selectedServiceId;
+            {listed.map((srv) => {
+              const isSelected = srv.id === selectedService?.id;
 
               return (
                 <div
@@ -218,10 +257,7 @@ export default function ServicesPage() {
                   size="sm"
                   className="bg-slate-900 text-white mt-2"
                   onClick={() => {
-                    setName("");
-                    setDescription("");
-                    setBasePrice(5000);
-                    setEstimatedDurationHours(4);
+                    resetForm();
                     setIsCreateOpen(true);
                   }}
                 >
@@ -234,8 +270,10 @@ export default function ServicesPage() {
           <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
-                  {selectedService.category}
+                <span className="flex flex-wrap gap-1.5">
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">{selectedService.category}</span>
+                  {selectedService.isCustom && <span className="text-xs font-semibold px-2 py-0.5 rounded bg-violet-50 text-violet-800">Custom</span>}
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-zinc-100 text-zinc-700">{GST_LABEL[selectedService.gstTreatment ?? "DEFAULT"]}</span>
                 </span>
                 <h2 className="text-base font-semibold text-slate-900 mt-1">
                   {selectedService.name} 
@@ -243,6 +281,7 @@ export default function ServicesPage() {
                 <p className="text-xs text-slate-500 mt-0.5">
                   {selectedService.description}
                 </p>
+                {selectedService.notes && <p className="mt-2 rounded-lg bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-700"><span className="font-semibold">Notes:</span> {selectedService.notes}</p>}
               </div>
 
               <div className="text-right space-y-2">
@@ -356,7 +395,7 @@ export default function ServicesPage() {
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full border border-slate-200 p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-semibold text-slate-900">Create New Service Package</h3>
+              <h3 className="text-sm font-semibold text-slate-900">{isCustom ? "New custom service" : "New service"}</h3>
               <Button size="sm" variant="ghost" onClick={() => setIsCreateOpen(false)} className="h-7 w-7 p-0">
                 <X className="h-4 w-4" />
               </Button>
@@ -419,6 +458,26 @@ export default function ServicesPage() {
                   className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
                   placeholder="Service package summary..."
                 />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-zinc-800" htmlFor="svc-new-gst">GST treatment</label>
+                  <select id="svc-new-gst" value={gstTreatment} onChange={(e) => setGstTreatment(e.target.value as NonNullable<Service["gstTreatment"]>)} className="w-full h-11 rounded-xl border border-zinc-300 px-3 bg-white text-sm">
+                    <option value="DEFAULT">Company default (GST)</option>
+                    <option value="GST">Always GST</option>
+                    <option value="NON_GST">Non-GST</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 min-h-11 sm:pt-6 text-sm font-medium text-zinc-800">
+                  <input type="checkbox" checked={isCustom} onChange={(e) => setIsCustom(e.target.checked)} className="h-5 w-5 accent-rose-500" />
+                  Custom service
+                </label>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-zinc-800" htmlFor="svc-new-notes">Notes</label>
+                <textarea id="svc-new-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm" placeholder="Materials, access needs, anything the team should know" />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -503,6 +562,26 @@ export default function ServicesPage() {
                   rows={2}
                   className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-zinc-800" htmlFor="svc-edit-gst">GST treatment</label>
+                  <select id="svc-edit-gst" value={gstTreatment} onChange={(e) => setGstTreatment(e.target.value as NonNullable<Service["gstTreatment"]>)} className="w-full h-11 rounded-xl border border-zinc-300 px-3 bg-white text-sm">
+                    <option value="DEFAULT">Company default (GST)</option>
+                    <option value="GST">Always GST</option>
+                    <option value="NON_GST">Non-GST</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 min-h-11 sm:pt-6 text-sm font-medium text-zinc-800">
+                  <input type="checkbox" checked={isCustom} onChange={(e) => setIsCustom(e.target.checked)} className="h-5 w-5 accent-rose-500" />
+                  Custom service
+                </label>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-zinc-800" htmlFor="svc-edit-notes">Notes</label>
+                <textarea id="svc-edit-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm" placeholder="Materials, access needs, anything the team should know" />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

@@ -1298,6 +1298,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         description: serviceData.description,
         basePrice: serviceData.basePrice,
         estimatedDurationHours: serviceData.estimatedDurationHours,
+        isCustom: serviceData.isCustom ?? false,
+        gstTreatment: serviceData.gstTreatment ?? "DEFAULT",
+        notes: serviceData.notes ?? "",
         checklistTemplate: serviceData.checklistTemplate.map(({ area, task, critical }) => ({ area, task, critical })),
       }),
     });
