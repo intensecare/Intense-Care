@@ -37,6 +37,21 @@ Server-enforced: arrival is GPS-checked against the property (`ARRIVAL_GEOFENCE_
 - Admin → **Invoices** filters *All / GST Invoices / Non-GST Invoices*; each invoice prints (or saves as PDF) with the job QR.
 - **Tax Officer → GST only, enforced on the server:** `/api/invoices`, `/api/invoices/[id]` and `/api/invoices/report` always filter `invoiceType = 'GST'` for anyone without `finance.view`. Asking for Non-GST invoices returns 403, and a Non-GST invoice id returns 404, however the URL or request is edited.
 
+## Intense AI
+
+A business assistant inside the app (**Intense AI** in the menu for every signed-in role, and an **Intense AI** button on the customer's QR page). Ask in plain language — "Summarize today's business performance", "Why are we getting more rework this month?", "Which customers haven't booked again?", "Give me a monthly business report" — or tap a suggested question or quick action. Answers stream in, keep **What the data shows** separate from **Recommendations**, and reports follow Executive Summary → … → Next Actions.
+
+- **It sees only what the user can see.** The model never gets the database. It can only call server-side data tools (`src/lib/server/ai/tools.ts`), and each tool (1) is offered only to roles holding its permission, (2) is re-checked when the model calls it, and (3) queries through the same scoping as the normal APIs (`jobWhereFor`, `authorizeJob`, `invoiceWhereFor`), with money fields only for `finance.view`. So:
+  - Admin — full business intelligence (metrics, jobs, customers, revenue, invoices, GST, QC, rework, feedback, Field Manager and service performance).
+  - Field Manager — their own assigned jobs, customers on those jobs, their QC results and rework; no money.
+  - QC — quality checks, rework and the jobs behind them; no money.
+  - Tax Officer — GST invoices and GST summaries only (Non-GST requests return "not permitted").
+  - Customer — only their own job, via the QR token.
+- The provider key (`GEMINI_API_KEY`) stays on the server; the browser talks only to `/api/ai/chat`. Users never see the provider's name — errors are replaced with plain messages.
+- Limits: 40 questions per user per 10 minutes (20 per customer IP), questions up to 4,000 characters, at most 6 rounds of data lookups per answer.
+- The conversation is kept for the browser session (cleared on sign-out); **New chat** starts over.
+- `node scripts/ai-verify.mjs` runs the security checks against a stand-in provider that deliberately asks for data each role must not get.
+
 ## Demo sign-in
 
 For client walkthroughs: run `npm run db:seed:demo`, then start the server with `DEMO_LOGINS_ENABLED=true`. The login page shows **Try a demo** — one button each for Admin, Field Manager, QC and Tax Officer, plus **Customer**, which opens the sample job's QR page. The demo accounts (`*@demo.intensecare.local`) have random passwords that are never shown or sent to the browser; the server signs them in by role. Each demo account has exactly its role's normal permissions. Without the flag, the buttons and `/api/auth/demo-login` are gone (404), so keep it off in production.

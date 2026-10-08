@@ -118,6 +118,10 @@ export const PERMISSIONS = [
   "notifications.send",
 
   "links.manage",
+
+  /** Intense AI assistant. What it can SEE is decided per data tool by the
+   *  permissions above — this only switches the assistant on for a role. */
+  "ai.use",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -185,7 +189,7 @@ const FIELD_MANAGER: PermissionGrant = {
     "customer_approval.view"
   ),
   ...own("photos.delete"), // only photos they uploaded themselves
-  ...all("services.view"),
+  ...all("services.view", "ai.use"),
 };
 
 /** QC — inspects completed work; never touches money, users or settings. */
@@ -202,7 +206,8 @@ const QC_INSPECTOR: PermissionGrant = {
     "qc.reinspect",
     "rework.view",
     "rework.create",
-    "services.view"
+    "services.view",
+    "ai.use"
   ),
 };
 
@@ -228,7 +233,7 @@ const CUSTOMER: PermissionGrant = {
  * invoiceType = GST for anyone without `finance.view`.
  */
 const TAX_OFFICER: PermissionGrant = {
-  ...all("gst.view", "gst.reports"),
+  ...all("gst.view", "gst.reports", "ai.use"),
 };
 
 export const ROLE_PERMISSIONS: Record<Role, PermissionGrant> = {

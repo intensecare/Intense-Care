@@ -20,6 +20,7 @@ import {
   Receipt,
   FileText,
   PieChart,
+  Sparkles as SparklesIcon,
   Search,
   Plus,
   X,
@@ -44,6 +45,7 @@ const ICONS: Record<string, React.ElementType> = {
   "/gst": PieChart,
   "/gst/invoices": FileText,
   "/gst/reports": BarChart3,
+  "/assistant": SparklesIcon,
   "/reports": BarChart3,
   "/users": UserCog,
   "/settings": Settings,
@@ -97,8 +99,9 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   const secondaryNav = nav.filter((n) => n.secondary);
   // Phone bottom bar: every page as a tab when there are few; else Home · Jobs · More.
   const compactRole = nav.length <= 4;
-  const tabs = compactRole ? nav : nav.filter((n) => n.href === "/" || n.href === "/jobs");
-  const more = compactRole ? [] : nav.filter((n) => n.href !== "/" && n.href !== "/jobs");
+  const BAR = ["/", "/jobs", "/assistant"];
+  const tabs = compactRole ? nav : BAR.map((h) => nav.find((n) => n.href === h)).filter((n): n is NavItem => !!n);
+  const more = compactRole ? [] : nav.filter((n) => !BAR.includes(n.href));
   const canSearchJobs = can("jobs.view");
 
   const search = (e: React.FormEvent) => {
@@ -214,13 +217,13 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
 
       {/* Phone/tablet bottom nav */}
       <nav aria-label="Main" className="print:hidden lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-zinc-200 pb-[env(safe-area-inset-bottom)]">
-        <div className={cn("grid max-w-md mx-auto", compactRole ? (tabs.length + 1 === 4 ? "grid-cols-4" : tabs.length + 1 === 3 ? "grid-cols-3" : "grid-cols-5") : "grid-cols-3")}>
+        <div className={cn("grid max-w-md mx-auto", (tabs.length + 1 === 4 ? "grid-cols-4" : tabs.length + 1 === 3 ? "grid-cols-3" : "grid-cols-5"))}>
           {tabs.map((item) => {
             const Icon = item.href === "/" ? LayoutDashboard : ICONS[item.href] ?? Briefcase;
             const active = isActive(item.href);
             const label = item.href === "/" ? "Home" : item.label.replace(/^GST /, "");
             return (
-              <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("h-16 flex flex-col items-center justify-center gap-1 text-xs font-semibold", active ? "text-rose-600" : "text-zinc-500")}>
+              <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cn("h-16 px-0.5 flex flex-col items-center justify-center gap-1 text-xs font-semibold leading-tight text-center", active ? "text-rose-600" : "text-zinc-500")}>
                 <Icon className="h-6 w-6" aria-hidden />
                 {compactRole && item.href === home ? "Home" : label}
               </Link>

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { ChevronLeft, WifiOff, Home, Briefcase, ListChecks, User, ClipboardCheck, History } from "lucide-react";
+import { ChevronLeft, WifiOff, Home, Briefcase, ListChecks, User, ClipboardCheck, History, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { OfflineBanner } from "@/components/ui/states";
@@ -31,12 +31,14 @@ const TABS: Record<string, Tab[]> = {
     { key: "home", label: "Home", href: "/my-jobs", Icon: Home },
     { key: "jobs", label: "Jobs", href: "/my-jobs?tab=jobs", Icon: Briefcase },
     { key: "tasks", label: "Tasks", href: "/my-jobs?tab=tasks", Icon: ListChecks },
+    { key: "ai", label: "Intense AI", href: "/assistant", Icon: Sparkles },
     { key: "profile", label: "Profile", href: "/my-jobs?tab=profile", Icon: User },
   ],
   qc_inspector: [
     { key: "home", label: "Home", href: "/quality-queue", Icon: Home },
     { key: "quality", label: "Quality", href: "/quality-queue?tab=quality", Icon: ClipboardCheck },
     { key: "history", label: "History", href: "/quality-queue?tab=history", Icon: History },
+    { key: "ai", label: "Intense AI", href: "/assistant", Icon: Sparkles },
     { key: "profile", label: "Profile", href: "/quality-queue?tab=profile", Icon: User },
   ],
 };
@@ -112,11 +114,11 @@ export function MobileLayout({
 
       {showTabs && !action && (
         <nav aria-label="Main" className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-zinc-200 pb-[env(safe-area-inset-bottom)]">
-          <div className="max-w-md mx-auto grid grid-cols-4">
+          <div className="max-w-md mx-auto grid grid-cols-5">
             {tabs.map(({ key, label, href, Icon }) => {
-              const active = pathname === href.split("?")[0] && currentTab === key;
+              const active = key === "ai" ? pathname === "/assistant" : pathname === href.split("?")[0] && currentTab === key;
               return (
-                <Link key={key} href={href} aria-current={active ? "page" : undefined} className={cn("h-16 flex flex-col items-center justify-center gap-1 text-xs font-semibold transition-colors", active ? "text-rose-600" : "text-zinc-500")}>
+                <Link key={key} href={href} aria-current={active ? "page" : undefined} className={cn("h-16 px-0.5 flex flex-col items-center justify-center gap-1 text-xs font-semibold leading-tight text-center transition-colors", active ? "text-rose-600" : "text-zinc-500")}>
                   <Icon className="h-6 w-6" aria-hidden />
                   {label}
                 </Link>

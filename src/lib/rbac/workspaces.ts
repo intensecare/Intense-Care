@@ -48,6 +48,7 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     layout: "desk",
     nav: [
       { label: "Dashboard", href: "/", permission: "dashboard.view" },
+      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
       { label: "Jobs", href: "/jobs", permission: "jobs.view", badge: "jobs_open" },
       { label: "Customers", href: "/customers", permission: "customers.view" },
       { label: "Invoices", href: "/invoices", permission: "finance.view", badge: "overdue" },
@@ -67,7 +68,10 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     home: "/my-jobs",
     queue: "/my-jobs",
     layout: "mobile",
-    nav: [{ label: "My Jobs", href: "/my-jobs", permission: "jobs.view" }],
+    nav: [
+      { label: "My Jobs", href: "/my-jobs", permission: "jobs.view" },
+      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
+    ],
   },
   qc_inspector: {
     role: "qc_inspector",
@@ -75,7 +79,10 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     home: "/quality-queue",
     queue: "/quality-queue",
     layout: "mobile",
-    nav: [{ label: "Quality", href: "/quality-queue", permission: "qc.inspect", badge: "qc_pending" }],
+    nav: [
+      { label: "Quality", href: "/quality-queue", permission: "qc.inspect", badge: "qc_pending" },
+      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
+    ],
   },
   tax_officer: {
     role: "tax_officer",
@@ -87,6 +94,7 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
       { label: "GST Dashboard", href: "/gst", permission: "gst.view" },
       { label: "GST Invoices", href: "/gst/invoices", permission: "gst.view" },
       { label: "GST Reports", href: "/gst/reports", permission: "gst.reports" },
+      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
     ],
   },
   customer: {

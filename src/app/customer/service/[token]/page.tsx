@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/states";
+import { IntenseAIChat } from "@/components/ai/IntenseAIChat";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 /**
@@ -158,6 +159,7 @@ export default function CustomerServicePage() {
   const [complaintSent, setComplaintSent] = useState(false);
   const [rating, setRating] = useState(0);
   const [success, setSuccess] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -272,7 +274,7 @@ export default function CustomerServicePage() {
   })();
 
   return (
-    <Shell action={primary} tab={tab} onTab={go}>
+    <Shell action={primary} tab={tab} onTab={go} onAskAi={() => setAiOpen(true)}>
       {success && (
         <div role="status" className="rounded-2xl bg-emerald-600 text-white text-base font-semibold px-4 py-3 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden /> {success}
@@ -483,6 +485,13 @@ export default function CustomerServicePage() {
         </>
       )}
 
+      <Dialog open={aiOpen} onOpenChange={setAiOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogTitle className="sr-only">Intense AI</DialogTitle>
+          {aiOpen && <IntenseAIChat role="customer" userName={data.customer.name} token={token} storageKey={`intense-ai:customer:${job.id}`} compact />}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showComplaint} onOpenChange={setShowComplaint}>
         <DialogContent>
           <DialogHeader>
@@ -542,7 +551,7 @@ const TABS: { key: Tab; label: string; Icon: React.ElementType }[] = [
   { key: "profile", label: "Profile", Icon: User },
 ];
 
-function Shell({ jobId, action, tab, onTab, children }: { jobId?: string; action?: React.ReactNode; tab?: Tab; onTab?: (t: Tab) => void; children: React.ReactNode }) {
+function Shell({ jobId, action, tab, onTab, onAskAi, children }: { jobId?: string; action?: React.ReactNode; tab?: Tab; onTab?: (t: Tab) => void; onAskAi?: () => void; children: React.ReactNode }) {
   return (
     <div className={cn("min-h-screen bg-zinc-50 text-zinc-900", tab ? (action ? "pb-48" : "pb-28") : "pb-10")}>
       <header className="print:hidden bg-white/95 backdrop-blur border-b border-zinc-200 sticky top-0 z-30">
@@ -557,6 +566,11 @@ function Shell({ jobId, action, tab, onTab, children }: { jobId?: string; action
             </div>
           </div>
           {jobId && <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-700 whitespace-nowrap">{jobId}</span>}
+          {onAskAi && (
+            <button onClick={onAskAi} className="h-10 px-3 rounded-xl bg-zinc-950 text-white text-sm font-semibold inline-flex items-center gap-1.5 shrink-0">
+              <Sparkles className="h-4 w-4 text-rose-300" aria-hidden /> Intense AI
+            </button>
+          )}
         </div>
       </header>
       <main className="max-w-lg mx-auto px-4 py-5 space-y-4">{children}</main>
