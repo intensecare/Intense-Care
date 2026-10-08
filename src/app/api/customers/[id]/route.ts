@@ -20,7 +20,7 @@ import {
 
 /**
  * GET /api/customers/[id] — the full 360° customer file: profile, properties,
- * booking history, financial transactions (super_admin ONLY), referral
+ * booking history, financial transactions (Admin ONLY), referral
  * attribution and support issues.
  *
  * ops_manager receives a financially redacted projection consistent with the
@@ -178,7 +178,7 @@ export async function GET(
       });
     }
 
-    // Financial truth for the super_admin: lifetime revenue from the
+    // Financial truth for the Admin: lifetime revenue from the
     // maintained counter, billing/collection/outstanding from the ledgers
     // (cancelled/refunded invoices excluded from the operating figures).
     const openInvoices = invoices.filter(

@@ -1,6 +1,9 @@
 /**
- * RBAC — role workspaces (§18).
+ * RBAC — role workspaces.
  *
+ * Four separate experiences, not one dashboard with hidden menus:
+ *   Admin → "Operations"   Field Manager → "My Jobs"   QC → "Quality"
+ *   Customer → "My Service" (the secure link — no sign-in)
  * Each role has ONE home, ONE primary queue and ONE clear next action. The
  * navigation of a workspace is derived from the permission matrix — an item
  * is shown only when the role holds its permission — and the route guard
@@ -24,7 +27,7 @@ export interface NavItem {
 
 export interface WorkspaceDef {
   role: Role;
-  /** Workspace title shown in the header ("Business Overview", "My Jobs" …). */
+  /** Workspace title shown in the header ("Operations", "My Jobs" …). */
   title: string;
   /** Home route — the ONE place the role lands after sign-in. */
   home: string;
@@ -35,69 +38,24 @@ export interface WorkspaceDef {
 }
 
 export const WORKSPACES: Record<Role, WorkspaceDef> = {
-  super_admin: {
-    role: "super_admin",
-    title: "Business Overview",
-    home: "/",
-    queue: "/operations",
-    layout: "desk",
-    nav: [
-      { label: "Business Overview", href: "/", permission: "dashboard.view" },
-      { label: "Operations", href: "/operations", permission: "jobs.view", badge: "jobs_open" },
-      { label: "Schedule", href: "/schedule", permission: "scheduling.manage" },
-      { label: "Jobs", href: "/jobs", permission: "jobs.view" },
-      { label: "Quality Queue", href: "/quality-queue", permission: "qc.inspect", badge: "qc_pending" },
-      { label: "Quality & Rework", href: "/quality", permission: "rework.view", badge: "rework" },
-      { label: "Customers", href: "/customers", permission: "customers.view" },
-      { label: "Properties", href: "/properties", permission: "properties.view" },
-      { label: "AMC Contracts", href: "/amc", permission: "amc.view" },
-      { label: "Quotations", href: "/quotations", permission: "quotes.manage" },
-      { label: "Services & Checklists", href: "/services", permission: "services.manage" },
-      { label: "Finance", href: "/finance", permission: "finance.view", badge: "overdue" },
-      { label: "Referrals & Partners", href: "/referrals", permission: "referrals.manage" },
-      { label: "Reports", href: "/reports", permission: "reports.view" },
-      { label: "Notifications", href: "/notifications", permission: "notifications.view" },
-      { label: "Users & Roles", href: "/users", permission: "users.manage" },
-      { label: "Settings & Audit", href: "/settings", permission: "settings.manage" },
-      { label: "Field App", href: "/my-jobs", permission: "jobs.arrive" },
-    ],
-  },
-  ops_manager: {
-    role: "ops_manager",
+  admin: {
+    role: "admin",
     title: "Operations",
-    home: "/operations",
-    queue: "/operations",
+    home: "/",
+    queue: "/",
     layout: "desk",
     nav: [
-      { label: "Operations", href: "/operations", permission: "jobs.view", badge: "jobs_open" },
+      { label: "Dashboard", href: "/", permission: "dashboard.view" },
+      { label: "Jobs", href: "/jobs", permission: "jobs.view", badge: "jobs_open" },
       { label: "Schedule", href: "/schedule", permission: "scheduling.manage" },
-      { label: "Dispatch", href: "/dispatcher", permission: "jobs.assign", badge: "dispatch" },
-      { label: "Jobs", href: "/jobs", permission: "jobs.view" },
-      { label: "Calendar", href: "/calendar", permission: "scheduling.view" },
-      { label: "Quality & Rework", href: "/quality", permission: "rework.view", badge: "rework" },
+      { label: "Quality", href: "/quality-queue", permission: "qc.view", badge: "qc_pending" },
       { label: "Customers", href: "/customers", permission: "customers.view" },
       { label: "Properties", href: "/properties", permission: "properties.view" },
-      { label: "AMC Contracts", href: "/amc", permission: "amc.view" },
-      { label: "Services & Checklists", href: "/services", permission: "checklist.manage" },
-      { label: "Staff", href: "/users", permission: "users.view" },
+      { label: "Services", href: "/services", permission: "services.manage" },
+      { label: "Payments", href: "/finance", permission: "finance.view", badge: "overdue" },
       { label: "Reports", href: "/reports", permission: "reports.view" },
-      { label: "Notifications", href: "/notifications", permission: "notifications.view" },
-    ],
-  },
-  scheduler: {
-    role: "scheduler",
-    title: "Schedule",
-    home: "/schedule",
-    queue: "/schedule",
-    layout: "desk",
-    nav: [
-      { label: "Schedule", href: "/schedule", permission: "scheduling.manage" },
-      { label: "Dispatch", href: "/dispatcher", permission: "jobs.assign", badge: "dispatch" },
-      { label: "Jobs", href: "/jobs", permission: "jobs.view" },
-      { label: "Calendar", href: "/calendar", permission: "scheduling.view" },
-      { label: "Customers", href: "/customers", permission: "customers.view" },
-      { label: "Properties", href: "/properties", permission: "properties.view" },
-      { label: "AMC Visits", href: "/amc", permission: "amc.view" },
+      { label: "Users", href: "/users", permission: "users.manage" },
+      { label: "Settings", href: "/settings", permission: "settings.manage" },
     ],
   },
   field_manager: {
@@ -108,54 +66,22 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     layout: "mobile",
     nav: [{ label: "My Jobs", href: "/my-jobs", permission: "jobs.view" }],
   },
-  field_staff: {
-    role: "field_staff",
-    title: "My Tasks",
-    home: "/my-tasks",
-    queue: "/my-tasks",
-    layout: "mobile",
-    nav: [{ label: "My Tasks", href: "/my-tasks", permission: "checklist.execute" }],
-  },
   qc_inspector: {
     role: "qc_inspector",
-    title: "Quality Queue",
+    title: "Quality",
     home: "/quality-queue",
     queue: "/quality-queue",
-    layout: "desk",
-    nav: [
-      { label: "Quality Queue", href: "/quality-queue", permission: "qc.inspect", badge: "qc_pending" },
-      { label: "Rework Tracker", href: "/quality", permission: "rework.view", badge: "rework" },
-    ],
-  },
-  accounts: {
-    role: "accounts",
-    title: "Finance",
-    home: "/finance",
-    queue: "/finance",
-    layout: "desk",
-    nav: [
-      { label: "Finance", href: "/finance", permission: "finance.view", badge: "overdue" },
-      { label: "Billable Jobs", href: "/jobs", permission: "jobs.view" },
-      { label: "Customers", href: "/customers", permission: "customers.view" },
-      { label: "Referral Payouts", href: "/referrals", permission: "payouts.manage" },
-      { label: "Reports", href: "/reports", permission: "reports.financial" },
-    ],
-  },
-  referral_partner: {
-    role: "referral_partner",
-    title: "My Referrals",
-    home: "/my-referrals",
-    queue: "/my-referrals",
-    layout: "portal",
-    nav: [{ label: "My Referrals", href: "/my-referrals", permission: "referrals.view" }],
+    layout: "mobile",
+    nav: [{ label: "Quality", href: "/quality-queue", permission: "qc.inspect", badge: "qc_pending" }],
   },
   customer: {
+    // Customers never sign in — this entry only keeps the table total.
     role: "customer",
-    title: "My Services",
-    home: "/my-services",
-    queue: "/my-services",
+    title: "My Service",
+    home: "/login",
+    queue: "/login",
     layout: "portal",
-    nav: [{ label: "My Services", href: "/my-services", permission: "jobs.view" }],
+    nav: [],
   },
 };
 
@@ -166,15 +92,12 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
 const ROUTE_PERMISSIONS: { prefix: string; permission: Permission; layouts: WorkspaceLayout[] }[] = [
   { prefix: "/jobs/", permission: "jobs.view", layouts: ["desk"] },
   { prefix: "/customers/", permission: "customers.view", layouts: ["desk"] },
-  { prefix: "/quality-queue/", permission: "qc.inspect", layouts: ["desk"] },
-  { prefix: "/my-jobs/", permission: "jobs.view", layouts: ["mobile", "desk"] },
-  { prefix: "/my-tasks/", permission: "checklist.execute", layouts: ["mobile", "desk"] },
-  { prefix: "/my-services/", permission: "jobs.view", layouts: ["portal"] },
-  { prefix: "/field", permission: "checklist.execute", layouts: ["mobile", "desk"] },
+  { prefix: "/quality-queue/", permission: "qc.inspect", layouts: ["desk", "mobile"] },
+  { prefix: "/my-jobs/", permission: "jobs.arrive", layouts: ["mobile"] },
 ];
 
-/** Paths that need no sign-in (secure links, public partner code portal). */
-export const PUBLIC_PATH_PREFIXES = ["/login", "/customer/", "/portal", "/partner-portal", "/refer/"];
+/** Paths that need no sign-in (login and the customer's secure links). */
+export const PUBLIC_PATH_PREFIXES = ["/login", "/customer/"];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));

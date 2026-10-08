@@ -28,7 +28,9 @@ export const linkPolicy = {
  *     correct in every environment, local and deployed).
  *  3. Vercel-provided deployment domains (VERCEL_PROJECT_PRODUCTION_URL /
  *     VERCEL_URL are injected automatically on Vercel).
- *  4. localhost fallback for bare server-side calls in development.
+ *  4. localhost — development only. In production a link is NEVER built on
+ *     localhost: without APP_BASE_URL (or a request / Vercel origin) this
+ *     throws so a broken link is never sent to a customer.
  */
 export function resolveBaseUrl(requestOrigin: string | null): string {
   const configured = process.env.APP_BASE_URL;
@@ -42,6 +44,9 @@ export function resolveBaseUrl(requestOrigin: string | null): string {
   }
   const vercelUrl = process.env.VERCEL_URL;
   if (vercelUrl) return `https://${vercelUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("APP_BASE_URL is not set. Set it to the public https:// address customers open (e.g. https://your-domain.com).");
+  }
   return "http://localhost:3000";
 }
 

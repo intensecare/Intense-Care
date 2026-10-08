@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requirePermission } from "@/lib/server/authz";
+import { requirePermission, jobWhereFor } from "@/lib/server/authz";
 import { recordAudit } from "@/lib/server/audit";
 import { can } from "@/lib/rbac";
 import { errorResponse } from "@/lib/server/http";
@@ -32,17 +32,23 @@ const UpdateSchema = z.object({
 });
 
 /**
- * GET /api/customers — full directory (managers/admins). ops_manager receives
- * contact/dispatch fields only; lifetime value (financial) is super_admin-only.
+ * GET /api/customers — full directory for Admin; a Field Manager receives only
+ * the customers of their assigned jobs. Lifetime value is Admin-only.
  */
 export async function GET() {
   try {
     const { user, scope } = await requirePermission("customers.view");
-    // OWN scope (customer logins) resolves only the caller's own record.
-    const rows = await prisma.customer.findMany({
-      where: scope === "OWN" ? { id: user.customerId ?? "__none__" } : undefined,
-      orderBy: { createdAt: "desc" },
-    });
+    // Only Admin (ALL) gets the directory. A Field Manager (ASSIGNED) gets
+    // just the customers of the jobs they are on — never the full list.
+    let where: Record<string, unknown> | undefined;
+    if (scope === "OWN") {
+      where = { id: user.customerId ?? "__none__" };
+    } else if (scope !== "ALL") {
+      const jobWhere = await jobWhereFor(user, "jobs.view");
+      const jobs = await prisma.job.findMany({ where: jobWhere ?? { id: "__none__" }, select: { customerId: true } });
+      where = { id: { in: Array.from(new Set(jobs.map((j) => j.customerId))) } };
+    }
+    const rows = await prisma.customer.findMany({ where, orderBy: { createdAt: "desc" } });
     const mapped = rows.map(serializeCustomer);
     if (can(user, "finance.view")) return ok(mapped);
     return ok(
@@ -175,7 +181,7 @@ export async function PATCH(request: Request) {
 }
 
 /**
- * DELETE /api/customers — remove a customer (super_admin ONLY). Customers with
+ * DELETE /api/customers — remove a customer (Admin ONLY). Customers with
  * job history are rejected (FK-restricted + financial records must survive);
  * deactivate them via PATCH { status: "inactive" } instead. Jobless customers
  * hard-delete together with their property records (schema cascade).

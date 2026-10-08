@@ -26,22 +26,22 @@ export const APPROVAL_POLICIES: Record<ApprovalKind, ApprovalPolicy> = {
   "refund.high_value": {
     kind: "refund.high_value",
     label: "Refund above the configured limit",
-    approvers: ["super_admin", "ops_manager"],
+    approvers: ["admin"],
   },
   "discount.high_value": {
     kind: "discount.high_value",
     label: "Discount above the configured limit",
-    approvers: ["super_admin", "ops_manager"],
+    approvers: ["admin"],
   },
   "users.delete": {
     kind: "users.delete",
     label: "Delete a user account",
-    approvers: ["super_admin"],
+    approvers: ["admin"],
   },
   "settings.critical": {
     kind: "settings.critical",
     label: "Critical configuration",
-    approvers: ["super_admin"],
+    approvers: ["admin"],
   },
   "audit.delete": {
     kind: "audit.delete",

@@ -303,7 +303,10 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       data.completedAt = new Date();
     }
 
-    const job = await prisma.job.update({ where: { id }, data });
+    // Compare-and-set: only applies if nobody moved the job meanwhile (double taps, two devices).
+    const moved = await prisma.job.updateMany({ where: { id, status: existing.status }, data });
+    if (moved.count === 0) return fail("This job was just updated by someone else. Refresh and try again.", 409);
+    const job = { status };
 
     const STATUS_EVENT_MESSAGES: Record<string, string> = {
       SCHEDULED: "Job scheduled",

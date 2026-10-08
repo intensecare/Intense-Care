@@ -18,7 +18,7 @@ import { logger } from "@/lib/server/logger";
 
 /**
  * GET /api/referrals — the full referral ledger hydrated in one call:
- * partners, commission rules, commission entries, payouts (super_admin ONLY;
+ * partners, commission rules, commission entries, payouts (Admin ONLY;
  * commission amounts are financial data).
  */
 export async function GET() {

@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { logger, maskPhone } from "./logger";
 import { deepLinkFor, ROLES, scopeOf, type Permission } from "@/lib/rbac";
+import { resolveBaseUrl } from "./policy";
 
 /**
  * §24/§26 — outbound notifications with ROLE-SPECIFIC DEEP LINKS.
@@ -19,18 +20,8 @@ export interface NotifyResult {
   reason?: string;
 }
 
-function appBaseUrl(): string {
-  const configured = process.env.APP_BASE_URL;
-  if (configured && /^https?:\/\//.test(configured)) return configured.replace(/\/$/, "");
-  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  if (vercel && !vercel.startsWith("localhost")) {
-    return `https://${vercel.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
-  }
-  return "http://localhost:3000";
-}
-
 function absolute(path: string): string {
-  return /^https?:\/\//.test(path) ? path : `${appBaseUrl()}${path}`;
+  return /^https?:\/\//.test(path) ? path : `${resolveBaseUrl(null)}${path}`;
 }
 
 function company(): string {
@@ -39,7 +30,8 @@ function company(): string {
 
 async function auditAndMaybeSend(params: { jobId: string; phone: string; purpose: string; body: string }): Promise<NotifyResult> {
   const providerConfigured = Boolean(process.env.TWOFACTOR_API_KEY);
-  const waConfigured = Boolean(process.env.WHATSAPP_API_URL);
+  const waCloud = Boolean(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
+  const waConfigured = waCloud || Boolean(process.env.WHATSAPP_API_URL);
   const provider = waConfigured ? "whatsapp" : providerConfigured ? "2factor" : "none";
 
   if (!params.phone) return { queued: false, provider: "none", reason: "no_phone" };
@@ -62,7 +54,9 @@ async function auditAndMaybeSend(params: { jobId: string; phone: string; purpose
   }
 
   try {
-    if (waConfigured) {
+    if (waCloud) {
+      await sendWhatsAppCloud(params.phone, params.body);
+    } else if (waConfigured) {
       await fetch(process.env.WHATSAPP_API_URL as string, {
         method: "POST",
         headers: {
@@ -92,6 +86,35 @@ async function auditAndMaybeSend(params: { jobId: string; phone: string; purpose
   }
 }
 
+/**
+ * WhatsApp Cloud API delivery (WHATSAPP_ACCESS_TOKEN + WHATSAPP_PHONE_NUMBER_ID).
+ * With WHATSAPP_TEMPLATE_NAME the message goes out as that approved template
+ * with the composed text as its one body variable ({{1}}) — required for
+ * business-initiated messages; otherwise as a plain text message.
+ */
+async function sendWhatsAppCloud(phone: string, body: string): Promise<void> {
+  const to = phone.replace(/[^0-9]/g, "");
+  const template = process.env.WHATSAPP_TEMPLATE_NAME;
+  const payload = template
+    ? {
+        messaging_product: "whatsapp",
+        to,
+        type: "template",
+        template: {
+          name: template,
+          language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en" },
+          components: [{ type: "body", parameters: [{ type: "text", text: body }] }],
+        },
+      }
+    : { messaging_product: "whatsapp", to, type: "text", text: { body } };
+  const res = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`WhatsApp API ${res.status}`);
+}
+
 /** Notification dedup: skip when the same purpose fired for the job recently. */
 async function recentlySent(jobId: string, purpose: string, withinMs = 5 * 60 * 1000): Promise<boolean> {
   const cutoff = new Date(Date.now() - withinMs);
@@ -104,15 +127,15 @@ async function recentlySent(jobId: string, purpose: string, withinMs = 5 * 60 * 
 
 /** Active users whose role holds the permission (resolved from the matrix, not role names). */
 async function usersWith(permission: Permission): Promise<{ id: string; name: string; phone: string; role: string }[]> {
-  const roles = ROLES.filter((r) => scopeOf(r, permission) !== "NONE" && r !== "super_admin");
+  const roles = ROLES.filter((r) => scopeOf(r, permission) !== "NONE" && r !== "admin" && r !== "customer");
   const rows = await prisma.user.findMany({
     where: { role: { in: roles }, active: true },
     select: { id: true, name: true, phone: true, role: true },
     orderBy: { createdAt: "asc" },
   });
   if (rows.length > 0) return rows;
-  // Fall back to the first super admin so the message is never lost.
-  return prisma.user.findMany({ where: { role: "super_admin", active: true }, select: { id: true, name: true, phone: true, role: true }, take: 1 });
+  // Fall back to the first admin so the message is never lost.
+  return prisma.user.findMany({ where: { role: "admin", active: true }, select: { id: true, name: true, phone: true, role: true }, take: 1 });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -191,16 +214,15 @@ export async function notifyQcReady(jobId: string, link?: string, mode: "inspect
 }
 
 /* -------------------------------------------------------------------------- */
-/* Accounts                                                                   */
+/* Admin                                                                      */
 /* -------------------------------------------------------------------------- */
 
 export async function notifyAccountsBillable(jobId: string): Promise<NotifyResult> {
-  const invoice = await prisma.invoice.findFirst({ where: { jobId }, select: { id: true } });
   if (await recentlySent(jobId, "BILLABLE")) return { queued: false, provider: "deduped" };
   const accounts = await usersWith("invoice.finalize");
   let last: NotifyResult = { queued: false, provider: "none", reason: "no_accounts" };
   for (const a of accounts) {
-    const dl = deepLinkFor(a.role, "customer_approved", { jobId, invoiceId: invoice?.id });
+    const dl = deepLinkFor(a.role, "customer_approved", { jobId });
     const body = `${company()}: ${dl.message} ${dl.cta}: ${absolute(dl.path)}`;
     last = await auditAndMaybeSend({ jobId, phone: a.phone, purpose: "BILLABLE", body });
   }

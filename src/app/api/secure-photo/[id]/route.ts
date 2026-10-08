@@ -25,8 +25,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
     const jobId = resolved.data.job.id;
 
     const photo = await prisma.jobPhoto.findUnique({ where: { id: params.id } });
-    if (!photo || photo.jobId !== jobId) {
-      // Token from a DIFFERENT job can never read another job's photo.
+    if (!photo || photo.jobId !== jobId || !["before", "after"].includes(photo.photoType)) {
+      // Token from a DIFFERENT job can never read another job's photo, and
+      // QC / rework evidence is internal — never served on the customer link.
       return new NextResponse("Not found", { status: 404 });
     }
 

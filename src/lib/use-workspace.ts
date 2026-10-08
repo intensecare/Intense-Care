@@ -21,32 +21,30 @@ export interface WorkspaceQueueItem {
   actionable: boolean;
 }
 
+export interface WorkspaceAttentionItem {
+  key: string;
+  jobId: string | null;
+  title: string;
+  reason: string;
+  href: string;
+  tone: "alert" | "warning";
+}
+
 export interface WorkspacePayload {
   role: string;
   workspace: { title: string; home: string; queue: string; layout: string };
   today: string;
   counts: {
     today: number;
-    scheduled: number;
-    assigned: number;
-    inProgress: number;
+    active: number;
     qcPending: number;
     rework: number;
     approvalPending: number;
     completed: number;
   };
-  attention: { key: string; label: string; count: number; href: string }[];
+  attention: WorkspaceAttentionItem[];
   queue: WorkspaceQueueItem[];
-  finance?: {
-    outstanding: number;
-    collected: number;
-    pending: number;
-    overdueCount: number;
-    overdueAmount: number;
-    pendingCount: number;
-    revenueMonth: number;
-  };
-  features?: { amc: boolean; nri: boolean };
+  finance?: { outstanding: number; overdueCount: number; collectedMonth: number };
 }
 
 export function useWorkspace(pollMs = 15000) {

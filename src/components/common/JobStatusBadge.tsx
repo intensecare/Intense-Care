@@ -1,114 +1,59 @@
 import React from "react";
-import { JobStatus } from "@/lib/types";
-import { JOB_STATUS_CONFIG } from "@/lib/state-machine";
+import { CheckCircle2, Circle, Clock, AlertTriangle, PlayCircle, XCircle } from "lucide-react";
+import { statusView, TONE_CLASSES, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
-interface JobStatusBadgeProps {
-  status: JobStatus;
-  size?: "sm" | "md";
-  showDot?: boolean;
-}
+const TONE_ICON: Record<StatusTone, React.ElementType> = {
+  neutral: Circle,
+  info: PlayCircle,
+  warning: Clock,
+  success: CheckCircle2,
+  error: AlertTriangle,
+};
 
 /**
- * Outline status chip with a colored dot — one shape, four semantics:
- * neutral (zinc), success (emerald), waiting (amber), alert (red).
- * No filled pastel backgrounds; the dot carries the hue, the label carries
- * the meaning. Keeps the whole app's status vocabulary calm and scannable.
+ * StatusBadge — the ONE status chip of the product. Colour AND an icon carry
+ * the meaning (never colour alone), labels come from src/lib/status.ts.
  */
-export function JobStatusBadge({
-  status,
-  size = "md",
-  showDot = true,
-}: JobStatusBadgeProps) {
-  const config = JOB_STATUS_CONFIG[status] || JOB_STATUS_CONFIG.DRAFT;
-
-  const tone =
-    status === "COMPLETED" || status === "PASS"
-      ? "success"
-      : status === "REWORK_REQUIRED" ||
-        status === "REWORK_ASSIGNED" ||
-        status === "REWORK_IN_PROGRESS" ||
-        status === "CANCELLED"
-      ? "alert"
-      : status === "SCHEDULED" ||
-        status === "QUALITY_CHECK" ||
-        status === "CUSTOMER_APPROVAL" ||
-        status === "FEEDBACK_REQUESTED" ||
-        status === "REINSPECTION" ||
-        status === "REWORK_COMPLETED"
-      ? "waiting"
-      : "neutral";
-
-  const tones = {
-    neutral: {
-      chip: "border-zinc-200 text-zinc-600",
-      dot: "bg-zinc-400",
-    },
-    success: {
-      chip: "border-emerald-200 text-emerald-700",
-      dot: "bg-emerald-500",
-    },
-    waiting: {
-      chip: "border-amber-200 text-amber-700",
-      dot: "bg-amber-500",
-    },
-    alert: {
-      chip: "border-red-200 text-red-600",
-      dot: "bg-red-500",
-    },
-  }[tone];
-
+export function StatusBadge({ status, size = "md", className }: { status: string; size?: "sm" | "md"; className?: string }) {
+  const view = statusView(status);
+  const Icon = status === "CANCELLED" ? XCircle : TONE_ICON[view.tone];
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border bg-white font-medium whitespace-nowrap font-sans",
-        tones.chip,
-        size === "sm" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs"
+        "inline-flex items-center gap-1.5 rounded-full border font-semibold whitespace-nowrap",
+        TONE_CLASSES[view.tone].chip,
+        size === "sm" ? "px-2 py-0.5 text-xs" : "px-2.5 py-1 text-xs sm:text-sm",
+        className
       )}
     >
-      {showDot && (
-        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", tones.dot)} />
-      )}
-      {config.label}
+      <Icon className={size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4"} aria-hidden />
+      {view.label}
     </span>
   );
 }
 
-export function PaymentStatusBadge({
-  status,
-}: {
-  status: "UNPAID" | "PARTIAL" | "PAID" | "REFUNDED" | "CANCELLED" | "NOT_APPLICABLE";
-}) {
-  // Same outline-dot vocabulary: only PAID is green, only UNPAID is amber.
-  const styles = {
-    UNPAID: "border-amber-200 text-amber-700",
-    PARTIAL: "border-amber-200 text-amber-700",
-    PAID: "border-emerald-200 text-emerald-700",
-    REFUNDED: "border-zinc-200 text-zinc-500",
-    CANCELLED: "border-zinc-200 text-zinc-500",
-    NOT_APPLICABLE: "border-slate-200 text-slate-500",
-  };
-  const dots = {
-    UNPAID: "bg-amber-500",
-    PARTIAL: "bg-amber-500",
-    PAID: "bg-emerald-500",
-    REFUNDED: "bg-zinc-300",
-    CANCELLED: "bg-zinc-300",
-    NOT_APPLICABLE: "bg-slate-300",
-  };
-  const labels: Record<string, string> = {
-    NOT_APPLICABLE: "Billed on contract",
-  };
+/** Backwards-compatible name used across the app. */
+export function JobStatusBadge({ status, size = "md" }: { status: string; size?: "sm" | "md"; showDot?: boolean }) {
+  return <StatusBadge status={status} size={size} />;
+}
 
+const PAYMENT: Record<string, { label: string; tone: StatusTone }> = {
+  UNPAID: { label: "Unpaid", tone: "warning" },
+  PARTIAL: { label: "Part paid", tone: "warning" },
+  PAID: { label: "Paid", tone: "success" },
+  REFUNDED: { label: "Refunded", tone: "neutral" },
+  CANCELLED: { label: "Cancelled", tone: "neutral" },
+  NOT_APPLICABLE: { label: "Billed on contract", tone: "neutral" },
+};
+
+export function PaymentStatusBadge({ status }: { status: string }) {
+  const p = PAYMENT[status] ?? PAYMENT.UNPAID;
+  const Icon = TONE_ICON[p.tone];
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border bg-white text-[10px] font-medium font-sans whitespace-nowrap",
-        styles[status] || styles.UNPAID
-      )}
-    >
-      <span className={cn("h-1.5 w-1.5 rounded-full", dots[status] || dots.UNPAID)} />
-      {labels[status] ?? status.charAt(0) + status.slice(1).toLowerCase()}
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold whitespace-nowrap", TONE_CLASSES[p.tone].chip)}>
+      <Icon className="h-3.5 w-3.5" aria-hidden />
+      {p.label}
     </span>
   );
 }

@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { prisma } from "./prisma";
 import { logger, maskToken } from "./logger";
+import { resolveBaseUrl } from "./policy";
 
 /**
  * Customer secure link service — ONE link per job, for the whole journey.
@@ -63,43 +64,35 @@ function decryptToken(enc: string): string | null {
   }
 }
 
+/** Encrypt / decrypt a raw token for at-rest storage (same scheme as job links). */
+export const sealToken = encryptToken;
+export const openToken = decryptToken;
+
 /** Decrypt a stored token row to its raw value (desk re-show only). */
 export function rawTokenOfRow(row: { tokenEnc: string | null }): string | null {
   return row.tokenEnc ? decryptToken(row.tokenEnc) : null;
 }
 
-function generateToken(): string {
+export function generateToken(): string {
   return crypto.randomBytes(32).toString("base64url"); // 256-bit, URL-safe
 }
 
-/** Resolve the shareable base URL (APP_BASE_URL → Vercel → localhost). */
+/** The shareable base URL — one resolver for every customer link (APP_BASE_URL first). */
 function baseUrl(): string {
-  const configured = process.env.APP_BASE_URL;
-  if (configured && /^https?:\/\//.test(configured)) return configured.replace(/\/$/, "");
-  const vercelProduction = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  if (vercelProduction && !vercelProduction.startsWith("localhost")) {
-    return `https://${vercelProduction.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
-  }
-  const vercelUrl = process.env.VERCEL_URL;
-  if (vercelUrl) return `https://${vercelUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
-  return "http://localhost:3000";
+  return resolveBaseUrl(null);
 }
 
 export function buildLinkPath(token: string): string {
-  return `/customer/job/${token}`;
+  return `/customer/service/${token}`;
 }
 
 export function buildLinkUrl(token: string): string {
   return `${baseUrl()}${buildLinkPath(token)}`;
 }
 
-/**
- * URL encoded in the physical QR — resolves straight to the customer journey
- * page (the /q alias route was removed with the single-link simplification;
- * encoding a dead alias made printed QR codes 404).
- */
+/** Same URL as the link itself — kept for callers that print it. */
 export function buildShortUrl(token: string): string {
-  return `${baseUrl()}/customer/job/${token}`;
+  return buildLinkUrl(token);
 }
 
 export interface MintFailure {

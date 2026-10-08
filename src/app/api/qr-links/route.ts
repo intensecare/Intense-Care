@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import QRCode from "qrcode";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, authorizeJob } from "@/lib/server/authz";
 import { recordAudit } from "@/lib/server/audit";
@@ -12,7 +11,6 @@ import {
   revokeQrToken,
   rawTokenOfRow,
   buildLinkUrl,
-  buildShortUrl,
   serializeQrToken,
 } from "@/lib/server/qr-service";
 
@@ -23,7 +21,7 @@ import {
  * POST get           → the job's single link; mints it on first use.
  * POST regen         → replace: new link, old dies instantly.
  * POST revoke        → kill switch.
- * POST qr / qr-dl    → QR image of the SAME link (no rotation).
+ * (No per-job QR: the only QR is the optional property QR.)
  * POST purge-job     → revoke the job's link (compromise response).
  */
 
@@ -118,7 +116,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (action === "reveal" || action === "qr" || action === "qr-download") {
+    if (action === "reveal") {
       const parsed = TokenActionSchema.safeParse(body);
       if (!parsed.success) return NextResponse.json({ success: false, error: "Invalid payload." }, { status: 400 });
 
@@ -145,24 +143,10 @@ export async function POST(request: Request) {
       }
 
       const linkUrl = buildLinkUrl(raw);
-      const shortUrl = buildShortUrl(raw);
-
-      if (action === "reveal") {
-        return NextResponse.json({
-          success: true,
-          data: { linkUrl, shortUrl, expiresAt: row.expiresAt?.toISOString() ?? null },
-        });
-      }
-
-      const urlForQr = action === "qr-download" ? linkUrl : shortUrl;
-      const size = action === "qr-download" ? 1024 : 320;
-      const dataUrl = await QRCode.toDataURL(urlForQr, {
-        width: size,
-        margin: 2,
-        color: { dark: "#0f172a", light: "#ffffff" },
-        errorCorrectionLevel: "M",
+      return NextResponse.json({
+        success: true,
+        data: { linkUrl, shortUrl: linkUrl, expiresAt: row.expiresAt?.toISOString() ?? null },
       });
-      return NextResponse.json({ success: true, data: { qrDataUrl: dataUrl, linkUrl, token: urlForQr.split("/").pop() } });
     }
 
     if (action === "revoke") {

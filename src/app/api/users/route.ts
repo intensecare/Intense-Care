@@ -6,9 +6,10 @@ import { requirePermission, requireApproval, requireUser } from "@/lib/server/au
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { recordAudit } from "@/lib/server/audit";
-import { ROLES, ASSIGNABLE_ROLES, normalizeRole, scopeOf } from "@/lib/rbac";
+import { ASSIGNABLE_ROLES, normalizeRole, scopeOf } from "@/lib/rbac";
 
-const RoleSchema = z.enum(ROLES);
+/** Only the three sign-in roles can be given an account. Customers use their service link. */
+const RoleSchema = z.enum(["admin", "field_manager", "qc_inspector"]);
 
 const CreateSchema = z.object({
   name: z.string().min(2).max(120),
@@ -18,10 +19,6 @@ const CreateSchema = z.object({
   password: z.string().min(8).max(200),
   teamId: z.string().max(64).nullable().optional(),
   branchId: z.string().max(64).nullable().optional(),
-  /** Required for the customer role: the customer record this login belongs to. */
-  customerId: z.string().max(64).nullable().optional(),
-  /** Required for the referral_partner role: the partner record this login belongs to. */
-  referralPartnerId: z.string().max(64).nullable().optional(),
 });
 
 const UpdateSchema = z.object({
@@ -32,8 +29,6 @@ const UpdateSchema = z.object({
   password: z.string().min(8).max(200).optional(),
   teamId: z.string().max(64).nullable().optional(),
   branchId: z.string().max(64).nullable().optional(),
-  customerId: z.string().max(64).nullable().optional(),
-  referralPartnerId: z.string().max(64).nullable().optional(),
 });
 
 function publicUser(u: {
@@ -66,24 +61,10 @@ function publicUser(u: {
   };
 }
 
-/** External logins must point at the record they own; internal logins must not. */
-async function validateRoleLinks(d: { role: string; customerId?: string | null; referralPartnerId?: string | null }) {
-  if (d.role === "customer") {
-    if (!d.customerId) throw Object.assign(new Error("A customer login must be linked to a customer record."), { status: 400 });
-    const c = await prisma.customer.findUnique({ where: { id: d.customerId } });
-    if (!c) throw Object.assign(new Error("Customer record not found."), { status: 404 });
-  } else if (d.role === "referral_partner") {
-    if (!d.referralPartnerId) throw Object.assign(new Error("A partner login must be linked to a referral partner."), { status: 400 });
-    const p = await prisma.referralPartner.findUnique({ where: { id: d.referralPartnerId } });
-    if (!p) throw Object.assign(new Error("Referral partner not found."), { status: 404 });
-  }
-}
-
 /**
  * GET /api/users — the user directory.
- *   users.manage (Super Admin)       → every account with contact details
- *   users.view   (ops / scheduler)   → assignable field accounts only (name,
- *                                      phone, team, active) for dispatch
+ *   users.manage (Admin)  → every account with contact details
+ *   users.view            → Field Manager accounts only (name, phone, active)
  */
 export async function GET() {
   try {
@@ -124,7 +105,6 @@ export async function POST(request: Request) {
       );
     }
     const d = parsed.data;
-    await validateRoleLinks(d);
 
     const existing = await prisma.user.findUnique({ where: { email: d.email.toLowerCase() } });
     if (existing) {
@@ -142,8 +122,6 @@ export async function POST(request: Request) {
         active: true,
         teamId: d.teamId ?? null,
         branchId: d.branchId ?? null,
-        customerId: d.role === "customer" ? d.customerId ?? null : null,
-        referralPartnerId: d.role === "referral_partner" ? d.referralPartnerId ?? null : null,
       },
     });
 
@@ -189,19 +167,13 @@ export async function PATCH(request: Request) {
     const user = await prisma.user.findUnique({ where: { id } });
     if (!user) return NextResponse.json({ success: false, error: "User not found." }, { status: 404 });
 
-    // Role changes on super_admin accounts and self-demotion are critical configuration.
-    if (rest.role !== undefined && (user.role === "super_admin" || id === acting.id)) {
+    // Role changes on admin accounts and self-demotion are critical configuration.
+    if (rest.role !== undefined && (normalizeRole(user.role) === "admin" || id === acting.id)) {
       requireApproval(acting, "settings.critical");
-      if (id === acting.id && rest.role !== "super_admin") {
+      if (id === acting.id && rest.role !== "admin") {
         return NextResponse.json({ success: false, error: "You cannot change your own role." }, { status: 409 });
       }
     }
-    const nextRole = rest.role ?? normalizeRole(user.role);
-    await validateRoleLinks({
-      role: nextRole,
-      customerId: rest.customerId !== undefined ? rest.customerId : user.customerId,
-      referralPartnerId: rest.referralPartnerId !== undefined ? rest.referralPartnerId : user.referralPartnerId,
-    });
 
     const data: Record<string, unknown> = {};
     if (rest.name !== undefined) data.name = rest.name;
@@ -210,8 +182,6 @@ export async function PATCH(request: Request) {
     if (rest.active !== undefined) data.active = rest.active;
     if (rest.teamId !== undefined) data.teamId = rest.teamId;
     if (rest.branchId !== undefined) data.branchId = rest.branchId;
-    if (rest.customerId !== undefined || rest.role !== undefined) data.customerId = nextRole === "customer" ? (rest.customerId ?? user.customerId) : null;
-    if (rest.referralPartnerId !== undefined || rest.role !== undefined) data.referralPartnerId = nextRole === "referral_partner" ? (rest.referralPartnerId ?? user.referralPartnerId) : null;
     if (password !== undefined) data.passwordHash = await bcrypt.hash(password, 12);
 
     if (rest.active === false && id === acting.id) {
@@ -242,10 +212,10 @@ export async function OPTIONS() {
 }
 
 /**
- * DELETE /api/users — remove a user account. Approval authority: Super Admin
- * only (users.delete). Accounts referenced by operational history are
+ * DELETE /api/users — remove a user account. Approval authority:
+ * Admin only (users.delete). Accounts referenced by operational history are
  * deactivated instead of deleted so names still resolve; the acting admin
- * cannot delete themselves and the last active super_admin is protected.
+ * cannot delete themselves and the last active admin is protected.
  */
 export async function DELETE(request: Request) {
   try {
@@ -259,10 +229,10 @@ export async function DELETE(request: Request) {
     const target = await prisma.user.findUnique({ where: { id } });
     if (!target) return NextResponse.json({ success: false, error: "User not found." }, { status: 404 });
 
-    if (target.role === "super_admin") {
-      const activeSuperAdmins = await prisma.user.count({ where: { role: "super_admin", active: true, NOT: { id } } });
-      if (activeSuperAdmins === 0) {
-        return NextResponse.json({ success: false, error: "Cannot delete the last active super_admin account." }, { status: 409 });
+    if (normalizeRole(target.role) === "admin") {
+      const activeAdmins = await prisma.user.count({ where: { role: "admin", active: true, NOT: { id } } });
+      if (activeAdmins === 0) {
+        return NextResponse.json({ success: false, error: "Cannot delete the last active admin account." }, { status: 409 });
       }
     }
 

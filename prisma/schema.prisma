@@ -23,7 +23,7 @@ model User {
   name              String
   email             String   @unique
   phone             String
-  role              String
+  role              String // admin | field_manager | qc_inspector
   avatar            String?
   passwordHash      String? // bcrypt hash; null = password login disabled until set
   active            Boolean  @default(true)
@@ -84,6 +84,9 @@ model Property {
   preferredTime       String?
   recurringService    Boolean  @default(false)
   recurringFrequency  String?
+  // ONE optional property QR → customer page for the current/upcoming service.
+  accessTokenHash     String?  @unique
+  accessTokenEnc      String?
   createdAt           DateTime @default(now())
 
   customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -158,7 +161,7 @@ model Job {
   customerConfirmedAt DateTime?
   // Unified QR/link workflow wiring (§3): the customer-confirmation token and
   // the current QR tokens resolve back to this single Job ID — never a copy.
-  jobSerial         String?
+  jobSerial         String?   @unique // readable Job ID, e.g. JOB-10245
   customerTokenId   String?
   approvedAt        DateTime?
   approvedBy        String?

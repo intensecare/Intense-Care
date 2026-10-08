@@ -94,7 +94,7 @@ interface AppContextType {
   refreshJobs: () => Promise<void>;
   /** Re-fetches the customer directory from the server (post-write re-sync). */
   refreshCustomers: () => Promise<void>;
-  /** Re-fetches the referral ledger from the server (post-write re-sync; super_admin only). */
+  /** Re-fetches the referral ledger from the server (post-write re-sync; Admin only). */
   refreshReferrals: () => Promise<void>;
   /** Re-fetches QC checks, issues, rework tasks and complaints. Live-syncs
    *  the rework loop: a worker's newly-assigned rework appears without a
@@ -110,7 +110,7 @@ interface AppContextType {
   addJobPhoto: (photo: {
     jobId: string;
     area: string;
-    photoType: "before" | "after";
+    photoType: "before" | "after" | "qc" | "rework";
     imageDataUrl: string;
     caption?: string;
   }) => Promise<{ success: boolean; message: string; photo?: JobPhoto }>;
@@ -224,7 +224,7 @@ interface AppContextType {
   deleteQuote: (id: string) => Promise<{ success: boolean; message: string }>;
   assignStaffToJob: (jobId: string, staffIds: string[]) => Promise<{ success: boolean; message: string }>;
   /** Assignment-scoped roster of active field workers (PUT /api/users), visible
-   *  to both super_admin and ops_manager — backs the dispatcher tower and the
+   *  to both Admin and ops_manager — backs the dispatcher tower and the
    *  job-console staff-assignment modal. */
   fetchStaffDirectory: () => Promise<void>;
 
@@ -345,7 +345,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     name: "System",
     email: "system@local",
     phone: "",
-    role: "super_admin",
+    role: "customer", // signed-out placeholder: holds no permissions
     active: true,
     createdAt: new Date().toISOString(),
   };
@@ -406,7 +406,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         })
       );
     }
-    if (allowed("referrals.view") && authUser.role !== "referral_partner") {
+    if (allowed("referrals.view")) {
       parallel.push(
         api<{
           partners: ReferralPartner[];
@@ -685,7 +685,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const addJobPhoto = async (photo: {
     jobId: string;
     area: string;
-    photoType: "before" | "after";
+    photoType: "before" | "after" | "qc" | "rework";
     imageDataUrl: string;
     caption?: string;
   }): Promise<{ success: boolean; message: string; photo?: JobPhoto }> => {
@@ -973,7 +973,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /**
    * Hydrates the assignment-scoped field-worker roster (PUT /api/users —
-   * semantic GET, allowed for super_admin AND ops_manager). Ops managers cannot
+   * semantic GET, allowed for Admin AND ops_manager). Ops managers cannot
    * read the full /api/users directory, so the dispatcher tower and the
    * job-console assignment modal call this to resolve worker names/phones.
    * Merges into the users store without clobbering existing hydrated users.

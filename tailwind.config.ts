@@ -16,6 +16,12 @@ const config: Config = {
       },
     },
     extend: {
+      /* Type scale — nothing important is smaller than 13px. */
+      fontSize: {
+        xs: ["0.8125rem", { lineHeight: "1.125rem" }], // 13px — labels, meta
+        sm: ["0.875rem", { lineHeight: "1.375rem" }], // 14px — body (desktop)
+        base: ["1rem", { lineHeight: "1.5rem" }], // 16px — body (mobile), inputs
+      },
       fontFamily: {
         sans: [
           "azo-sans-web",
@@ -198,6 +204,15 @@ const config: Config = {
           800: "#1f4e3c",
           900: "#1a4031",
           950: "#0e2a20",
+        },
+        /* Information — the only blue in the product (status "in progress" etc.). */
+        info: {
+          50: "#eff5fc",
+          100: "#dce9f8",
+          200: "#b9d2f0",
+          500: "#3b78c4",
+          600: "#2f62a3",
+          700: "#284f82",
         },
         /* Warm green — success/pass/paid (de-neoned to sit on cream) */
         emerald: {

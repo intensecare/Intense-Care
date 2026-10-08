@@ -1,4 +1,5 @@
 import { Job, JobStatus, UserRole } from "./types";
+import { statusView } from "./status";
 import { TRANSITION_PERMISSION } from "./rbac/next-action";
 import type { Permission } from "./rbac/permissions";
 import { scopeOf } from "./rbac/engine";
@@ -17,8 +18,8 @@ export interface StatusConfig {
 
 export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   DRAFT: {
-    label: "Draft",
-    shortDescription: "Job created but not yet scheduled",
+    label: "Booked",
+    shortDescription: "Booked — date not confirmed yet",
     color: {
       bg: "bg-slate-100",
       text: "text-slate-700",
@@ -29,7 +30,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   SCHEDULED: {
     label: "Scheduled",
-    shortDescription: "Date confirmed, pending staff assignment",
+    shortDescription: "Date confirmed — needs a Field Manager",
     color: {
       bg: "bg-blue-50",
       text: "text-blue-700",
@@ -39,8 +40,8 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
   ASSIGNED: {
-    label: "Staff Assigned",
-    shortDescription: "Field staff assigned and scheduled",
+    label: "Assigned",
+    shortDescription: "Field Manager assigned",
     color: {
       bg: "bg-indigo-50",
       text: "text-indigo-700",
@@ -50,8 +51,8 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
   ARRIVED: {
-    label: "Staff Arrived",
-    shortDescription: "Field worker on site, awaiting customer confirmation",
+    label: "Arrived",
+    shortDescription: "Team on site — waiting for customer confirmation",
     color: {
       bg: "bg-amber-50",
       text: "text-amber-800",
@@ -61,8 +62,8 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
   CUSTOMER_VERIFIED: {
-    label: "Customer Verified",
-    shortDescription: "Customer confirmed via secure link, ready to start",
+    label: "Customer Confirmed",
+    shortDescription: "Customer confirmed — ready to start",
     color: {
       bg: "bg-emerald-50",
       text: "text-emerald-700",
@@ -73,7 +74,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   IN_PROGRESS: {
     label: "In Progress",
-    shortDescription: "Deep cleaning active, checklist & photos in progress",
+    shortDescription: "Work in progress",
     color: {
       bg: "bg-sky-50",
       text: "text-sky-800",
@@ -84,7 +85,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   WORK_COMPLETED: {
     label: "Work Completed",
-    shortDescription: "Staff finished, ready for Operations Manager QC",
+    shortDescription: "Work done — waiting for QC",
     color: {
       bg: "bg-purple-50",
       text: "text-purple-700",
@@ -94,8 +95,8 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
   QUALITY_CHECK: {
-    label: "Quality Inspection",
-    shortDescription: "Operations Manager conducting QC audit",
+    label: "Quality Check",
+    shortDescription: "QC is inspecting",
     color: {
       bg: "bg-violet-50",
       text: "text-violet-800",
@@ -106,7 +107,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   PASS: {
     label: "QC Passed",
-    shortDescription: "Quality check passed, ready for customer sign-off",
+    shortDescription: "QC passed — waiting for customer approval",
     color: {
       bg: "bg-emerald-50",
       text: "text-emerald-800",
@@ -116,8 +117,8 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
   REWORK_REQUIRED: {
-    label: "Rework Required",
-    shortDescription: "Defects found during QC, awaiting dispatch to field staff",
+    label: "Rework",
+    shortDescription: "QC found issues — Field Manager fixing",
     color: {
       bg: "bg-rose-50",
       text: "text-rose-700",
@@ -127,8 +128,8 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
   REWORK_ASSIGNED: {
-    label: "Rework Assigned",
-    shortDescription: "Rework tasks dispatched to the assigned field staff",
+    label: "Rework",
+    shortDescription: "QC found issues — Field Manager fixing",
     color: {
       bg: "bg-orange-50",
       text: "text-orange-700",
@@ -138,8 +139,8 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
   REWORK_IN_PROGRESS: {
-    label: "Rework In Progress",
-    shortDescription: "Field staff opened the rework link and started corrective work",
+    label: "Rework",
+    shortDescription: "Field Manager fixing",
     color: {
       bg: "bg-orange-50",
       text: "text-orange-800",
@@ -149,8 +150,8 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
   REWORK_COMPLETED: {
-    label: "Rework Completed",
-    shortDescription: "Staff finished corrective work, ready for reinspection",
+    label: "Reinspection",
+    shortDescription: "Rework submitted — waiting for QC",
     color: {
       bg: "bg-amber-50",
       text: "text-amber-700",
@@ -161,7 +162,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   REINSPECTION: {
     label: "Reinspection",
-    shortDescription: "Operations Manager reinspecting corrective work",
+    shortDescription: "QC is reinspecting",
     color: {
       bg: "bg-indigo-50",
       text: "text-indigo-800",
@@ -172,7 +173,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   CUSTOMER_APPROVAL: {
     label: "Customer Approval",
-    shortDescription: "QC passed, awaiting customer review and digital sign-off",
+    shortDescription: "QC passed — waiting for customer approval",
     color: {
       bg: "bg-teal-50",
       text: "text-teal-800",
@@ -183,7 +184,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   COMPLETED: {
     label: "Completed",
-    shortDescription: "Service accepted & approved by customer",
+    shortDescription: "Customer approved the service",
     color: {
       bg: "bg-emerald-100",
       text: "text-emerald-900",
@@ -193,8 +194,8 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
   FEEDBACK_REQUESTED: {
-    label: "Feedback Requested",
-    shortDescription: "Secure feedback & Google Review link sent to customer",
+    label: "Completed",
+    shortDescription: "Customer approved — feedback requested",
     color: {
       bg: "bg-slate-100",
       text: "text-slate-800",
@@ -205,7 +206,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   CLOSED: {
     label: "Closed",
-    shortDescription: "Job closed & archived",
+    shortDescription: "Job closed",
     color: {
       bg: "bg-slate-200",
       text: "text-slate-900",
@@ -216,7 +217,7 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
   },
   CANCELLED: {
     label: "Cancelled",
-    shortDescription: "Job cancelled or booking voided",
+    shortDescription: "Job cancelled",
     color: {
       bg: "bg-red-50",
       text: "text-red-700",
@@ -226,6 +227,11 @@ export const JOB_STATUS_CONFIG: Record<JobStatus, StatusConfig> = {
     },
   },
 };
+
+// Labels always come from the one status vocabulary (src/lib/status.ts).
+for (const key of Object.keys(JOB_STATUS_CONFIG) as JobStatus[]) {
+  JOB_STATUS_CONFIG[key].label = statusView(key).label;
+}
 
 export interface TransitionAction {
   status: JobStatus;

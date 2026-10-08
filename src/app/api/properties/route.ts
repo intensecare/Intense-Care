@@ -136,7 +136,7 @@ export async function PATCH(request: Request) {
 }
 
 /**
- * DELETE /api/properties — remove a property (super_admin ONLY). Properties
+ * DELETE /api/properties — remove a property (Admin ONLY). Properties
  * tied to booked jobs are rejected (FK-restricted job history must survive).
  */
 export async function DELETE(request: Request) {

@@ -139,7 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const can = useCallback((permission: Permission) => (role ? rbacCan({ role }, permission) : false), [role]);
   const scope = useCallback((permission: Permission): Scope => (role ? scopeOf(role, permission) : "NONE"), [role]);
   const hasPermission = useCallback(
-    (allowedRoles: UserRole[]) => (role ? role === "super_admin" || allowedRoles.includes(role) : false),
+    (allowedRoles: UserRole[]) => (role ? role === "admin" || allowedRoles.includes(role) : false),
     [role]
   );
   const workspace = useMemo(() => workspaceOf(role ?? "customer"), [role]);

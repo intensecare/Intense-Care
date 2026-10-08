@@ -112,7 +112,7 @@ export function serializeChecklistItem(i: Prisma.JobChecklistItemGetPayload<obje
 }
 
 /**
- * Financial fields of a job are the super_admin's domain. ops_manager gets a
+ * Financial fields of a job are the Admin's domain. ops_manager gets a
  * stripped projection (no amounts, no payment data) enforced at the API
  * boundary; staff receive the same shape so the field app stays money-free.
  */
@@ -142,6 +142,7 @@ export function serializeJob(
 ): SerializedJob {
   return {
     id: j.id,
+    jobNumber: j.jobSerial ?? undefined,
     customerId: j.customerId,
     propertyId: j.propertyId,
     serviceId: j.serviceId,
@@ -187,7 +188,7 @@ export function serializeJob(
 
 /**
  * Resolves assigned worker ids to display names server-side. Ops managers and
- * staff cannot read the full user directory (GET /api/users is super_admin
+ * staff cannot read the full user directory (GET /api/users is Admin
  * only), so dispatch surfaces previously rendered assigned jobs as
  * "Unassigned" — the id→name map simply came back empty. Routes attach this
  * to every serialized job; pages fall back to their local store when absent.

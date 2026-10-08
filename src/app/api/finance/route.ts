@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nextJobSerial } from "@/lib/server/job-serial";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, requireAnyPermission, requireApproval, HttpError } from "@/lib/server/authz";
@@ -371,6 +372,7 @@ export async function POST(request: Request) {
       const { job, invoice } = await prisma.$transaction(async (tx) => {
         const createdJob = await tx.job.create({
           data: {
+            jobSerial: await nextJobSerial(tx),
             customerId: quote.customerId,
             propertyId: quote.propertyId,
             serviceId: quote.serviceId,

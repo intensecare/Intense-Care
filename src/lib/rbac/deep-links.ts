@@ -1,13 +1,11 @@
 /**
- * RBAC — notification deep links (§24).
+ * RBAC — notification deep links.
  *
  * A notification always lands on the role-specific action page, never on a
- * generic dashboard. The same resolver is used by SMS/WhatsApp composition
- * on the server and by in-app notification cards.
+ * generic dashboard. Customers always land on their ONE secure service link.
  */
 
 import type { Role } from "./roles";
-import { normalizeRole } from "./roles";
 
 export type NotificationEvent =
   | "job_assigned"
@@ -15,10 +13,7 @@ export type NotificationEvent =
   | "qc_ready"
   | "rework_assigned"
   | "qc_passed"
-  | "customer_approved"
-  | "payment_received"
-  | "invoice_due"
-  | "commission_earned";
+  | "customer_approved";
 
 export interface DeepLink {
   path: string;
@@ -26,35 +21,22 @@ export interface DeepLink {
   message: string;
 }
 
-export function deepLinkFor(roleRaw: Role | string, event: NotificationEvent, ctx: { jobId?: string; invoiceId?: string; customerLink?: string }): DeepLink {
-  const role = normalizeRole(roleRaw);
+export function deepLinkFor(_role: Role | string, event: NotificationEvent, ctx: { jobId?: string; customerLink?: string }): DeepLink {
   const jobId = ctx.jobId ?? "";
 
   switch (event) {
     case "job_assigned":
-      return role === "field_staff"
-        ? { path: `/my-tasks/${jobId}`, cta: "OPEN TASK", message: "New task assigned." }
-        : { path: `/my-jobs/${jobId}`, cta: "OPEN JOB", message: "New job assigned." };
+      return { path: `/my-jobs/${jobId}`, cta: "OPEN JOB", message: "New job assigned." };
     case "team_arrived":
-      return { path: ctx.customerLink ?? `/my-services/${jobId}`, cta: "CONFIRM SERVICE", message: "Your cleaning team has arrived." };
+      return { path: ctx.customerLink ?? "", cta: "CONFIRM & START", message: "Your team has arrived." };
     case "qc_ready":
-      return { path: `/quality-queue/${jobId}`, cta: "INSPECT", message: "Job ready for quality inspection." };
+      return { path: `/quality-queue/${jobId}`, cta: "INSPECT", message: "Job ready for quality check." };
     case "rework_assigned":
-      return role === "field_staff"
-        ? { path: `/my-tasks/${jobId}`, cta: "OPEN REWORK", message: "Rework assigned to you." }
-        : { path: `/my-jobs/${jobId}`, cta: "OPEN REWORK", message: "Rework assigned to your team." };
+      return { path: `/my-jobs/${jobId}`, cta: "OPEN REWORK", message: "Rework required on your job." };
     case "qc_passed":
-      return { path: ctx.customerLink ?? `/my-services/${jobId}`, cta: "APPROVE SERVICE", message: "Your service is quality checked and ready for approval." };
+      return { path: ctx.customerLink ?? "", cta: "APPROVE SERVICE", message: "Your service passed the quality check and is ready for approval." };
     case "customer_approved":
-      return role === "accounts"
-        ? { path: `/finance?invoice=${ctx.invoiceId ?? ""}`, cta: "GENERATE INVOICE", message: "Customer approved the service." }
-        : { path: `/jobs/${jobId}`, cta: "VIEW JOB", message: "Customer approved the service." };
-    case "payment_received":
-      return { path: `/finance?invoice=${ctx.invoiceId ?? ""}`, cta: "VIEW PAYMENT", message: "Payment received." };
-    case "invoice_due":
-      return { path: `/my-services/${jobId}`, cta: "PAY NOW", message: "Your invoice is ready." };
-    case "commission_earned":
-      return { path: "/my-referrals", cta: "VIEW COMMISSION", message: "Commission credited." };
+      return { path: `/jobs/${jobId}`, cta: "VIEW JOB", message: "Customer approved the service." };
     default:
       return { path: "/", cta: "OPEN", message: "" };
   }

@@ -16,8 +16,6 @@ import type { Prisma } from "@prisma/client";
 import { getSessionUser, type SessionUser } from "./session";
 import { prisma } from "./prisma";
 import { logger } from "./logger";
-import { getOpsDateVisibility } from "@/lib/ops-visibility";
-import { dispatchCutoffTime } from "./policy";
 import {
   authorize,
   can,
@@ -107,15 +105,17 @@ const JOB_SCOPE_SELECT = {
 
 export type JobScopeRow = Prisma.JobGetPayload<{ select: typeof JOB_SCOPE_SELECT }>;
 
-/** Is the dispatch-window policy active for this user? (ops managers only) */
-export function dispatchWindowApplies(user: SessionUser): boolean {
-  return user.role === "ops_manager";
+/**
+ * The next-day dispatch window applied only to the retired Operations
+ * Manager role. Admin sees every date, so it never applies now; kept as a
+ * function so callers stay unchanged.
+ */
+export function dispatchWindowApplies(_user: SessionUser): boolean {
+  return false;
 }
 
-function opsWindowBlocks(user: SessionUser, scheduledDate: string): boolean {
-  if (!dispatchWindowApplies(user)) return false;
-  const visibility = getOpsDateVisibility(new Date(), { nextDayDispatchTime: dispatchCutoffTime() });
-  return !visibility.isDateVisible(scheduledDate);
+function opsWindowBlocks(_user: SessionUser, _scheduledDate: string): boolean {
+  return false;
 }
 
 /** Team member ids for TEAM-scoped queries. */
@@ -220,7 +220,7 @@ export function isAssignedWorker(
   job: { assignedManagerId: string | null; assignedStaffIds: string[] },
   userId: string
 ): boolean {
-  return matchesScope("ASSIGNED", { id: userId, role: "field_staff" }, job);
+  return matchesScope("ASSIGNED", { id: userId, role: "field_manager" }, job);
 }
 
 /** The lead on site: the assigned field manager, else the first crew member. */

@@ -90,7 +90,7 @@ export interface UploadedPhoto {
 export async function uploadJobPhoto(
   dataUrl: string,
   jobId: string,
-  photoType: "before" | "after"
+  photoType: "before" | "after" | "qc" | "rework"
 ): Promise<{ ok: true; data: UploadedPhoto } | { ok: false; error: string }> {
   const check = validateImagePayload(dataUrl);
   if (!check.ok) return { ok: false, error: check.error };

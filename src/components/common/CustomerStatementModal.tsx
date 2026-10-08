@@ -23,7 +23,7 @@ interface CustomerStatementModalProps {
  * Printable Statement of Account for one customer: every tax invoice, every
  * payment receipt, and the running outstanding balance — print/share ready
  * for clients. All identity figures come from live DB records; nothing is
- * hardcoded. Financial data is super_admin-only, so callers gate rendering.
+ * hardcoded. Financial data is Admin-only, so callers gate rendering.
  */
 export function CustomerStatementModal({
   isOpen,
@@ -153,7 +153,7 @@ export function CustomerStatementModal({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 text-xs gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                className="gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50"
               >
                 <MessageCircle className="h-3.5 w-3.5" />
                 WhatsApp
@@ -163,7 +163,7 @@ export function CustomerStatementModal({
               <Printer className="h-3.5 w-3.5" />
               Print / Save PDF
             </Button>
-            <Button onClick={onClose} variant="outline" size="sm" className="h-8 w-8 p-0">
+            <Button onClick={onClose} variant="outline" size="sm" className="w-8 p-0">
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -178,9 +178,9 @@ export function CustomerStatementModal({
                 {companyName}
               </h1>
               {companyTagline && (
-                <p className="text-[11px] text-slate-500 font-medium">{companyTagline}</p>
+                <p className="text-xs text-slate-500 font-medium">{companyTagline}</p>
               )}
-              <div className="text-[11px] text-slate-600 mt-2 leading-relaxed">
+              <div className="text-xs text-slate-600 mt-2 leading-relaxed">
                 {companyAddress && <div>{companyAddress}</div>}
                 {(companyPhone || companyEmail) && (
                   <div>
@@ -194,11 +194,11 @@ export function CustomerStatementModal({
             </div>
 
             <div className="text-right shrink-0">
-              <div className="text-[10px] font-semibold text-slate-400">
+              <div className="text-xs font-semibold text-slate-400">
                 Statement of Account
               </div>
               <div className="text-sm font-semibold text-slate-900 mt-1">{customer.name}</div>
-              <div className="text-[11px] text-slate-600 mt-1 space-y-0.5">
+              <div className="text-xs text-slate-600 mt-1 space-y-0.5">
                 <div>
                   Statement Date: <strong className="text-slate-800">{formatDate(periodTo)}</strong>
                 </div>
@@ -212,7 +212,7 @@ export function CustomerStatementModal({
           {/* Customer identity */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs bg-slate-50 border border-slate-100 rounded-lg p-4">
             <div>
-              <span className="font-semibold text-slate-400 text-[10px] block mb-1">
+              <span className="font-semibold text-slate-400 text-xs block mb-1">
                 Account Holder
               </span>
               <div className="font-semibold text-slate-900 text-sm">{customer.name}</div>
@@ -220,7 +220,7 @@ export function CustomerStatementModal({
               <div className="text-slate-600">{customer.phone}{customer.email ? ` • ${customer.email}` : ""}</div>
             </div>
             <div className="sm:text-right">
-              <span className="font-semibold text-slate-400 text-[10px] block mb-1">
+              <span className="font-semibold text-slate-400 text-xs block mb-1">
                 Account Summary
               </span>
               <div className="text-slate-600">
@@ -235,30 +235,30 @@ export function CustomerStatementModal({
           {/* Summary strip */}
           <div className="grid grid-cols-3 gap-3 text-xs">
             <div className="rounded-lg border border-slate-200 p-3">
-              <div className="text-[10px] font-semibold text-slate-400">Total Billed</div>
+              <div className="text-xs font-semibold text-slate-400">Total Billed</div>
               <div className="text-base font-semibold text-slate-900 mt-1">{formatCurrency(totalBilled)}</div>
             </div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-              <div className="text-[10px] font-semibold text-emerald-600">Total Paid</div>
+              <div className="text-xs font-semibold text-emerald-600">Total Paid</div>
               <div className="text-base font-semibold text-emerald-800 mt-1">{formatCurrency(totalPaid)}</div>
             </div>
             <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-              <div className="text-[10px] font-semibold text-red-600">Outstanding Balance</div>
+              <div className="text-xs font-semibold text-red-600">Outstanding Balance</div>
               <div className="text-base font-semibold text-red-800 mt-1">{formatCurrency(outstanding)}</div>
             </div>
           </div>
 
           {/* Invoice ledger */}
           <div>
-            <h4 className="text-[10px] font-semibold text-slate-400 mb-2">
+            <h4 className="text-xs font-semibold text-slate-400 mb-2">
               Tax Invoices
             </h4>
             {sortedInvoices.length === 0 ? (
               <p className="text-xs text-slate-400">No invoices issued in this period.</p>
             ) : (
-              <table className="w-full text-[11px] border-collapse">
+              <table className="w-full text-xs border-collapse">
                 <thead>
-                  <tr className="bg-slate-900 text-white text-[9px]">
+                  <tr className="bg-slate-900 text-white text-xs">
                     <th className="py-2 px-2.5 rounded-l-md text-left font-semibold">Date</th>
                     <th className="py-2 text-left font-semibold">Invoice #</th>
                     <th className="py-2 text-left font-semibold">Service / Booking</th>
@@ -296,12 +296,12 @@ export function CustomerStatementModal({
           {/* Payment receipts */}
           {sortedPayments.length > 0 && (
             <div>
-              <h4 className="text-[10px] font-semibold text-slate-400 mb-2">
+              <h4 className="text-xs font-semibold text-slate-400 mb-2">
                 Payment Receipts
               </h4>
-              <table className="w-full text-[11px] border-collapse">
+              <table className="w-full text-xs border-collapse">
                 <thead>
-                  <tr className="text-slate-400 text-[9px] border-b border-slate-200">
+                  <tr className="text-slate-400 text-xs border-b border-slate-200">
                     <th className="py-1.5 text-left font-semibold">Date</th>
                     <th className="py-1.5 text-left font-semibold">Reference</th>
                     <th className="py-1.5 text-left font-semibold">Method</th>
@@ -327,18 +327,18 @@ export function CustomerStatementModal({
           )}
 
           {/* Outstanding in words + footer */}
-          <div className="border-t border-slate-200 pt-4 space-y-3 text-[11px]">
+          <div className="border-t border-slate-200 pt-4 space-y-3 text-xs">
             {words && (
               <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-slate-600">
-                <span className="font-semibold text-slate-400 text-[10px] block mb-1">
+                <span className="font-semibold text-slate-400 text-xs block mb-1">
                   Outstanding Balance in Words
                 </span>
                 INR {words} Only
               </div>
             )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-[10px] text-slate-500 leading-relaxed">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs text-slate-500 leading-relaxed">
               <div>
-                <h4 className="font-semibold text-slate-400 text-[9px] mb-1.5">Notes</h4>
+                <h4 className="font-semibold text-slate-400 text-xs mb-1.5">Notes</h4>
                 <ul className="list-disc list-inside space-y-0.5">
                   <li>This statement reflects all transactions recorded up to {formatDate(periodTo)}.</li>
                   {companyEmail && <li>Account queries: {companyEmail}.</li>}
@@ -348,7 +348,7 @@ export function CustomerStatementModal({
               <div className="text-right flex flex-col justify-end">
                 <div className="pt-8 border-t border-slate-300 mt-auto">
                   For <strong className="text-slate-700">{companyName}</strong>
-                  <div className="text-[9px] text-slate-400 mt-0.5">Authorised Signatory</div>
+                  <div className="text-xs text-slate-400 mt-0.5">Authorised Signatory</div>
                 </div>
               </div>
             </div>

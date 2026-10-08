@@ -147,7 +147,7 @@ export interface CustomerDetailJob extends Job {
 }
 
 /** Server-computed aggregates for the customer detail view. Financial fields
- *  are only present for super_admin responses. */
+ *  are only present for Admin responses. */
 export interface CustomerDetailStats {
   totalBookings: number;
   completedJobs: number;
@@ -159,7 +159,7 @@ export interface CustomerDetailStats {
 }
 
 /** GET /api/customers/[id] — the 360° customer file consumed by the detail
- *  page. Invoices/payments/quotes are super_admin-only and omitted otherwise. */
+ *  page. Invoices/payments/quotes are Admin-only and omitted otherwise. */
 export interface CustomerDetailSnapshot {
   customer: Customer;
   properties: Property[];
@@ -170,7 +170,7 @@ export interface CustomerDetailSnapshot {
   payments?: Payment[];
   quotes?: Quote[];
   complaints?: Complaint[];
-  /** §2 AMC contracts held by this customer (super_admin only). */
+  /** §2 AMC contracts held by this customer (Admin only). */
   amcContracts?: CustomerAmcContractSummary[];
 }
 
@@ -264,7 +264,7 @@ export interface JobPhoto {
   id: string;
   jobId: string;
   area: string; // "Kitchen", "Master Bedroom", "Balcony", "Bathroom 1"
-  photoType: "before" | "after";
+  photoType: "before" | "after" | "qc" | "rework";
   photoUrl: string;
   thumbnailUrl?: string;
   caption?: string;
@@ -549,7 +549,9 @@ export interface JobActivityEvent {
 }
 
 export interface Job {
-  id: string; // e.g. "JOB-2026-0841"
+  id: string; // internal database id (used in URLs)
+  /** The ONE readable Job ID shown to people, e.g. "JOB-10245". */
+  jobNumber?: string;
   customerId: string;
   propertyId: string;
   serviceId: string;
@@ -563,7 +565,7 @@ export interface Job {
   /** Server-resolved display names for assignedStaffIds (attached by the jobs
    *  API; ops_manager/staff cannot read the full user directory). */
   assignedStaffNames?: string[];
-  /** Job value — super_admin only. The server redacts this field (and
+  /** Job value — Admin only. The server redacts this field (and
    *  paymentStatus) for ops_manager and staff; treat as optional at runtime. */
   amount?: number;
   paymentStatus?: PaymentStatus;

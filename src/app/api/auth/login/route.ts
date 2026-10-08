@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/server/prisma";
 import { createSession, toSessionUser } from "@/lib/server/session";
 import { recordAudit } from "@/lib/server/audit";
-import { grantsFor, workspaceFor, navFor, ROLE_LABELS } from "@/lib/rbac";
+import { grantsFor, workspaceFor, navFor, ROLE_LABELS, canSignIn } from "@/lib/rbac";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 
@@ -81,6 +81,13 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { success: false, error: "Invalid email or password." },
         { status: 401 }
+      );
+    }
+
+    if (!canSignIn(user.role)) {
+      return NextResponse.json(
+        { success: false, error: "This account type does not sign in. Customers use the secure service link sent to them." },
+        { status: 403 }
       );
     }
 

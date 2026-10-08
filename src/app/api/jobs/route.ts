@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nextJobSerial } from "@/lib/server/job-serial";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
@@ -214,6 +215,7 @@ export async function POST(request: Request) {
     const result = await prisma.$transaction(async (tx) => {
       const job = await tx.job.create({
         data: {
+          jobSerial: await nextJobSerial(tx),
           customerId,
           propertyId,
           serviceId: service.id,

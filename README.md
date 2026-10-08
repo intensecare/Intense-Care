@@ -1,134 +1,73 @@
-# Deep Cleaning Operations ERP (Intense Care)
+# Intense Care — Deep Cleaning Operations
 
-A production-grade, database-backed field-service ERP for deep-cleaning businesses, built on Next.js 14 (App Router) with TypeScript strict mode, Prisma 7 + PostgreSQL (Neon), Cloudinary evidence-photo storage, and 2Factor.in SMS OTP.
+A simple service-management app for a deep-cleaning business. **Four user types, one Job ID per job, one customer link per job.**
 
-Every entity lives in PostgreSQL — there are **no hardcoded catalogs, demo data, or mock flows**: services, checklist rubrics, referral partners, commission rules, and user accounts are all created by the company through the app.
+| Who | Experience | What they do |
+|---|---|---|
+| **Admin** | **Operations** (desk) | Customers, properties, services, jobs, Field Manager assignment, scheduling, quality status, rework, customer approvals and issues, payments, reports, users, settings |
+| **Field Manager** | **My Jobs** (mobile) | Only their assigned jobs: Navigate → I'M HERE (GPS) → wait for customer → START SERVICE → checklist by area → before/after photos + notes → COMPLETE WORK → fix rework → SUBMIT FOR QC |
+| **QC** | **Quality** (mobile) | Jobs waiting for inspection → INSPECT → PASS or REWORK REQUIRED (area · issue · photo · comment) → reinspection (PASS / REWORK AGAIN), full history kept |
+| **Customer** | **My Service** (secure link, no login) | The page follows the job: View service → CONFIRM & START → progress → quality check pending → VIEW BEFORE / AFTER + APPROVE SERVICE → report, star rating, Google review |
 
-## Tech Stack
+## The job
 
-- **Next.js 14.2 (App Router)** + **React 18** + **TypeScript (strict)**
-- **Prisma 7** with the `@prisma/adapter-pg` driver adapter → **PostgreSQL** (built against [Neon](https://neon.tech); any Postgres works)
-- **Tailwind CSS** + minimal shadcn-style UI primitives (`button`, `dialog`, `input`, `tabs`)
-- **Cloudinary** — before/after evidence photos (stored in DB, served via CDN URLs)
-- **2Factor.in** — provider-generated OTP over SMS (AUTOGEN DLT template); no plaintext OTP codes ever touch the database
-- **bcryptjs** password hashing (cost 12) + HMAC-signed httpOnly session cookies
-
-## Architecture
-
-- **Server-authoritative APIs** under `src/app/api/*` with role-based authorization (`src/lib/server/authz.ts`). All lifecycle gates (state machine, OTP verification, assignment scope, dispatch window) are enforced on the server, not just in the UI.
-- **Database is the single source of truth.** The client store (`src/lib/app-context.tsx`) hydrates every collection from the APIs on sign-in and writes through on every action; optimistic updates roll back on server rejection.
-- **Nine RBAC roles, one permission matrix.** Authorization is `permission + scope + resource + action + approval authority` (`src/lib/rbac/`, documented in [docs/RBAC.md](docs/RBAC.md)). No route or page branches on a role name: the server resolves `requirePermission("jobs.assign")` / `authorizeJob(id, "jobs.start")` through the central matrix, and the UI asks the same engine (`can("…")`) to decide what to show.
-  - `super_admin` → **Business Overview** · `ops_manager` → **Operations** · `scheduler` → **Schedule** · `field_manager` → **My Jobs** (mobile) · `field_staff` → **My Tasks** (mobile) · `qc_inspector` → **Quality Queue** · `accounts` → **Finance** · `referral_partner` → **My Referrals** (portal) · `customer` → **My Services** (portal).
-  - Scopes `ALL | BRANCH | TEAM | ASSIGNED | OWN | NONE` decide which records a permission reaches; the server turns them into database filters.
-  - Approval authority: refunds above the configured limit and high-value discounts need an Operations Manager or Super Admin; user deletion and critical configuration are Super Admin only; audit history can never be deleted.
-  - AMC / NRI is a **customer-profile capability**, not a role.
-- **Contextual next action.** `getNextAction(role, jobState)` yields ONE primary action per role per state and the same table (`TRANSITION_PERMISSION`) gates status changes on the server.
-- **Customer** — the customer portal (`/my-services`, customer login) and the ONE tokenized secure link per job (`/customer/job/[token]`) for confirm → progress → approve → feedback. No other QR codes exist.
-- **Referral partner** — `/my-referrals` (partner login) plus the public lead link `/refer/[code]` and the code-scoped `/partner-portal/[code]`.
-- **Audit log** records user, role, action, resource, job, previous/new state, reason and device metadata for every important action.
-
-## Job Lifecycle (strict state machine)
+One Job ID (`JOB-10245`) from booking to feedback — rework never creates a new job:
 
 ```
-DRAFT → SCHEDULED → ASSIGNED → ARRIVED → CUSTOMER_VERIFIED → IN_PROGRESS
-      → WORK_COMPLETED → QUALITY_CHECK → (PASS | REWORK_REQUIRED → REWORK_COMPLETED
-      → REINSPECTION) → CUSTOMER_APPROVAL → COMPLETED → FEEDBACK_REQUESTED → CLOSED
+BOOKED → SCHEDULED → ASSIGNED → ARRIVED → CUSTOMER CONFIRMED → IN PROGRESS
+→ WORK COMPLETED → QC → PASS ─────────────→ CUSTOMER APPROVAL → COMPLETED → FEEDBACK
+                       └→ REWORK REQUIRED → Field Manager fixes → SUBMIT FOR QC → REINSPECTION ┘
 ```
 
-- `CUSTOMER_VERIFIED` can **only** be reached through `/api/otp/verify` (server-side 2Factor session check) — a client PATCH cannot skip it.
-- Work cannot start before OTP verification; mandatory checklist items must be completed before submitting for QC.
-- Referral commissions settle automatically when a referred job completes (idempotent).
+Server-enforced: arrival is GPS-checked against the property (`ARRIVAL_GEOFENCE_METERS`, a reason is required to proceed without GPS); work cannot start until the customer confirms on their link; required checklist items must be done before COMPLETE WORK; status changes are compare-and-set so double taps or two devices can't apply twice.
 
-## Ops Manager dispatch window
+## Customer link and QR
 
-Ops managers see jobs from the past through **today**, plus **tomorrow only after** the dispatch cutoff (`NEXT_DAY_DISPATCH_TIME`, default 20:00 local). The window is enforced in `/api/jobs` and `/api/jobs/[id]`; beyond-window jobs are never returned, and direct URL access renders as out-of-window.
+- **One secure link per job** — `APP_BASE_URL/customer/service/<token>`, valid for the whole job. 256-bit random token, only its SHA-256 hash is stored (plus an encrypted copy so Admin can re-share the same link). Admin can replace or turn it off. Old `/customer/job/<token>` links redirect.
+- The customer only ever receives: service, date, property, team names, checklist progress and **before/after** photos (served through a token-checked proxy). Never amounts, notes, QC findings or QC/rework photos.
+- **One optional property QR** (Admin → Properties → property → *Property QR*). Scanning it opens the customer page of that property's current or upcoming service. No other QR codes exist.
 
-## Getting Started
+## Screens and design system
 
-### Prerequisites
+- **Admin** — desktop sidebar (Dashboard, Jobs, Schedule, Quality, Customers, Properties, Services, Payments, Reports, Users, Settings); on phones a bottom bar with Home / Jobs / More.
+- **Field Manager** — Home / Jobs / Tasks / Profile. The job screen shows the journey, the current step and one sticky next-action button (I'm here → Start service → Checklist → Photos → Complete work → Submit for QC).
+- **QC** — Home / Quality / History / Profile. Large PASS and REWORK buttons; rework items take area, issue, severity, photo and comment.
+- **Customer link** — Home / Service / Reports / Profile: confirm & start, progress, before/after, approve, rating and Google review.
 
-- Node.js 18.17+ (20+ recommended)
-- A PostgreSQL database (Neon, Supabase, RDS, or local)
-- Cloudinary account (evidence photos)
-- 2Factor.in API key (customer OTP SMS)
+Shared building blocks live in `src/components/ui` and `src/components/job`: `StatusBadge` (labels and tones from `src/lib/status.ts`, always icon + text), `JobJourney`, `NextActionCard`, `DataTable` (table at ≥1280px, cards below), `Dialog` (bottom sheet on phones with a sticky footer), `Field`/`Input`/`Button` (44px+ touch targets, `loading` state), skeleton / empty / error / offline states. Palette: coral brand, green success, amber warning, red error, blue info, warm neutrals. Every screen is checked for horizontal overflow at 320, 360, 375, 390, 414, 430, 768, 1024, 1280 and 1440px.
 
-### 1. Install
+## Stack
+
+Next.js 14 (App Router) · React 18 · TypeScript strict · Prisma 7 + PostgreSQL · Tailwind · Cloudinary (before / after / QC / rework photos) · WhatsApp / SMS notifications with links.
+
+Authorization: `src/lib/rbac/` holds the one permission matrix (permission + scope). Every API route checks permission and record scope on the server — the UI hiding a button is never the guard. Sessions are HMAC-signed httpOnly cookies; the role is re-read from the database on every request. See [docs/RBAC.md](docs/RBAC.md).
+
+## Getting started
 
 ```bash
 npm install
+cp .env.example .env          # DATABASE_URL, ERP_SESSION_SECRET, APP_BASE_URL, CLOUDINARY_*, WHATSAPP_* …
+npx prisma migrate deploy     # apply migrations
+npm run db:seed               # creates the first Admin from SEED_SUPERADMIN_EMAIL / _PASSWORD
+npm run dev                   # http://localhost:3000
 ```
 
-### 2. Configure environment
+Production: `npm run build && npm run start`. **Set `APP_BASE_URL`** to your public https address — customer links and the property QR are built on it, and the app refuses to build them on localhost in production.
 
-```bash
-cp .env.example .env
-# then fill in DATABASE_URL, ERP_SESSION_SECRET, TWOFACTOR_API_KEY,
-# CLOUDINARY_* and the SEED_* credentials
-```
+First run: sign in as Admin → **Services** (add services and their checklist by area) → **Users** (add Field Managers and QC) → **Settings** (tax, Google review URL) → **New Job**.
 
-Every variable is documented in `.env.example`. `ERP_SESSION_SECRET` can be generated with `openssl rand -hex 32`.
+Upgrading an existing database: `migrate deploy` maps old accounts automatically — every desk role (super admin, ops manager, scheduler, accounts) becomes **Admin**, field staff become **Field Manager**, and customer / referral-partner logins are disabled (customers use their link). Existing jobs get readable Job IDs.
 
-### 3. Apply the database schema
+## Notifications
 
-```bash
-npx prisma migrate deploy     # apply committed migrations (production-safe)
-# or, for a brand-new empty database:
-npx prisma migrate dev
-```
+Composed for every step and logged (`SmsLog`); delivered when a provider is configured:
+- **WhatsApp Cloud API** — `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_TEMPLATE_NAME` (template with one body variable). The older `WHATSAPP_API_URL` webhook is still supported.
+- **SMS** — `TWOFACTOR_API_KEY`.
 
-### 4. Seed the first super admin
-
-```bash
-npm run db:seed
-```
-
-This creates **only** the initial super_admin from `SEED_SUPERADMIN_EMAIL` / `SEED_SUPERADMIN_PASSWORD`. No other data is seeded — create services, rubrics, partners, and staff in the app.
-
-### 5. Run
-
-```bash
-npm run dev          # development, http://localhost:3000
-npm run build        # production build (type-checks + lints)
-npm run start        # serve the production build
-```
-
-### 6. First-run checklist (in-app)
-
-1. Sign in as the seeded super admin.
-2. **Services & Rubrics** — create your service packages; add checklist rubric items (they instantiate onto every booking).
-3. **Users & Roles** — create accounts for the other roles (operations manager, scheduler, field managers, field staff, QC inspector, accounts). Customer and referral-partner logins are linked to their customer / partner record.
-4. **Settings** — configure GST rate/label, GSTIN, SAC code, dispatch cutoff, and Google review URL.
-5. Optionally **Referrals & Partners** — create commission rules and partners before book referral-attributed jobs.
-
-## Database migrations
-
-Prisma 7 runs non-interactively here (config: `prisma7.config.ts`). Migration history lives in `prisma/migrations/`; apply with `npx prisma migrate deploy`. The schema covers users, customers, properties, services + rubric items, jobs + checklist items, OTP challenges, SMS logs, quality checks/issues/rework, completion invites (sign-off + feedback), invoices/payments/expenses/quotes, referral partners/rules/entries/payouts, and an audit log.
-
-## Key API surface
-
-| Area | Endpoints |
-|---|---|
-| Auth | `POST /api/auth/login`, `GET /api/auth/session` (httpOnly signed cookie; returns grants + workspace) |
-| Role home | `GET /api/me/workspace` (counts, attention list, queue with next actions), `GET /api/me/customer`, `GET /api/me/partner` |
-| Jobs | `GET/POST /api/jobs`, `GET/PATCH /api/jobs/[id]`, `POST /api/jobs/[id]/completion-link` |
-| OTP | `POST /api/otp/send` / `verify` / `resend` (lead-worker gated, rate-limited) |
-| Directory | `GET/POST/PATCH/DELETE /api/users` (`users.manage`), `PUT /api/users` assignable roster (`users.view`) |
-| Catalog | `GET/POST/PATCH/PUT/DELETE /api/services` (rubric builder), `GET/POST /api/customers`, `/api/properties` |
-| Quality | `GET/POST/PATCH /api/quality`, `GET /api/checklist` |
-| Finance (`finance.view` / `invoice.view` OWN) | `GET/POST /api/finance` (payments, finalize/update invoice, refunds with approval), `GET/POST /api/referrals`, `GET /api/audit` (`audit.view`) |
-| Photos | `GET/POST /api/photos`, `DELETE /api/photos/[id]` (Cloudinary) |
-| Public tokenized | `GET/POST /api/customer/job/[token]` (the ONE customer link), `GET /api/partner-portal/[code]`, `GET/POST /api/refer/[code]` (referral leads) |
-| Settings | `GET /api/settings` (all roles), `PATCH /api/settings` (`settings.manage`) |
+Messages: job assigned (Field Manager), team arrived (customer link), QC ready / reinspection (QC), rework (Field Manager), approve your service (customer link).
 
 ## Tests
 
 ```bash
-npm test          # RBAC matrix / scope / next-action / workspace tests + dispatch-window tests
+npm test     # roles, permissions, routing, next action, state machine
 ```
-
-## Security notes
-
-- Session cookies are HMAC-SHA256 signed, httpOnly, `sameSite=lax`, and re-validated against the `User` table (deactivated users are rejected immediately).
-- OTP policy (expiry, max attempts, resend cooldown, per-job/per-phone hourly caps) is enforced server-side from environment variables; challenge state is database-tracked and single-use.
-- Customer phone numbers are normalized to the 10-digit subscriber form for 2Factor; only masked numbers are ever returned to clients.
-- The 2Factor API key, session secret, and all credentials are read exclusively from environment variables and never logged.

@@ -11,7 +11,7 @@ const DONE_STATUSES = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
 
 /**
  * GET /api/users/staff-directory — the field-staff directory for the
- * operations desk (super_admin + ops_manager).
+ * operations desk (Admin + ops_manager).
  *
  * Returns every staff account with server-computed details: contact info,
  * assignment statistics (total/active/completed/upcoming/lead), open rework

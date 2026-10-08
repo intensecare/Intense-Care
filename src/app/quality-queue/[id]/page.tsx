@@ -1,49 +1,51 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { AdminLayout } from "@/components/common/AdminLayout";
-import { PageHeader } from "@/components/common/PageHeader";
-import { JobStatusBadge } from "@/components/common/JobStatusBadge";
-import { BeforeAfterGallery } from "@/components/common/BeforeAfterGallery";
+import { QualityShell } from "@/components/quality/QualityShell";
+import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
-import { cn, formatDate, formatTimeSlot } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { CheckCircle2, AlertTriangle, Plus, X, Loader2, ShieldCheck } from "lucide-react";
-import type { Job } from "@/lib/types";
+import { compressImageForUpload } from "@/lib/image-compress";
+import { cn, formatDate, formatDateTime, formatTimeSlot } from "@/lib/utils";
+import { CheckCircle2, AlertTriangle, Plus, X, Loader2, ShieldCheck, Camera, RotateCcw, MapPin, ClipboardList, Check } from "lucide-react";
+import type { Job, JobPhoto } from "@/lib/types";
 
 type DeskJob = Job & { customerName?: string; propertyTitle?: string; service?: { name: string } };
-type DraftIssue = { area: string; itemDescription: string; severity: "minor" | "major" | "critical"; notes: string };
+type Severity = "minor" | "major" | "critical";
+type DraftIssue = { area: string; issue: string; comment: string; severity: Severity; photo?: JobPhoto };
+
+const INSPECTABLE = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"];
 
 /**
- * QC inspection screen (§10 / §23) — optimized for speed:
- * job → checklist (tap ⚠ to raise an issue in one step) → before/after →
- * [PASS] or [REWORK REQUIRED]. The score is derived from the issues raised.
+ * QUALITY CHECK — one job.
+ * Service details, checklist, before/after photos and work notes → [PASS] or
+ * [REWORK REQUIRED] (area · issue · photo · comment → [CREATE REWORK]).
+ * Reinspection offers PASS or REWORK AGAIN. Every round stays in the history;
+ * rework always stays on the SAME job.
  */
-export default function QualityInspectPage() {
+function QualityInspect() {
   const params = useParams();
   const router = useRouter();
   const jobId = String(params?.id ?? "");
-  const { jobs, checklistItems, photos, reworkTasks, qualityIssues, submitQualityCheck, reinspectAndPassQC, refreshJobs, refreshQuality, refreshPhotos } = useApp();
+  const { jobs, checklistItems, photos, qualityIssues, qualityChecks, submitQualityCheck, reinspectAndPassQC, addJobPhoto, refreshJobs, refreshQuality, refreshPhotos } = useApp();
   const { can } = useAuth();
 
   const job = jobs.find((j) => j.id === jobId) as DeskJob | undefined;
   const checklist = useMemo(() => checklistItems.filter((c) => c.jobId === jobId), [checklistItems, jobId]);
   const jobPhotos = useMemo(() => photos.filter((p) => p.jobId === jobId), [photos, jobId]);
+  const history = useMemo(() => qualityChecks.filter((q) => q.jobId === jobId).sort((a, b) => (b.inspectedAt ?? "").localeCompare(a.inspectedAt ?? "")), [qualityChecks, jobId]);
   const pastIssues = useMemo(() => qualityIssues.filter((i) => i.jobId === jobId), [qualityIssues, jobId]);
-  const openRework = useMemo(() => reworkTasks.filter((t) => t.jobId === jobId && t.status !== "completed"), [reworkTasks, jobId]);
 
+  const [mode, setMode] = useState<"review" | "rework">("review");
   const [issues, setIssues] = useState<DraftIssue[]>([]);
-  const [notes, setNotes] = useState("");
-  const [adding, setAdding] = useState<{ area: string; itemDescription: string } | null>(null);
-  const [severity, setSeverity] = useState<DraftIssue["severity"]>("major");
-  const [issueNotes, setIssueNotes] = useState("");
+  const [draft, setDraft] = useState<DraftIssue>({ area: "", issue: "", comment: "", severity: "major" });
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -62,36 +64,53 @@ export default function QualityInspectPage() {
     void fetch("/api/quality", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start-inspection", jobId }) }).then(() => refreshJobs());
   }, [job, started, jobId, can, refreshJobs]);
 
+  const areas = useMemo(() => {
+    const list = Array.from(new Set([...checklist.map((c) => c.area), ...jobPhotos.map((p) => p.area)]));
+    return list.length ? list : ["General"];
+  }, [checklist, jobPhotos]);
+
+  useEffect(() => {
+    if (!draft.area && areas.length) setDraft((d) => ({ ...d, area: areas[0] }));
+  }, [areas, draft.area]);
+
   if (!job) {
     return (
-      <AdminLayout>
-        <div className="p-12 text-center bg-white rounded-lg border border-slate-200 text-sm text-slate-500">Job not found or outside your queue.</div>
-      </AdminLayout>
+      <QualityShell title="Quality Check" backHref="/quality-queue">
+        <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">Job not found or not waiting for a quality check.</div>
+      </QualityShell>
     );
   }
 
   const reinspect = ["REWORK_COMPLETED", "REINSPECTION"].includes(job.status);
-  const inspectable = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"].includes(job.status);
-  const areas = Array.from(new Set(checklist.map((c) => c.area)));
-  const itemsTotal = Math.max(checklist.length, 1);
-  const flagged = new Set(issues.map((i) => `${i.area}::${i.itemDescription}`));
-  const score = Math.max(0, Math.round(100 - (issues.reduce((acc, i) => acc + (i.severity === "critical" ? 3 : i.severity === "major" ? 2 : 1), 0) / itemsTotal) * 100));
+  const inspectable = INSPECTABLE.includes(job.status) && can("qc.inspect");
 
-  const addIssue = () => {
-    if (!adding) return;
-    setIssues((prev) => [...prev, { area: adding.area, itemDescription: adding.itemDescription, severity, notes: issueNotes }]);
-    setAdding(null);
-    setIssueNotes("");
-    setSeverity("major");
+  const onPhotoPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const prepared = await compressImageForUpload(String(ev.target?.result ?? ""));
+      const r = await addJobPhoto({ jobId, area: draft.area || "General", photoType: "qc", imageDataUrl: prepared.dataUrl, caption: draft.issue || undefined });
+      setUploading(false);
+      if (!r.success || !r.photo) setError(r.message);
+      else setDraft((d) => ({ ...d, photo: r.photo }));
+    };
+    reader.readAsDataURL(file);
   };
 
-  const decide = async (decision: "PASS" | "REWORK_REQUIRED") => {
+  const addDraft = () => {
+    if (!draft.issue.trim()) return;
+    setIssues((prev) => [...prev, { ...draft, issue: draft.issue.trim(), comment: draft.comment.trim() }]);
+    setDraft({ area: draft.area, issue: "", comment: "", severity: "major" });
+  };
+
+  const pass = async () => {
     setBusy(true);
     setError(null);
-    const res =
-      reinspect && decision === "PASS"
-        ? await reinspectAndPassQC(job.id, notes)
-        : await submitQualityCheck(job.id, decision === "PASS" ? 100 : score, decision, notes, issues);
+    const res = reinspect ? await reinspectAndPassQC(job.id, "") : await submitQualityCheck(job.id, 100, "PASS", "", []);
     setBusy(false);
     if (!res.success) {
       setError(res.message);
@@ -101,169 +120,268 @@ export default function QualityInspectPage() {
     router.push("/quality-queue");
   };
 
-  return (
-    <AdminLayout>
-      <PageHeader
-        title={`Quality Inspection · ${job.id}`}
-        description={`${job.service?.name ?? "Service"} for ${job.customerName ?? "Customer"} · ${formatDate(job.scheduledDate)} ${formatTimeSlot(job.scheduledTimeSlot)}`}
-        breadcrumbs={[{ label: "Quality Queue", href: "/quality-queue" }, { label: job.id }]}
-        badge={<JobStatusBadge status={job.status} />}
-      />
+  const createRework = async () => {
+    const all = draft.issue.trim() ? [...issues, { ...draft, issue: draft.issue.trim(), comment: draft.comment.trim() }] : issues;
+    if (all.length === 0) return;
+    setBusy(true);
+    setError(null);
+    const score = Math.max(0, 100 - all.length * 10);
+    const res = await submitQualityCheck(
+      job.id,
+      score,
+      "REWORK_REQUIRED",
+      "",
+      all.map((i) => ({ area: i.area, itemDescription: i.issue, severity: i.severity, notes: i.comment }))
+    );
+    setBusy(false);
+    if (!res.success) {
+      setError(res.message);
+      return;
+    }
+    await refreshJobs();
+    await refreshQuality();
+    router.push("/quality-queue");
+  };
 
-      {error && <div className="mb-4 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+  const pendingCount = issues.length + (draft.issue.trim() ? 1 : 0);
+  const action = !inspectable ? undefined : mode === "review" ? (
+    <div className="grid grid-cols-2 gap-2">
+      <Button size="lg" variant="outline" className="border-amber-400 text-amber-800 hover:bg-amber-50 px-2" disabled={busy} onClick={() => { setMode("rework"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+        <RotateCcw className="h-5 w-5" aria-hidden /> {reinspect ? "REWORK AGAIN" : "REWORK"}
+      </Button>
+      <Button size="lg" variant="success" loading={busy} onClick={() => void pass()}>
+        <ShieldCheck className="h-5 w-5" aria-hidden /> PASS
+      </Button>
+    </div>
+  ) : (
+    <Button size="lg" className="w-full bg-amber-500 hover:bg-amber-600" disabled={pendingCount === 0 || uploading} loading={busy} onClick={() => void createRework()}>
+      <AlertTriangle className="h-5 w-5" aria-hidden /> CREATE REWORK{pendingCount ? ` · ${pendingCount}` : ""}
+    </Button>
+  );
+
+  const before = (a: string) => jobPhotos.filter((p) => p.area === a && p.photoType === "before");
+  const after = (a: string) => jobPhotos.filter((p) => p.area === a && p.photoType === "after");
+  const reworkPhotos = jobPhotos.filter((p) => p.photoType === "rework");
+
+  return (
+    <QualityShell title={job.customerName ?? job.id} subtitle={reinspect ? "Reinspection" : "Quality Check"} backHref="/quality-queue" action={action}>
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhotoPicked} />
+
+      {error && (
+        <div className="rounded-2xl bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-3 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
       {!inspectable && (
-        <div className="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          This job is not awaiting inspection right now ({job.status}). {openRework.length > 0 && `${openRework.length} rework item(s) still open.`}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">
+          This job is not waiting for a quality check right now.
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <BeforeAfterGallery photos={jobPhotos} title="Before / After evidence" />
-
-          <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
-            <div className="px-4 py-3 border-b border-zinc-100 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-900">Checklist — tap ⚠ to raise an issue</h3>
-              <span className="text-xs text-zinc-500">{checklist.filter((c) => c.status === "completed").length}/{checklist.length} done by team</span>
-            </div>
-            {areas.map((area) => (
-              <div key={area}>
-                <div className="px-4 py-1.5 bg-zinc-50 text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">{area}</div>
-                <ul className="divide-y divide-zinc-100">
-                  {checklist
-                    .filter((c) => c.area === area)
-                    .map((item) => {
-                      const isFlagged = flagged.has(`${item.area}::${item.task}`);
-                      return (
-                        <li key={item.id} className={cn("px-4 py-2.5 flex items-center gap-3", isFlagged && "bg-amber-50/60")}>
-                          <span className={cn("h-6 w-6 rounded-full flex items-center justify-center shrink-0", item.status === "completed" ? "bg-emerald-100 text-emerald-700" : item.status === "issue" ? "bg-amber-100 text-amber-700" : "bg-zinc-100 text-zinc-400")}>
-                            {item.status === "completed" ? <CheckCircle2 className="h-4 w-4" /> : item.status === "issue" ? <AlertTriangle className="h-4 w-4" /> : <span className="text-[10px]">○</span>}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <div className={cn("text-xs", isFlagged ? "text-amber-900 font-semibold" : "text-zinc-800")}>{item.task}</div>
-                            {item.issueNotes && <div className="text-[11px] text-amber-700">Team note: {item.issueNotes}</div>}
-                          </div>
-                          {inspectable && can("qc.rework") && !isFlagged && (
-                            <button onClick={() => setAdding({ area: item.area, itemDescription: item.task })} className="h-8 px-2.5 rounded-md text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 hover:bg-amber-100 inline-flex items-center gap-1">
-                              <AlertTriangle className="h-3.5 w-3.5" /> Issue
-                            </button>
-                          )}
-                        </li>
-                      );
-                    })}
-                </ul>
-              </div>
-            ))}
-            {checklist.length === 0 && <div className="p-6 text-center text-xs text-zinc-500">No checklist on this service.</div>}
-          </div>
-
-          {pastIssues.length > 0 && (
-            <div className="rounded-lg border border-zinc-200 bg-white p-4">
-              <h3 className="text-sm font-semibold text-zinc-900 mb-2">Previous issues on this job</h3>
-              <ul className="space-y-1 text-xs">
-                {pastIssues.map((i) => (
-                  <li key={i.id} className="flex items-center justify-between">
-                    <span>
-                      <span className="font-semibold">{i.area}</span> · {i.itemDescription}
-                    </span>
-                    <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", i.status === "resolved" || i.status === "reinspected_pass" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>{i.status.replace(/_/g, " ")}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+      {/* Service details */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 font-mono">{job.jobNumber ?? job.id}</span>
+          {!inspectable ? (
+            <StatusBadge status={job.status} />
+          ) : reinspect ? (
+            <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">Reinspection</span>
+          ) : (
+            <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">First inspection</span>
           )}
         </div>
-
-        <div className="space-y-4">
-          <div className="rounded-lg border border-zinc-200 bg-white p-4 space-y-3 sticky top-20">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-900">Result</h3>
-              <span className={cn("text-2xl font-semibold", issues.length ? "text-amber-700" : "text-emerald-700")}>{issues.length ? `${score}%` : "100%"}</span>
-            </div>
-
-            {issues.length === 0 ? (
-              <p className="text-xs text-zinc-500">No issues raised. Pass the job or tap ⚠ next to a checklist item.</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {issues.map((i, idx) => (
-                  <li key={idx} className="text-xs rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-semibold text-amber-900">{i.area}: {i.itemDescription}</div>
-                      <div className="text-[11px] text-amber-800">{i.severity}{i.notes ? ` — ${i.notes}` : ""}</div>
-                    </div>
-                    <button onClick={() => setIssues((prev) => prev.filter((_, k) => k !== idx))} className="text-amber-700 hover:text-amber-900">
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {inspectable && can("qc.rework") && (
-              <button onClick={() => setAdding({ area: areas[0] ?? "General", itemDescription: "" })} className="w-full h-9 rounded-md border border-dashed border-zinc-300 text-xs text-zinc-600 hover:bg-zinc-50 inline-flex items-center justify-center gap-1">
-                <Plus className="h-3.5 w-3.5" /> Add issue
-              </button>
-            )}
-
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Inspector notes (optional)" rows={2} className="w-full rounded-md border border-zinc-200 px-3 py-2 text-xs" />
-
-            {inspectable && (
-              <div className="grid grid-cols-1 gap-2 pt-1">
-                {can("qc.pass") && (
-                  <Button disabled={busy || issues.length > 0} onClick={() => decide("PASS")} className="h-11 text-sm text-white bg-emerald-600 hover:bg-emerald-700 border-emerald-600">
-                    {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ShieldCheck className="h-4 w-4 mr-2" />} PASS
-                  </Button>
-                )}
-                {can("qc.rework") && (
-                  <Button variant="destructive" disabled={busy || issues.length === 0} onClick={() => decide("REWORK_REQUIRED")} className="h-11 text-sm">
-                    {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <AlertTriangle className="h-4 w-4 mr-2" />} REWORK REQUIRED ({issues.length})
-                  </Button>
-                )}
-              </div>
-            )}
-            <Link href="/quality-queue" className="block text-center text-[11px] text-zinc-400 pt-1">Back to queue</Link>
-          </div>
+        <div className="text-lg font-semibold text-slate-900">{job.service?.name ?? "Service"}</div>
+        <div className="text-sm text-slate-600 flex items-start gap-1.5">
+          <MapPin className="h-4 w-4 mt-0.5 shrink-0 text-slate-400" /> {job.propertyTitle ?? "Property"}
         </div>
+        <div className="text-sm text-slate-500">
+          {formatDate(job.scheduledDate)} · {formatTimeSlot(job.scheduledTimeSlot)}
+        </div>
+        {job.notes && <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700"><strong>Work notes:</strong> {job.notes}</div>}
       </div>
 
-      {adding && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full border border-slate-200 p-5 space-y-3 text-xs">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-900">Raise an issue</h3>
-              <button onClick={() => setAdding(null)} className="text-slate-400 hover:text-slate-900"><X className="h-4 w-4" /></button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Area</label>
-                <select value={adding.area} onChange={(e) => setAdding({ ...adding, area: e.target.value })} className="w-full h-9 rounded-md border border-slate-200 px-2">
-                  {(areas.length ? areas : ["General"]).map((a) => <option key={a}>{a}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Severity</label>
-                <select value={severity} onChange={(e) => setSeverity(e.target.value as DraftIssue["severity"])} className="w-full h-9 rounded-md border border-slate-200 px-2">
-                  <option value="minor">Minor</option>
-                  <option value="major">Major</option>
-                  <option value="critical">Critical</option>
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">What is wrong?</label>
-              <Input autoFocus value={adding.itemDescription} onChange={(e) => setAdding({ ...adding, itemDescription: e.target.value })} placeholder="e.g. Mirror not cleaned properly" className="text-xs" />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Instruction for the team (optional)</label>
-              <Input value={issueNotes} onChange={(e) => setIssueNotes(e.target.value)} placeholder="e.g. Re-clean with glass cleaner, wipe streaks" className="text-xs" />
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="outline" size="sm" onClick={() => setAdding(null)}>Cancel</Button>
-              <Button size="sm" className="text-white" disabled={!adding.itemDescription.trim()} onClick={addIssue}>Add issue</Button>
-            </div>
+      {mode === "rework" && inspectable && (
+        <section className="rounded-2xl border border-amber-300 bg-white shadow-sm overflow-hidden">
+          <div className="px-5 py-4 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+            <div className="text-lg font-semibold text-amber-900">{reinspect ? "Rework again" : "Rework required"}</div>
+            <button onClick={() => setMode("review")} className="text-sm font-semibold text-amber-800">Cancel</button>
           </div>
-        </div>
+          {issues.length > 0 && (
+            <ul className="divide-y divide-slate-100 border-b border-slate-100">
+              {issues.map((i, idx) => (
+                <li key={idx} className="px-5 py-3 flex items-start gap-3">
+                  {i.photo ? <img src={i.photo.thumbnailUrl || i.photo.photoUrl} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0" /> : <span className="h-12 w-12 rounded-lg bg-slate-100 shrink-0" />}
+                  <div className="flex-1 min-w-0 text-sm">
+                    <div className="font-semibold text-slate-900">{i.area}: {i.issue} <span className="text-xs font-semibold text-slate-500 capitalize">· {i.severity}</span></div>
+                    {i.comment && <div className="text-slate-500">{i.comment}</div>}
+                  </div>
+                  <button onClick={() => setIssues((prev) => prev.filter((_, k) => k !== idx))} className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100 inline-flex items-center justify-center" aria-label="Remove">
+                    <X className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="p-5 space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-slate-700">Area</label>
+              <div className="flex flex-wrap gap-2">
+                {areas.map((a) => (
+                  <button key={a} type="button" onClick={() => setDraft({ ...draft, area: a })} className={cn("h-10 px-3 rounded-xl text-sm font-medium border", draft.area === a ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200")}>
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="qc-issue" className="text-sm font-semibold text-slate-700">Issue</label>
+              <input id="qc-issue" value={draft.issue} onChange={(e) => setDraft({ ...draft, issue: e.target.value })} placeholder="e.g. Mirror has streaks" className="w-full h-12 rounded-xl border border-slate-200 px-3 text-base focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-sm font-semibold text-slate-700">Severity</span>
+              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Severity">
+                {(["minor", "major", "critical"] as const).map((sv) => (
+                  <button key={sv} type="button" role="radio" aria-checked={draft.severity === sv} onClick={() => setDraft({ ...draft, severity: sv })} className={cn("h-11 rounded-xl border text-sm font-semibold capitalize", draft.severity === sv ? (sv === "critical" ? "bg-red-600 border-red-600 text-white" : sv === "major" ? "bg-amber-500 border-amber-500 text-white" : "bg-zinc-900 border-zinc-900 text-white") : "bg-white border-slate-200 text-slate-600")}>
+                    {sv}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-slate-700">Photo</label>
+              {draft.photo ? (
+                <div className="flex items-center gap-3">
+                  <img src={draft.photo.thumbnailUrl || draft.photo.photoUrl} alt="" className="h-16 w-16 rounded-xl object-cover" />
+                  <button onClick={() => setDraft({ ...draft, photo: undefined })} className="text-sm text-slate-500 underline">Remove</button>
+                </div>
+              ) : (
+                <button type="button" disabled={uploading} onClick={() => cameraRef.current?.click()} className="h-12 w-full rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm font-semibold text-slate-700 inline-flex items-center justify-center gap-2">
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} ADD PHOTO
+                </button>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="qc-comment" className="text-sm font-semibold text-slate-700">Comment (optional)</label>
+              <textarea id="qc-comment" rows={2} value={draft.comment} onChange={(e) => setDraft({ ...draft, comment: e.target.value })} placeholder="How to fix it" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            </div>
+            <button type="button" disabled={!draft.issue.trim()} onClick={addDraft} className="h-11 w-full rounded-xl border border-slate-300 text-sm font-semibold text-slate-700 inline-flex items-center justify-center gap-2 disabled:opacity-40">
+              <Plus className="h-4 w-4" /> Add another issue
+            </button>
+          </div>
+        </section>
       )}
-    </AdminLayout>
+
+      {/* Before / After */}
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 text-base font-semibold text-slate-900">Before / After</div>
+        <ul className="divide-y divide-slate-100">
+          {areas.map((a) => (
+            <li key={a} className="p-5 space-y-2">
+              <div className="text-sm font-semibold text-slate-900">{a}</div>
+              <div className="grid grid-cols-2 gap-2">
+                {[{ label: "BEFORE", list: before(a) }, { label: "AFTER", list: after(a) }].map(({ label, list }) => (
+                  <div key={label}>
+                    <div className="text-xs font-semibold text-slate-400 mb-1">{label}</div>
+                    {list.length ? (
+                      <a href={list[0].photoUrl} target="_blank" rel="noreferrer">
+                        <img src={list[0].thumbnailUrl || list[0].photoUrl} alt={`${label} ${a}`} className="aspect-[4/3] w-full rounded-xl object-cover" />
+                      </a>
+                    ) : (
+                      <div className="aspect-[4/3] w-full rounded-xl bg-slate-100 text-xs text-slate-400 flex items-center justify-center">No photo</div>
+                    )}
+                    {list.length > 1 && <div className="text-xs text-slate-400 mt-1">+{list.length - 1} more</div>}
+                  </div>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Checklist */}
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="text-base font-semibold text-slate-900 flex items-center gap-2"><ClipboardList className="h-5 w-5 text-slate-400" /> Checklist</div>
+          <div className="text-sm text-slate-500">{checklist.filter((c) => c.status === "completed" || c.status === "skipped").length}/{checklist.length} done</div>
+        </div>
+        {Array.from(new Set(checklist.map((c) => c.area))).map((area) => (
+          <div key={area}>
+            <div className="px-5 py-2 bg-slate-50 text-xs font-semibold text-slate-600 uppercase tracking-wide">{area}</div>
+            <ul className="divide-y divide-slate-100">
+              {checklist.filter((c) => c.area === area).map((item) => {
+                const done = item.status === "completed" || item.status === "skipped";
+                return (
+                  <li key={item.id} className="px-5 py-2.5 flex items-center gap-3 text-sm">
+                    <span className={cn("h-6 w-6 rounded-full flex items-center justify-center shrink-0", done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400")}>
+                      {done ? <Check className="h-4 w-4" /> : <span className="text-xs">○</span>}
+                    </span>
+                    <span className={done ? "text-slate-800" : "text-slate-500"}>{item.task}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+        {checklist.length === 0 && <div className="p-6 text-center text-sm text-slate-500">No checklist on this service.</div>}
+      </section>
+
+      {reworkPhotos.length > 0 && (
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5 space-y-2">
+          <div className="text-base font-semibold text-slate-900">Rework photos</div>
+          <div className="flex gap-2 overflow-x-auto">
+            {reworkPhotos.map((p) => (
+              <a key={p.id} href={p.photoUrl} target="_blank" rel="noreferrer" className="shrink-0 text-center">
+                <img src={p.thumbnailUrl || p.photoUrl} alt="" className="h-24 w-24 rounded-xl object-cover" />
+                <span className="text-xs text-slate-500">{p.area}</span>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* History — every QC round on this job */}
+      {(history.length > 0 || pastIssues.length > 0) && (
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 text-base font-semibold text-slate-900">History</div>
+          <ul className="divide-y divide-slate-100">
+            {history.map((q) => {
+              const passed = q.status === "PASS";
+              const round = pastIssues.filter((i) => i.qualityCheckId === q.id);
+              return (
+                <li key={q.id} className="px-5 py-4 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={cn("inline-flex items-center gap-1.5 text-sm font-semibold", passed ? "text-emerald-700" : "text-amber-800")}>
+                      {passed ? <CheckCircle2 className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />} {passed ? "Passed" : "Rework required"}
+                    </span>
+                    <span className="text-xs text-slate-400">{q.inspectedAt ? formatDateTime(q.inspectedAt) : ""}</span>
+                  </div>
+                  {q.inspectorName && <div className="text-xs text-slate-500">by {q.inspectorName}</div>}
+                  {round.length > 0 && (
+                    <ul className="space-y-1">
+                      {round.map((i) => (
+                        <li key={i.id} className="text-sm text-slate-700 flex items-start justify-between gap-2">
+                          <span><strong>{i.area}:</strong> {i.itemDescription}{i.notes && i.notes !== i.itemDescription ? ` — ${i.notes}` : ""}</span>
+                          <span className={cn("shrink-0 px-2 py-0.5 rounded-lg text-xs font-semibold", i.status === "resolved" || i.status === "reinspected_pass" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")}>
+                            {i.status === "resolved" ? "Fixed" : i.status === "reinspected_pass" ? "Passed" : "Open"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+    </QualityShell>
+  );
+}
+
+export default function QualityInspectPage() {
+  return (
+    <Suspense>
+      <QualityInspect />
+    </Suspense>
   );
 }

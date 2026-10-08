@@ -54,7 +54,8 @@ export async function GET(request: Request, { params }: { params: { token: strin
 
     const [checklist, photos, qc, team, complaintCount, jobRow] = await Promise.all([
       prisma.jobChecklistItem.findMany({ where: { jobId: job.id }, orderBy: { id: "asc" } }),
-      prisma.jobPhoto.findMany({ where: { jobId: job.id }, orderBy: { uploadedAt: "asc" } }),
+      // Before/after only — QC and rework evidence is internal.
+      prisma.jobPhoto.findMany({ where: { jobId: job.id, photoType: { in: ["before", "after"] } }, orderBy: { uploadedAt: "asc" } }),
       prisma.qualityCheck.findFirst({ where: { jobId: job.id }, orderBy: { createdAt: "desc" } }),
       loadTeamNames(job.id),
       prisma.complaint.count({ where: { jobId: job.id } }),
@@ -71,6 +72,7 @@ export async function GET(request: Request, { params }: { params: { token: strin
           customerFeedbackRating: true,
           customerFeedbackAt: true,
           googleReviewClicked: true,
+          jobSerial: true,
         },
       }),
     ]);
@@ -80,7 +82,7 @@ export async function GET(request: Request, { params }: { params: { token: strin
       success: true,
       data: {
         job: {
-          id: job.id,
+          id: jobRow?.jobSerial ?? job.id,
           status: job.status,
           serviceName: (await prisma.service.findUnique({ where: { id: job.serviceId }, select: { name: true } }))?.name ?? "Service",
           scheduledDate: job.scheduledDate,
@@ -93,17 +95,17 @@ export async function GET(request: Request, { params }: { params: { token: strin
         property: { title: job.propertyName, address: job.propertyAddress },
         customer: { name: job.customerName, phoneMasked: `******${job.customerPhone.replace(/[^0-9]/g, "").slice(-4)}` },
         team,
-        checklist: checklist.map((c) => ({ id: c.id, area: c.area, task: c.task, completed: c.status === "completed", status: c.status })),
+        checklist: checklist.map((c) => ({ id: c.id, area: c.area, task: c.task, completed: c.status === "completed" || c.status === "skipped" })),
         photos: photos.map((p) => ({
           id: p.id,
           area: p.area,
           photoType: p.photoType,
           url: `/api/secure-photo/${p.id}?t=${encodeURIComponent(params.token)}`,
-          thumbnailUrl: p.thumbnailUrl,
           caption: p.caption,
           uploadedAt: p.uploadedAt.toISOString(),
         })),
-        qualityCheck: qc ? { score: qc.score, decision: qc.decision, passed: qc.decision === "PASS" } : null,
+        // Only a PASS is customer-facing; rework details stay internal.
+        qualityCheck: qc && qc.decision === "PASS" ? { passed: true } : null,
         approval: jobRow?.approvedAt
           ? { approvedAt: jobRow.approvedAt.toISOString(), approvedBy: jobRow.approvedBy, method: jobRow.approvalMethod }
           : null,
@@ -175,15 +177,17 @@ export async function POST(request: Request, { params }: { params: { token: stri
       if (["CUSTOMER_VERIFIED", "IN_PROGRESS", "WORK_COMPLETED"].includes(jobRow.status) || jobRow.customerConfirmedAt) {
         return NextResponse.json({ success: true, data: { alreadyConfirmed: true, status: jobRow.status } });
       }
-      if (jobRow.status !== "ARRIVED" && jobRow.status !== "ASSIGNED") {
-        return fail(`Confirmation is possible only while the team is on site (current: ${jobRow.status}).`, 409);
+      // Confirmation follows the team's verified arrival — never before it.
+      if (jobRow.status !== "ARRIVED") {
+        return fail("You can confirm once your team has arrived. This page will update when they do.", 409);
       }
 
       const now = new Date();
-      await prisma.job.update({
-        where: { id: job.id },
+      const moved = await prisma.job.updateMany({
+        where: { id: job.id, status: "ARRIVED" },
         data: { status: "CUSTOMER_VERIFIED", customerConfirmedAt: now, updatedAt: now },
       });
+      if (moved.count === 0) return NextResponse.json({ success: true, data: { alreadyConfirmed: true, status: "CUSTOMER_VERIFIED" } });
       await recordActivity({
         jobId: job.id,
         type: "STATUS_CHANGED",
@@ -230,8 +234,8 @@ export async function POST(request: Request, { params }: { params: { token: stri
       }
 
       const now = new Date();
-      await prisma.job.update({
-        where: { id: job.id },
+      const moved = await prisma.job.updateMany({
+        where: { id: job.id, status: jobRow.status, approvedAt: null },
         data: {
           status: "COMPLETED",
           approvedAt: now,
@@ -241,6 +245,9 @@ export async function POST(request: Request, { params }: { params: { token: stri
           updatedAt: now,
         },
       });
+      if (moved.count === 0) {
+        return NextResponse.json({ success: true, data: { alreadyApproved: true, status: "COMPLETED" } });
+      }
 
       await recordActivity({
         jobId: job.id,
@@ -298,10 +305,9 @@ export async function POST(request: Request, { params }: { params: { token: stri
         return fail("This job is closed — please contact support to raise an issue.", 409);
       }
 
-      const { ROLES, scopeOf } = await import("@/lib/rbac");
-      const ownerRoles = ROLES.filter((r) => scopeOf(r, "complaints.manage") !== "NONE" && r !== "super_admin");
+      // Customer issues are owned by the Admin desk.
       const opsManager = await prisma.user.findFirst({
-        where: { role: { in: ownerRoles }, active: true },
+        where: { role: "admin", active: true },
         orderBy: { createdAt: "asc" },
       });
 

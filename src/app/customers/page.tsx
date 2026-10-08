@@ -1,21 +1,18 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
-import { formatCurrency } from "@/lib/utils";
+import { DataTable } from "@/components/ui/data-table";
+import { Notice, SkeletonList } from "@/components/ui/states";
 import {
   Users,
   Search,
   Plus,
-  Phone,
-  Mail,
   Building2,
-  Share2,
   Edit2,
   Trash2,
 } from "lucide-react";
@@ -29,8 +26,7 @@ import {
 import type { Customer } from "@/lib/types";
 
 export default function CustomersPage() {
-  const router = useRouter();
-  const { customers, properties, partners, createCustomer, updateCustomer, deleteCustomer } = useApp();
+  const { customers, properties, partners, createCustomer, updateCustomer, deleteCustomer, loading } = useApp();
   const { can } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -77,202 +73,59 @@ export default function CustomersPage() {
     }
   };
 
+  const propsOf = (id: string) => properties.filter((p) => p.customerId === id);
+
   return (
     <AdminLayout>
       <PageHeader
-        title="Customer Directory & Multi-Property Accounts"
-        description="Client contact records, WhatsApp routing, registered property portfolios, lifetime value, and referral source attribution."
-        breadcrumbs={[
-          { label: "Operations", href: "/" },
-          { label: "Customers" },
-        ]}
-        actions={
-          <Button
-            onClick={openCreate}
-            size="sm"
-            className="h-9 gap-1.5 bg-rose-500 text-white font-medium"
-          >
-            <Plus className="h-4 w-4" />
-            Register Customer
-          </Button>
-        }
+        title="Customers"
+        description={`${customers.length} customer${customers.length === 1 ? "" : "s"}`}
+        actions={can("customers.create") ? <Button onClick={openCreate}><Plus className="h-5 w-5" aria-hidden /> Add Customer</Button> : undefined}
       />
 
-      {/* Search Bar */}
-      <div className="bg-white border border-slate-200 rounded-lg p-3.5 mb-5 shadow-xs">
-        <div className="relative max-w-md">
-          <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <Input
-            type="text"
-            placeholder="Search by customer name, phone, or email..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 text-xs h-9 bg-slate-50 border-slate-200"
-          />
-        </div>
-        {actionError && (
-          <p className="mt-2 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
-            {actionError}
-          </p>
-        )}
+      <div className="relative mb-5 max-w-md">
+        <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" aria-hidden />
+        <Input type="search" placeholder="Search name, phone or email" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" aria-label="Search customers" />
       </div>
 
-      {/* Customers List */}
-      <div className="space-y-4">
-        {filteredCustomers.length === 0 ? (
-          <EmptyState
-            icon={Users}
-            title={customers.length === 0 ? "No customers registered yet" : "No customers match your search"}
-            description={
-              customers.length === 0
-                ? "Register residential or commercial property owners to track bookings, address access notes, and WhatsApp communication."
-                : "Try clearing your search query or registering a new customer."
-            }
-            actionLabel="Register Customer"
-            onAction={openCreate}
-          />
-        ) : (
-          filteredCustomers.map((c) => {
-            const custProps = properties.filter((p) => p.customerId === c.id);
-            const partner = partners.find((p) => p.id === c.referralPartnerId);
+      {actionError && <Notice tone="error" className="mb-4">{actionError}</Notice>}
 
-            return (
-              <div
-                key={c.id}
-                onClick={() => router.push(`/customers/${c.id}`)}
-                className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all space-y-4 cursor-pointer"
-                title="Open customer profile"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-900 text-base">{c.name}</span>
-                      <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800">
-                        {c.status}
-                      </span>
-                      {partner && (
-                        <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 flex items-center gap-1">
-                          <Share2 className="h-2.5 w-2.5" />
-                          Ref: {partner.code}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-500 flex items-center gap-4 flex-wrap">
-                      <span className="flex items-center gap-1 font-mono text-slate-700">
-                        <Phone className="h-3 w-3 text-slate-400" />
-                        {c.phone}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Mail className="h-3 w-3 text-slate-400" />
-                        {c.email}
-                      </span>
-                      <span className="text-slate-400">Source: {c.source}</span>
-                    </div>
-                  </div>
+      {loading && customers.length === 0 ? (
+        <SkeletonList rows={4} />
+      ) : customers.length === 0 ? (
+        <EmptyState icon={Users} title="No customers yet" description="Add your first customer, then book a job for them." actionLabel={can("customers.create") ? "Add customer" : undefined} onAction={openCreate} />
+      ) : filteredCustomers.length === 0 ? (
+        <EmptyState icon={Search} title="No matching customers" description="Try a different name or phone number." />
+      ) : (
+        <DataTable
+          caption="Customers"
+          rows={filteredCustomers}
+          rowKey={(c) => c.id}
+          href={(c) => `/customers/${c.id}`}
+          columns={[
+            { key: "name", header: "Customer", mobile: "title", cell: (c) => <span className="font-semibold text-zinc-950">{c.name}</span> },
+            { key: "phone", header: "Phone", mobile: "subtitle", cell: (c) => c.phone },
+            { key: "status", header: "Status", mobile: "badge", cell: (c) => <span className={c.status === "inactive" ? "inline-flex rounded-full bg-zinc-100 text-zinc-600 px-2.5 py-1 text-xs font-semibold" : "inline-flex rounded-full bg-emerald-50 text-emerald-800 px-2.5 py-1 text-xs font-semibold"}>{c.status === "inactive" ? "Inactive" : "Active"}</span> },
+            { key: "props", header: "Properties", cell: (c) => { const ps = propsOf(c.id); return ps.length ? <span className="inline-flex items-center gap-1.5"><Building2 className="h-4 w-4 text-zinc-400" aria-hidden />{ps.length === 1 ? ps[0].title : `${ps.length} properties`}</span> : <span className="text-zinc-400">None</span>; } },
+            { key: "jobs", header: "Jobs", cell: (c) => c.totalBookings ?? 0 },
+          ]}
+          actions={canEdit || canDelete ? (c) => (
+            <>
+              {canEdit && <Button variant="outline" size="sm" onClick={(e) => { e.preventDefault(); openEdit(c); }}><Edit2 className="h-4 w-4" aria-hidden /> Edit</Button>}
+              {canDelete && <Button variant="ghost" size="sm" className="text-red-700" onClick={(e) => { e.preventDefault(); setDeleteTarget({ id: c.id, name: c.name }); }}><Trash2 className="h-4 w-4" aria-hidden /> Delete</Button>}
+            </>
+          ) : undefined}
+        />
+      )}
 
-                  <div className="text-left sm:text-right">
-                    {(canEdit || canDelete) && (
-                      <div className="flex sm:justify-end gap-1.5 mb-1.5">
-                        {canEdit && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEdit(c);
-                            }}
-                            title="Edit customer"
-                          >
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActionError("");
-                              setDeleteTarget({ id: c.id, name: c.name });
-                            }}
-                            title="Delete customer"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </div>
-                    )}
-                    <div className="text-xs text-slate-400">Lifetime Revenue</div>
-                    <div className="text-base font-semibold text-slate-900">
-                      {typeof c.lifetimeRevenue === "number"
-                        ? formatCurrency(c.lifetimeRevenue)
-                        : "—"}
-                    </div>
-                    <div className="text-[11px] text-slate-500">{c.totalBookings} Bookings</div>
-                  </div>
-                </div>
-
-                {/* Registered Properties Grid */}
-                <div className="space-y-2">
-                  <span className="text-[11px] font-semibold text-slate-500">
-                    Registered Properties ({custProps.length})
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {custProps.map((p) => (
-                      <div
-                        key={p.id}
-                        className="p-3 rounded-lg border border-slate-100 bg-slate-50/70 text-xs space-y-1"
-                      >
-                        <div className="font-semibold text-slate-900 flex items-center gap-1.5">
-                          <Building2 className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                          {p.title}
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-relaxed truncate">
-                          {p.address}
-                        </p>
-                        <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1">
-                          <span className="capitalize">{p.propertyType} • {p.bedrooms || 3} BHK</span>
-                          {p.recurringService && (
-                            <span className="text-blue-600 font-semibold">
-                              Recurring: {p.recurringFrequency}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {c.notes && (
-                  <div className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded border border-slate-100">
-                    <strong>Notes:</strong> {c.notes}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* Register / Edit Customer (shared dialog) */}
-      <CustomerFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        partners={partners}
-        editing={editingCustomer}
-        onSubmit={handleFormSubmit}
-      />
-
-      {/* Delete Customer Confirmation */}
+      <CustomerFormDialog open={formOpen} onOpenChange={setFormOpen} partners={partners} editing={editingCustomer} onSubmit={handleFormSubmit} />
       <ConfirmModal
-        isOpen={deleteTarget !== null}
+        isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
-        title="Delete Customer"
-        description={`Permanently delete ${deleteTarget?.name ?? "this customer"}? Customers with booking history cannot be deleted — deactivate them instead.`}
-        confirmText="Delete Customer"
+        title="Delete customer?"
+        description={`${deleteTarget?.name ?? "This customer"} will be removed. Customers with jobs can't be deleted.`}
+        confirmText="Delete"
       />
     </AdminLayout>
   );

@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { cookies } from "next/headers";
 import { prisma } from "./prisma";
 import { logger } from "./logger";
-import { normalizeRole, type Role } from "@/lib/rbac/roles";
+import { normalizeRole, canSignIn, type Role } from "@/lib/rbac/roles";
 
 /**
  * Server-side session layer.
@@ -145,7 +145,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   if (!uid) return null;
 
   const user = await prisma.user.findUnique({ where: { id: uid } });
-  if (!user || !user.active) return null;
+  if (!user || !user.active || !canSignIn(user.role)) return null;
 
   return toSessionUser(user);
 }

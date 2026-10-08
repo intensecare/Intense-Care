@@ -1,4 +1,6 @@
 import React from "react";
+import Link from "next/link";
+import { ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PageHeaderProps {
@@ -10,59 +12,26 @@ interface PageHeaderProps {
   className?: string;
 }
 
-export function PageHeader({
-  title,
-  description,
-  badge,
-  actions,
-  breadcrumbs,
-  className,
-}: PageHeaderProps) {
+/** Page title + one line of context + the page's main action(s). */
+export function PageHeader({ title, description, badge, actions, breadcrumbs, className }: PageHeaderProps) {
+  const back = breadcrumbs?.filter((b) => b.href).slice(-1)[0];
   return (
-    <div className={cn("pb-4 border-b border-zinc-200 mb-6", className)}>
-      {breadcrumbs && breadcrumbs.length > 0 && (
-        <nav className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2 font-sans font-medium">
-          {breadcrumbs.map((crumb, idx) => (
-            <React.Fragment key={crumb.label}>
-              {crumb.href ? (
-                <a
-                  href={crumb.href}
-                  className="hover:text-zinc-900 transition-colors"
-                >
-                  {crumb.label}
-                </a>
-              ) : (
-                <span className="text-zinc-900 font-medium">{crumb.label}</span>
-              )}
-              {idx < breadcrumbs.length - 1 && (
-                <span className="text-zinc-300">/</span>
-              )}
-            </React.Fragment>
-          ))}
-        </nav>
+    <div className={cn("mb-6 sm:mb-8", className)}>
+      {back && (
+        <Link href={back.href!} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 mb-2 -ml-1">
+          <ChevronLeft className="h-4 w-4" aria-hidden /> {back.label}
+        </Link>
       )}
-
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-zinc-950 font-sans">
-              {title}
-            </h1>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-950">{title}</h1>
             {badge}
           </div>
-          {description && (
-            <p className="text-xs text-zinc-500 mt-1 leading-relaxed max-w-3xl">
-              {description}
-            </p>
-          )}
+          {description && <p className="text-sm text-zinc-500 mt-1.5 max-w-2xl">{description}</p>}
         </div>
-        {actions && (
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            {actions}
-          </div>
-        )}
+        {actions && <div className="flex items-center gap-2 shrink-0 flex-wrap">{actions}</div>}
       </div>
     </div>
   );
 }
-

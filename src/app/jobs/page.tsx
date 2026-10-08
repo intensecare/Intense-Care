@@ -5,12 +5,12 @@ import { useSearchParams } from "next/navigation";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
-import { JobStatusBadge, PaymentStatusBadge } from "@/components/common/JobStatusBadge";
+import { StatusBadge } from "@/components/common/JobStatusBadge";
+import { SkeletonList } from "@/components/ui/states";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { ASSIGNABLE_ROLES } from "@/lib/rbac";
 import { formatCurrency, formatDate, toLocalDateOffset, formatTimeSlot } from "@/lib/utils";
-import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import { JobStatus } from "@/lib/types";
 import { onDutyWorkerIds } from "@/lib/staff-availability";
 import {
@@ -29,11 +29,11 @@ import {
   UserPlus,
   Building2,
   X,
-  Loader2,
+  ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Field } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Dialog,
@@ -51,12 +51,10 @@ function JobsPageInner() {
     properties,
     services,
     users,
-    partners,
     createJob,
     createCustomer,
     createProperty,
-    currentRole,
-    systemSettings,
+    loading,
   } = useApp();
   const { can } = useAuth();
 
@@ -64,14 +62,7 @@ function JobsPageInner() {
 
   const searchParams = useSearchParams();
 
-  // Ops Managers operate inside the dispatch visibility window (past + today
-  // + tomorrow after the 8 PM cutoff). Enforced here for display consistency;
-  // the API enforces it authoritatively.
-  const isOps = currentRole === "ops_manager";
-  const opsVisibility = getOpsDateVisibility(new Date(), {
-    nextDayDispatchTime: systemSettings.nextDayDispatchTime || "20:00",
-  });
-  const allJobs = isOps ? filterJobsForOpsManager(jobs, opsVisibility) : jobs;
+  const allJobs = jobs;
 
   // Deep-link support: /jobs?q=... (navbar global search) and /jobs?create=true
   // ("New Booking" shortcut) now actually drive the page state.
@@ -79,25 +70,21 @@ function JobsPageInner() {
   const createParam = searchParams.get("create");
 
   const [searchQuery, setSearchQuery] = useState(initialSearch);
-  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") || "ALL");
   const [paymentFilter, setPaymentFilter] = useState<string>("ALL");
   const [workerFilter, setWorkerFilter] = useState<string>("ALL");
 
   // Status filter options with dynamic count
+  // Plain-language stages; each stage groups the statuses it covers.
   const statusOptions = useMemo(() => [
-    { value: "ALL", label: `All Statuses (${allJobs.length})` },
-    { value: "DRAFT", label: "Draft" },
-    { value: "SCHEDULED", label: "Scheduled" },
-    { value: "ASSIGNED", label: "Workers Assigned" },
-    { value: "ARRIVED", label: "Arrived (Awaiting Confirmation)" },
-    { value: "CUSTOMER_VERIFIED", label: "Customer Confirmed" },
-    { value: "IN_PROGRESS", label: "In Progress" },
-    { value: "WORK_COMPLETED", label: "Work Completed (QC Ready)" },
-    { value: "QUALITY_CHECK", label: "Quality Check" },
-    { value: "REWORK_REQUIRED", label: "Rework Required" },
+    { value: "ALL", label: `All jobs (${allJobs.length})` },
+    { value: "SCHEDULED", label: "Booked / Scheduled" },
+    { value: "ASSIGNED", label: "Field Manager Assigned" },
+    { value: "IN_PROGRESS", label: "Active (on site)" },
+    { value: "WORK_COMPLETED", label: "QC Pending" },
+    { value: "REWORK_REQUIRED", label: "Rework" },
     { value: "CUSTOMER_APPROVAL", label: "Customer Approval" },
     { value: "COMPLETED", label: "Completed" },
-    { value: "FEEDBACK_REQUESTED", label: "Feedback Collected" },
     { value: "CANCELLED", label: "Cancelled" },
   ], [allJobs.length]);
 
@@ -115,12 +102,6 @@ function JobsPageInner() {
       label: `${s.name} (${formatCurrency(s.basePrice)} • ~${s.estimatedDurationHours} hrs)`,
     })),
   [services]);
-
-  // Referral partner options
-  const partnerOptions = useMemo(() => [
-    { value: "", label: "Direct Booking (No Referral)" },
-    ...partners.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
-  ], [partners]);
 
   // Customer selection options
   const customerOptions = useMemo(() =>
@@ -165,7 +146,6 @@ function JobsPageInner() {
     }
     return busy;
   }, [jobs, scheduledDate, composedTimeSlot]);
-  const [referralPartnerId, setReferralPartnerId] = useState("");
   const [jobNotes, setJobNotes] = useState("");
 
   // Customer properties filter
@@ -187,13 +167,14 @@ function JobsPageInner() {
 
       const matchesSearch =
         job.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (job.jobNumber ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         customer?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         customer?.phone.includes(searchQuery) ||
         property?.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         service?.name.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesStatus =
-        statusFilter === "ALL" || job.status === statusFilter;
+        statusFilter === "ALL" || (STATUS_GROUPS[statusFilter] ?? [statusFilter]).includes(job.status);
       const matchesPayment =
         paymentFilter === "ALL" ||
         (can("finance.view") && job.paymentStatus === paymentFilter);
@@ -285,7 +266,7 @@ function JobsPageInner() {
         scheduledTimeSlot: composedTimeSlot,
         assignedStaffIds,
         notes: jobNotes,
-        referralPartnerId: referralPartnerId || undefined,
+        referralPartnerId: undefined,
       });
 
       if (!result.success) {
@@ -308,247 +289,105 @@ function JobsPageInner() {
     }
   };
 
+  const openCreate = () => {
+    setFormError(null);
+    setIsInlineCustomer(customers.length === 0);
+    setIsCreateOpen(true);
+  };
+  const managerName = (job: (typeof filteredJobs)[number]) =>
+    (job.assignedStaffNames ?? (job.assignedStaffIds || []).map((id) => users.find((u) => u.id === id)?.name).filter(Boolean))[0] ??
+    users.find((u) => u.id === job.assignedManagerId)?.name;
+  const filtersOn = searchQuery || statusFilter !== "ALL" || paymentFilter !== "ALL" || workerFilter !== "ALL";
+
   return (
     <AdminLayout>
       <PageHeader
-        title="Jobs Operational Register"
-        description="Comprehensive dispatch table for deep cleaning appointments, lifecycle tracking, field-worker dispatch, and status execution."
-        breadcrumbs={[
-          { label: "Operations", href: "/" },
-          { label: "Jobs Register" },
-        ]}
+        title="Jobs"
+        description={`${allJobs.length} job${allJobs.length === 1 ? "" : "s"} · every job keeps one Job ID from booking to feedback`}
         actions={
           can("jobs.create") ? (
-            <Button
-              onClick={() => {
-                setFormError(null);
-                setIsInlineCustomer(customers.length === 0);
-                setIsCreateOpen(true);
-              }}
-              size="sm"
-              className="h-9 gap-1.5 bg-rose-500 hover:bg-rose-600 text-white font-medium"
-            >
-              <Plus className="h-4 w-4" />
-              Book New Cleaning Job
+            <Button onClick={openCreate}>
+              <Plus className="h-5 w-5" aria-hidden /> New Job
             </Button>
           ) : undefined
         }
       />
 
-      {/* Filter Bar */}
-      <div className="bg-white border border-slate-200/90 rounded-lg p-3.5 mb-5 shadow-xs space-y-3">
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Search */}
-          <div className="relative flex-1">
-            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input
-              type="text"
-              placeholder="Search by Job ID, customer name, phone, address..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 text-xs h-9 bg-slate-50 border-slate-200"
-            />
+      {/* Filters */}
+      <div className="rounded-2xl border border-zinc-200 bg-white p-3 sm:p-4 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_14rem_14rem_auto] gap-3">
+          <div className="relative sm:col-span-2 lg:col-span-1">
+            <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" aria-hidden />
+            <Input type="search" placeholder="Search job ID, customer, phone" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" aria-label="Search jobs" />
             {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-3.5 w-3.5" />
+              <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 inline-flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-700" aria-label="Clear search">
+                <X className="h-4 w-4" />
               </button>
             )}
           </div>
-
-          {/* Status Filter */}
-          <SearchableSelect
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={statusOptions}
-            placeholder="All Statuses"
-            className="h-9"
-          />
-
-          {/* Payment Filter (super_admin only — money data is redacted for other roles) */}
+          <SearchableSelect value={statusFilter} onChange={setStatusFilter} options={statusOptions} placeholder="All statuses" className="h-11" />
+          <SearchableSelect value={workerFilter} onChange={setWorkerFilter} options={workerOptions} placeholder="All Field Managers" className="h-11" />
           {can("finance.view") && (
-            <select
-              value={paymentFilter}
-              onChange={(e) => setPaymentFilter(e.target.value)}
-              className="h-9 rounded-md border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-slate-900"
-            >
-              <option value="ALL">All Payments</option>
+            <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} aria-label="Payment" className="h-11 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-800">
+              <option value="ALL">All payments</option>
               <option value="UNPAID">Unpaid</option>
-              <option value="PARTIAL">Partially Paid</option>
-              <option value="PAID">Fully Paid</option>
+              <option value="PARTIAL">Part paid</option>
+              <option value="PAID">Paid</option>
             </select>
           )}
-
-          {/* Worker Filter */}
-          <SearchableSelect
-            value={workerFilter}
-            onChange={setWorkerFilter}
-            options={workerOptions}
-            placeholder="All Workers"
-            className="h-9"
-          />
         </div>
+        {filtersOn && (
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <span className="text-zinc-500">{filteredJobs.length} of {allJobs.length} jobs</span>
+            <button onClick={() => { setSearchQuery(""); setStatusFilter("ALL"); setPaymentFilter("ALL"); setWorkerFilter("ALL"); }} className="font-semibold text-rose-600">Clear filters</button>
+          </div>
+        )}
       </div>
 
-      {/* Operational Table or Empty State */}
-      {allJobs.length === 0 ? (
-        <EmptyState
-          icon={Briefcase}
-          title="No cleaning jobs scheduled yet"
-          description="Your dispatch queue is completely clean (zero dummy records). Click below to create your first customer booking and begin the operational lifecycle."
-          actionLabel="Book New Cleaning Job"
-          onAction={() => {
-            setIsInlineCustomer(true);
-            setIsCreateOpen(true);
-          }}
-        />
+      {loading && allJobs.length === 0 ? (
+        <SkeletonList rows={4} />
+      ) : allJobs.length === 0 ? (
+        <EmptyState icon={Briefcase} title="No jobs yet" description="Create the first job to start the workflow." actionLabel={can("jobs.create") ? "Create job" : undefined} onAction={openCreate} />
       ) : filteredJobs.length === 0 ? (
-        <div className="bg-white rounded-lg border border-slate-200 p-12 text-center text-xs text-slate-500">
-          No cleaning jobs match your current search and filter criteria.
-        </div>
+        <EmptyState icon={Search} title="No matching jobs" description="Try a different search or clear the filters." />
       ) : (
-        <div className="rounded-lg border border-slate-200 bg-white shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold text-[11px]">
+        <>
+          {/* Desktop: clean data table */}
+          <div className="hidden xl:block rounded-2xl border border-zinc-200 bg-white overflow-hidden">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-500">
                 <tr>
-                  <th className="py-3 px-4">Job ID</th>
-                  <th className="py-3 px-4">Customer & Contact</th>
-                  <th className="py-3 px-4">Property</th>
-                  <th className="py-3 px-4">Service</th>
-                  <th className="py-3 px-4">Assigned Workers</th>
-                  <th className="py-3 px-4">Scheduled Slot</th>
-                  <th className="py-3 px-4">Workflow Status</th>
-                  <th className="py-3 px-4">Payment</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+                  <th scope="col" className="py-3 px-5 font-semibold">Job</th>
+                  <th scope="col" className="py-3 px-4 font-semibold">Customer</th>
+                  <th scope="col" className="py-3 px-4 font-semibold">Service</th>
+                  <th scope="col" className="py-3 px-4 font-semibold">Manager</th>
+                  <th scope="col" className="py-3 px-4 font-semibold">Date</th>
+                  <th scope="col" className="py-3 px-4 font-semibold">Status</th>
+                  <th scope="col" className="py-3 px-5 font-semibold text-right"><span className="sr-only">Action</span></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+              <tbody className="divide-y divide-zinc-100">
                 {filteredJobs.map((job) => {
                   const customer = customers.find((c) => c.id === job.customerId);
-                  const property = properties.find((p) => p.id === job.propertyId);
                   const service = services.find((s) => s.id === job.serviceId);
-                  // Server-resolved names first — the ops desk (and staff) cannot
-                  // read the user directory, so local resolution comes back empty
-                  // and made assigned jobs display as "Unassigned".
-                  const assignedWorkers =
-                    job.assignedStaffNames ??
-                    ((job.assignedStaffIds || [])
-                      .map((id) => users.find((u) => u.id === id)?.name)
-                      .filter(Boolean) as string[]);
-                  const leadWorkerName = assignedWorkers[0];
-
+                  const manager = managerName(job);
                   return (
-                    <tr
-                      key={job.id}
-                      className="hover:bg-slate-50/70 transition-colors"
-                    >
-                      {/* Job ID */}
-                      <td className="py-3 px-4 font-mono font-semibold text-slate-900">
-                        <Link
-                          href={`/jobs/${job.id}`}
-                          className="hover:text-blue-600 hover:underline"
-                        >
-                          {job.id}
-                        </Link>
+                    <tr key={job.id} className="hover:bg-zinc-50 transition-colors">
+                      <td className="py-3.5 px-5 font-semibold text-zinc-950 whitespace-nowrap">{job.jobNumber ?? job.id.slice(-6)}</td>
+                      <td className="py-3.5 px-4">
+                        <div className="font-medium text-zinc-950">{customer?.name ?? "Customer"}</div>
+                        <div className="text-xs text-zinc-500">{customer?.phone}</div>
                       </td>
-
-                      {/* Customer */}
-                      <td className="py-3 px-4">
-                        <div className="font-semibold text-slate-900">
-                          {customer?.name || "Unknown"}
-                        </div>
-                        <div className="text-[11px] text-slate-500 font-mono">
-                          {customer?.phone}
-                        </div>
+                      <td className="py-3.5 px-4 text-zinc-800">{service?.name}</td>
+                      <td className="py-3.5 px-4">{manager ? <span className="text-zinc-800">{manager}</span> : <span className="text-amber-700 font-medium">Not assigned</span>}</td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="text-zinc-900">{formatDate(job.scheduledDate)}</div>
+                        <div className="text-xs text-zinc-500">{formatTimeSlot(job.scheduledTimeSlot).split(" - ")[0]}</div>
                       </td>
-
-                      {/* Property */}
-                      <td className="py-3 px-4 max-w-[200px]">
-                        <div className="font-medium text-slate-900 truncate">
-                          {property?.title || "Property"}
-                        </div>
-                        <div className="text-[11px] text-slate-400 truncate">
-                          {property?.city} • {property?.propertyType}
-                        </div>
-                      </td>
-
-                      {/* Service */}
-                      <td className="py-3 px-4">
-                        <div className="font-medium text-slate-900">
-                          {service?.name}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          {service && `~${service.estimatedDurationHours} hrs`}
-                        </div>
-                      </td>
-
-                      {/* Assigned Workers */}
-                      <td className="py-3 px-4">
-                        {assignedWorkers.length > 0 ? (
-                          <div>
-                            <div className="font-medium text-slate-900">
-                              {assignedWorkers.join(", ")}
-                            </div>
-                            {leadWorkerName && (
-                              <div className="text-[11px] text-slate-400">
-                                Lead: {leadWorkerName}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-amber-600 font-medium">
-                            Unassigned
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Scheduled */}
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <div className="font-medium text-slate-900">
-                          {formatDate(job.scheduledDate)}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          {formatTimeSlot(job.scheduledTimeSlot)}
-                        </div>
-                      </td>
-
-                      {/* Workflow Status */}
-                      <td className="py-3 px-4">
-                        <JobStatusBadge status={job.status} size="sm" />
-                        {job.status === "ARRIVED" && (
-                          <div className="text-[10px] text-amber-700 font-semibold mt-1">
-                            Awaiting customer confirmation
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Payment (super_admin only — the API redacts money for other roles) */}
-                      <td className="py-3 px-4">
-                        {can("finance.view") ? (
-                          <>
-                            <div className="font-semibold text-slate-900">
-                              {formatCurrency(job.amount ?? 0)}
-                            </div>
-                            <PaymentStatusBadge status={job.paymentStatus ?? "UNPAID"} />
-                          </>
-                        ) : (
-                          <span className="text-[11px] text-slate-400">Restricted</span>
-                        )}
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <Link href={`/jobs/${job.id}`}>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 text-xs px-2.5 font-medium"
-                          >
-                            Details
-                          </Button>
+                      <td className="py-3.5 px-4"><StatusBadge status={job.status} size="sm" /></td>
+                      <td className="py-3.5 px-5 text-right">
+                        <Link href={`/jobs/${job.id}`} className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50">
+                          Open <ChevronRight className="h-4 w-4" aria-hidden />
                         </Link>
                       </td>
                     </tr>
@@ -557,48 +396,77 @@ function JobsPageInner() {
               </tbody>
             </table>
           </div>
-        </div>
+
+          {/* Phones / tablets: one card per job */}
+          <ul className="xl:hidden grid grid-cols-1 md:grid-cols-2 gap-3">
+            {filteredJobs.map((job) => {
+              const customer = customers.find((c) => c.id === job.customerId);
+              const service = services.find((s) => s.id === job.serviceId);
+              const manager = managerName(job);
+              return (
+                <li key={job.id}>
+                  <Link href={`/jobs/${job.id}`} className="block rounded-2xl border border-zinc-200 bg-white p-4 active:bg-zinc-50">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm font-semibold text-zinc-500">{job.jobNumber ?? job.id.slice(-6)}</span>
+                      <StatusBadge status={job.status} size="sm" />
+                    </div>
+                    <div className="mt-2 text-base font-semibold text-zinc-950">{service?.name ?? "Service"}</div>
+                    <div className="text-base text-zinc-800">{customer?.name ?? "Customer"}</div>
+                    <div className="text-sm text-zinc-500 mt-0.5">{job.scheduledDate === new Date().toISOString().slice(0, 10) ? "Today" : formatDate(job.scheduledDate)} · {formatTimeSlot(job.scheduledTimeSlot).split(" - ")[0]}</div>
+                    <div className="mt-3 flex items-center justify-between gap-2 border-t border-zinc-100 pt-3">
+                      <span className="text-sm">
+                        <span className="text-zinc-500">Manager: </span>
+                        {manager ? <span className="font-medium text-zinc-900">{manager}</span> : <span className="font-medium text-amber-700">Not assigned</span>}
+                      </span>
+                      <span className="text-sm font-semibold text-rose-600 inline-flex items-center gap-0.5">Open <ChevronRight className="h-4 w-4" aria-hidden /></span>
+                    </div>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
 
       {/* New Booking Wizard Dialog */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Schedule New Deep Cleaning Job</DialogTitle>
+            <DialogTitle>New job</DialogTitle>
             <DialogDescription>
-              Create a new digital booking record with automatic service checklist generation and customer notification.
+              Pick the customer, service and time. The checklist and the customer link are created automatically.
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleCreateJob} className="space-y-4 py-2">
+          <form onSubmit={handleCreateJob} className="space-y-5">
             {formError && (
-              <div className="p-3 rounded-md bg-red-50 border border-red-200 text-red-800 text-xs font-medium">
+              <div role="alert" className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium">
                 {formError}
               </div>
             )}
             {/* Customer Mode Selection */}
             {customers.length > 0 && (
               <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                <span className="text-xs font-semibold text-slate-700">Client Profile</span>
+                <span className="text-sm font-medium text-zinc-800">Customer</span>
                 <button
                   type="button"
                   onClick={() => setIsInlineCustomer(!isInlineCustomer)}
-                  className="text-xs text-blue-600 hover:underline font-medium flex items-center gap-1"
+                  className="h-10 px-2 text-sm text-rose-600 font-semibold flex items-center gap-1"
                 >
-                  {isInlineCustomer ? "Choose Existing Customer" : "+ Register New Customer"}
+                  {isInlineCustomer ? "Choose existing customer" : "+ New customer"}
                 </button>
               </div>
             )}
 
             {isInlineCustomer || customers.length === 0 ? (
-              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80 space-y-3">
-                <div className="text-xs font-semibold text-slate-900 flex items-center gap-1.5">
+              <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-200 space-y-4">
+                <div className="text-sm font-semibold text-zinc-900 flex items-center gap-1.5">
                   <UserPlus className="h-3.5 w-3.5 text-blue-600" />
-                  New Customer & Property Details
+                  New customer and property
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="font-semibold text-slate-700">Customer Name *</label>
+                    <label className="text-sm font-medium text-zinc-800">Customer name *</label>
                     <Input
                       value={inlineName}
                       onChange={(e) => setInlineName(e.target.value)}
@@ -608,7 +476,7 @@ function JobsPageInner() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="font-semibold text-slate-700">Phone (Notifications) *</label>
+                    <label className="text-sm font-medium text-zinc-800">Phone *</label>
                     <Input
                       value={inlinePhone}
                       onChange={(e) => setInlinePhone(e.target.value)}
@@ -618,7 +486,7 @@ function JobsPageInner() {
                     />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
-                    <label className="font-semibold text-slate-700">Property Address *</label>
+                    <label className="text-sm font-medium text-zinc-800">Property address *</label>
                     <Input
                       value={inlineAddress}
                       onChange={(e) => setInlineAddress(e.target.value)}
@@ -633,8 +501,8 @@ function JobsPageInner() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Customer Selection */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">
-                    Select Customer *
+                  <label className="text-sm font-medium text-zinc-800">
+                    Customer *
                   </label>
                   <SearchableSelect
                     value={selectedCustomerId}
@@ -652,8 +520,8 @@ function JobsPageInner() {
 
                 {/* Property Selection */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">
-                    Service Property *
+                  <label className="text-sm font-medium text-zinc-800">
+                    Property *
                   </label>
                   <SearchableSelect
                     value={selectedPropertyId}
@@ -671,8 +539,8 @@ function JobsPageInner() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Service Selection */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700">
-                  Cleaning Service Package *
+                <label className="text-sm font-medium text-zinc-800">
+                  Service *
                 </label>
                 <SearchableSelect
                   value={selectedServiceId}
@@ -686,8 +554,8 @@ function JobsPageInner() {
 
               {/* Date */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700">
-                  Scheduled Date *
+                <label className="text-sm font-medium text-zinc-800">
+                  Date *
                 </label>
                 <Input
                   type="date"
@@ -700,8 +568,8 @@ function JobsPageInner() {
 
               {/* Time Window — freely settable from/to (manual, no fixed presets) */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700">
-                  Time Window * (from → to, set any times)
+                <label className="text-sm font-medium text-zinc-800">
+                  Time window *
                 </label>
                 <div className="flex items-center gap-2">
                   <Input
@@ -720,123 +588,80 @@ function JobsPageInner() {
                     required
                   />
                 </div>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-xs text-slate-400">
                   Service window: <strong className="text-slate-600">{composedTimeSlot}</strong>
                 </p>
               </div>
 
-              {/* Direct Field-Worker Assignment (multi-select) */}
-              <div className="space-y-1.5 sm:col-span-2">
-                <label className="text-xs font-semibold text-slate-700">
-                  Assign Field Workers (Optional — select one or more; the first selection is the lead worker)
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {fieldWorkers.map((w) => {
-                    const isSelected = assignedStaffIds.includes(w.id);
-                    const slotConflict = slotConflictIds.has(w.id);
-                    const onDuty = onDutyIds.has(w.id);
-                    return (
-                      <button
-                        key={w.id}
-                        type="button"
-                        onClick={() =>
-                          setAssignedStaffIds((prev) =>
-                            prev.includes(w.id)
-                              ? prev.filter((id) => id !== w.id)
-                              : [...prev, w.id]
-                          )
-                        }
-                        className={`px-2.5 py-1 rounded text-xs font-semibold border transition-all inline-flex items-center gap-1.5 ${
-                          isSelected
-                            ? "bg-slate-900 text-white border-slate-900 shadow-xs"
-                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-                        }`}
-                      >
-                        <span
-                          className={`h-2 w-2 rounded-full shrink-0 ${
-                            slotConflict
-                              ? "bg-red-500"
-                              : onDuty
-                              ? "bg-amber-500"
-                              : "bg-emerald-500"
-                          } ${isSelected ? "ring-1 ring-white/70" : ""}`}
-                        />
-                        {w.name}
-                        {isSelected && assignedStaffIds[0] === w.id && " • Lead"}
-                        {!isSelected && slotConflict && (
-                          <span className="text-[9px] font-bold text-red-600 uppercase">already assigned</span>
-                        )}
-                        {!isSelected && !slotConflict && onDuty && (
-                          <span className="text-[9px] font-bold text-amber-600 uppercase">on duty</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> available</span>
-                  <span className="mx-1.5">·</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> on duty (another job)</span>
-                  <span className="mx-1.5">·</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> already assigned for this date &amp; window</span>
-                </p>
-                {assignedStaffIds.length === 0 && (
-                  <p className="text-[11px] text-slate-400">
-                    Leave unassigned to keep the job in the dispatcher pool. Workers see only jobs assigned to them; the first-assigned worker is the lead.
-                  </p>
+              {/* Field Manager assignment (optional; first pick leads) */}
+              <fieldset className="space-y-2 sm:col-span-2">
+                <legend className="text-sm font-medium text-zinc-800">Field Manager <span className="font-normal text-zinc-500">(optional)</span></legend>
+                {fieldWorkers.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No Field Managers yet — add one under Users.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {fieldWorkers.map((w) => {
+                      const isSelected = assignedStaffIds.includes(w.id);
+                      const slotConflict = slotConflictIds.has(w.id);
+                      const onDuty = onDutyIds.has(w.id);
+                      const availability = slotConflict ? "Busy at this time" : onDuty ? "On another job" : "Free";
+                      return (
+                        <button
+                          key={w.id}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() =>
+                            setAssignedStaffIds((prev) =>
+                              prev.includes(w.id) ? prev.filter((id) => id !== w.id) : [...prev, w.id]
+                            )
+                          }
+                          className={`min-h-11 px-3.5 py-2 rounded-xl text-sm font-medium border transition-colors inline-flex items-center gap-2 text-left ${
+                            isSelected
+                              ? "bg-zinc-900 text-white border-zinc-900"
+                              : "bg-white text-zinc-800 border-zinc-300 hover:bg-zinc-50"
+                          }`}
+                        >
+                          <span
+                            aria-hidden
+                            className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                              slotConflict ? "bg-red-500" : onDuty ? "bg-amber-500" : "bg-emerald-500"
+                            }`}
+                          />
+                          <span>
+                            {w.name}
+                            {isSelected && assignedStaffIds[0] === w.id && assignedStaffIds.length > 1 && " · Lead"}
+                            <span className={`block text-xs ${isSelected ? "text-zinc-300" : slotConflict ? "text-red-700" : onDuty ? "text-amber-700" : "text-zinc-500"}`}>
+                              {availability}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
-              </div>
-
-              {/* Referral Partner */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700">
-                  Referral Partner Attribution
-                </label>
-                <SearchableSelect
-                  value={referralPartnerId}
-                  onChange={setReferralPartnerId}
-                  options={partnerOptions}
-                  placeholder="Direct Booking (No Referral)"
-                />
-              </div>
+                {assignedStaffIds.length === 0 && fieldWorkers.length > 0 && (
+                  <p className="text-sm text-zinc-500">You can assign someone later from the Schedule.</p>
+                )}
+              </fieldset>
             </div>
 
-            {/* Job Notes */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700">
-                Special Instructions / Work Notes
-              </label>
-              <Input
+            <Field label="Notes for the team" htmlFor="nj-notes" hint="Access, focus areas, anything the Field Manager should know">
+              <textarea
+                id="nj-notes"
                 value={jobNotes}
                 onChange={(e) => setJobNotes(e.target.value)}
-                placeholder="E.g. Focus on kitchen grease exhaust and master bath limescale..."
-                className="text-xs"
+                rows={3}
+                placeholder="e.g. Focus on kitchen grease and master bath limescale"
+                className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
               />
-            </div>
+            </Field>
 
-            <DialogFooter className="pt-3 border-t border-slate-100">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsCreateOpen(false)}
-              >
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                size="sm"
-                className=""
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Scheduling...
-                  </>
-                ) : (
-                  "Schedule & Dispatch Job"
-                )}
+              <Button type="submit" loading={isSubmitting}>
+                {isSubmitting ? "Creating…" : "Create job"}
               </Button>
             </DialogFooter>
           </form>
@@ -850,6 +675,17 @@ function JobsPageInner() {
  * useSearchParams() requires a Suspense boundary during static prerendering,
  * so the page body is wrapped before being exported as the route entry.
  */
+const STATUS_GROUPS: Record<string, string[]> = {
+  SCHEDULED: ["DRAFT", "SCHEDULED"],
+  ASSIGNED: ["ASSIGNED"],
+  IN_PROGRESS: ["ARRIVED", "CUSTOMER_VERIFIED", "IN_PROGRESS"],
+  WORK_COMPLETED: ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"],
+  REWORK_REQUIRED: ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"],
+  CUSTOMER_APPROVAL: ["PASS", "CUSTOMER_APPROVAL"],
+  COMPLETED: ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"],
+  CANCELLED: ["CANCELLED"],
+};
+
 export default function JobsPage() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>

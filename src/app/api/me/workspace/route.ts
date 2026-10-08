@@ -1,78 +1,84 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireUser, jobWhereFor, dispatchWindowApplies } from "@/lib/server/authz";
+import { requireUser, jobWhereFor } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
-import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
-import { dispatchCutoffTime } from "@/lib/server/policy";
-import { can, getNextAction, workspaceFor, customerStageLabel, customerFeatures } from "@/lib/rbac";
+import { can, getNextAction, workspaceFor, customerStageLabel } from "@/lib/rbac";
 
 /**
- * GET /api/me/workspace — the ONE home payload for the signed-in role (§18/§29).
+ * GET /api/me/workspace — the ONE home payload for the signed-in role.
  *
- * Answers "what needs my attention?" server-side so every workspace home
- * renders from one scoped call:
- *   counts     — today's jobs by stage (within the caller's jobs.view scope)
- *   attention  — items that need this role to act, each with a deep link
- *   queue      — the role's primary queue (jobs + their next action)
- * Financial figures are included only for finance.view holders.
+ *   counts     — the six Operations numbers (within the caller's job scope)
+ *   attention  — individual jobs that need someone to act, each with a reason
+ *   queue      — the role's open jobs with their ONE next action
+ *
+ * Money is included only for finance.view holders (Admin).
  */
+
+const ACTIVE = ["ARRIVED", "CUSTOMER_VERIFIED", "IN_PROGRESS"];
+const QC_PENDING = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"];
+const REWORK = ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
+const APPROVAL = ["PASS", "CUSTOMER_APPROVAL"];
+const DONE = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
+
+interface AttentionItem {
+  key: string;
+  jobId: string | null;
+  title: string;
+  reason: string;
+  href: string;
+  tone: "alert" | "warning";
+}
+
 export async function GET() {
   try {
     const { user } = await requireUser();
     const ws = workspaceFor(user.role);
-    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
 
     const where = await jobWhereFor(user, "jobs.view");
-    let jobs = where
+    const jobs = where
       ? await prisma.job.findMany({
-          where,
+          where: { ...where, status: { not: "CANCELLED" } },
           include: {
             customer: { select: { name: true } },
-            property: { select: { title: true, address: true, city: true } },
+            property: { select: { title: true, city: true } },
             service: { select: { name: true } },
             checklistItems: { select: { status: true, critical: true } },
             photos: { select: { photoType: true } },
             reworkTasks: { select: { status: true } },
-            invoices: { select: { balanceDue: true, finalizedAt: true, dueDate: true, status: true } },
           },
           orderBy: [{ scheduledDate: "asc" }, { scheduledTimeSlot: "asc" }],
         })
       : [];
-    if (dispatchWindowApplies(user)) {
-      const visibility = getOpsDateVisibility(new Date(), { nextDayDispatchTime: dispatchCutoffTime() });
-      jobs = filterJobsForOpsManager(jobs, visibility);
-    }
 
-    const active = jobs.filter((j) => !["CLOSED", "CANCELLED"].includes(j.status));
-    const todayJobs = active.filter((j) => j.scheduledDate === today);
-    const byStatus = (statuses: string[]) => active.filter((j) => statuses.includes(j.status)).length;
+    const open = jobs.filter((j) => !DONE.includes(j.status));
+    const isIn = (statuses: string[]) => (j: { status: string }) => statuses.includes(j.status);
 
     const counts = {
-      today: todayJobs.length,
-      scheduled: byStatus(["DRAFT", "SCHEDULED"]),
-      assigned: byStatus(["ASSIGNED"]),
-      inProgress: byStatus(["ARRIVED", "CUSTOMER_VERIFIED", "IN_PROGRESS"]),
-      qcPending: byStatus(["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"]),
-      rework: byStatus(["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"]),
-      approvalPending: byStatus(["PASS", "CUSTOMER_APPROVAL"]),
-      completed: active.filter((j) => ["COMPLETED", "FEEDBACK_REQUESTED"].includes(j.status)).length,
+      today: jobs.filter((j) => j.scheduledDate === today).length,
+      active: open.filter(isIn(ACTIVE)).length,
+      qcPending: open.filter(isIn(QC_PENDING)).length,
+      rework: open.filter(isIn(REWORK)).length,
+      approvalPending: open.filter(isIn(APPROVAL)).length,
+      completed: jobs.filter((j) => DONE.includes(j.status) && (j.approvedAt ?? j.updatedAt).toISOString().slice(0, 10) === today).length,
     };
 
-    const queue = active.map((j) => {
+    const label = (j: (typeof jobs)[number]) => `${j.customer?.name ?? "Customer"} · ${j.service?.name ?? "Service"}`;
+
+    const queue = open.map((j) => {
       const mandatory = j.checklistItems.filter((c) => c.critical);
-      const invoice = j.invoices[0];
+      const tracked = mandatory.length ? mandatory : j.checklistItems;
       const next = getNextAction(user.role, {
         status: j.status,
         assignedManagerId: j.assignedManagerId,
         assignedStaffIds: j.assignedStaffIds,
         customerConfirmedAt: j.customerConfirmedAt?.toISOString() ?? null,
-        checklistTotal: mandatory.length || j.checklistItems.length,
-        checklistDone: (mandatory.length ? mandatory : j.checklistItems).filter((c) => c.status === "completed" || c.status === "skipped").length,
+        checklistTotal: tracked.length,
+        checklistDone: tracked.filter((c) => c.status === "completed" || c.status === "skipped").length,
         photosBefore: j.photos.filter((p) => p.photoType === "before").length,
         photosAfter: j.photos.filter((p) => p.photoType === "after").length,
         openRework: j.reworkTasks.filter((t) => t.status !== "completed").length,
-        balanceDue: invoice?.balanceDue ?? 0,
-        invoiceFinalized: Boolean(invoice?.finalizedAt),
         approvedAt: j.approvedAt?.toISOString() ?? null,
         feedbackAt: j.customerFeedbackAt?.toISOString() ?? null,
       });
@@ -91,56 +97,53 @@ export async function GET() {
       };
     });
 
-    const attention: { key: string; label: string; count: number; href: string }[] = [];
-    const push = (key: string, label: string, count: number, href: string) => {
-      if (count > 0) attention.push({ key, label, count, href });
-    };
-    if (can(user, "jobs.assign")) push("unassigned", "Jobs without a team", byStatus(["SCHEDULED", "DRAFT"]), ws.layout === "desk" ? "/dispatcher" : ws.queue);
-    if (can(user, "qc.inspect")) push("qc", "QC pending", counts.qcPending, "/quality-queue");
-    else if (can(user, "qc.view") && ws.layout === "desk") push("qc", "QC pending", counts.qcPending, "/quality");
-    if (can(user, "rework.view") && ws.layout === "desk") push("rework", "Rework in progress", counts.rework, "/quality");
-    if (can(user, "complaints.manage")) {
-      const openComplaints = await prisma.complaint.count({ where: { status: { notIn: ["resolved", "closed"] } } });
-      push("complaints", "Customer issues", openComplaints, "/quality");
+    // Attention Required — one row per job that is stuck or needs a decision.
+    const attention: AttentionItem[] = [];
+    if (can(user, "jobs.assign")) {
+      const soon = new Date(now.getTime() + 2 * 86400000).toISOString().slice(0, 10);
+      for (const j of open) {
+        const unassigned = !j.assignedManagerId && j.assignedStaffIds.length === 0;
+        if (unassigned && j.scheduledDate <= soon) {
+          attention.push({ key: `unassigned-${j.id}`, jobId: j.id, title: label(j), reason: j.scheduledDate < today ? "Overdue and has no Field Manager" : "No Field Manager assigned", href: `/jobs/${j.id}`, tone: j.scheduledDate <= today ? "alert" : "warning" });
+        } else if (j.status === "ASSIGNED" && j.scheduledDate < today) {
+          attention.push({ key: `late-${j.id}`, jobId: j.id, title: label(j), reason: "Scheduled date passed — team never arrived", href: `/jobs/${j.id}`, tone: "alert" });
+        }
+        if (j.status === "ARRIVED" && !j.customerConfirmedAt && j.arrivedAt && now.getTime() - j.arrivedAt.getTime() > 20 * 60000) {
+          attention.push({ key: `confirm-${j.id}`, jobId: j.id, title: label(j), reason: "Customer has not confirmed for 20+ minutes", href: `/jobs/${j.id}`, tone: "warning" });
+        }
+        if (REWORK.includes(j.status)) {
+          attention.push({ key: `rework-${j.id}`, jobId: j.id, title: label(j), reason: "Rework pending", href: `/jobs/${j.id}`, tone: "warning" });
+        }
+        if (APPROVAL.includes(j.status) && now.getTime() - j.updatedAt.getTime() > 24 * 3600000) {
+          attention.push({ key: `approval-${j.id}`, jobId: j.id, title: label(j), reason: "Waiting for customer approval for over a day", href: `/jobs/${j.id}`, tone: "warning" });
+        }
+      }
     }
-    if (can(user, "customer_approval.view") && ws.layout === "desk") push("approval", "Waiting for customer approval", counts.approvalPending, "/jobs?status=CUSTOMER_APPROVAL");
-    if (can(user, "amc.view") && ws.layout === "desk") {
-      const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-      const amcDue = await prisma.amcVisit.count({ where: { status: { in: ["SCHEDULED", "REMINDED"] }, scheduledDate: { lte: in7 } } });
-      push("amc", "AMC visits due this week", amcDue, "/amc");
+    if (can(user, "complaints.manage")) {
+      const complaints = await prisma.complaint.findMany({
+        where: { status: { notIn: ["resolved", "closed"] } },
+        include: { job: { select: { id: true, customer: { select: { name: true } } } } },
+        orderBy: { createdAt: "asc" },
+        take: 20,
+      });
+      for (const c of complaints) {
+        attention.unshift({ key: `complaint-${c.id}`, jobId: c.jobId, title: c.job?.customer?.name ?? "Customer", reason: `Customer issue: ${c.description.slice(0, 80)}`, href: `/jobs/${c.jobId}`, tone: "alert" });
+      }
     }
 
-    let finance: Record<string, number> | undefined;
+    let finance: { outstanding: number; overdueCount: number; collectedMonth: number } | undefined;
     if (can(user, "finance.view")) {
-      const invoices = await prisma.invoice.findMany({ where: { status: { notIn: ["CANCELLED"] } }, select: { total: true, amountPaid: true, balanceDue: true, dueDate: true, status: true } });
+      const invoices = await prisma.invoice.findMany({ where: { status: { notIn: ["CANCELLED"] } }, select: { balanceDue: true, dueDate: true } });
       const overdue = invoices.filter((i) => i.balanceDue > 0 && i.dueDate < today);
+      const paid = await prisma.payment.aggregate({ where: { paidAt: { gte: new Date(`${today.slice(0, 7)}-01`) } }, _sum: { amount: true } });
       finance = {
         outstanding: invoices.reduce((a, i) => a + i.balanceDue, 0),
-        collected: invoices.reduce((a, i) => a + i.amountPaid, 0),
-        pending: invoices.filter((i) => i.balanceDue > 0).reduce((a, i) => a + i.balanceDue, 0),
         overdueCount: overdue.length,
-        overdueAmount: overdue.reduce((a, i) => a + i.balanceDue, 0),
-        pendingCount: invoices.filter((i) => i.balanceDue > 0).length,
-        revenueMonth: 0,
+        collectedMonth: paid._sum.amount ?? 0,
       };
-      const monthStart = `${today.slice(0, 7)}-01`;
-      const paid = await prisma.payment.aggregate({ where: { paidAt: { gte: new Date(monthStart) } }, _sum: { amount: true } });
-      finance.revenueMonth = paid._sum.amount ?? 0;
-      push("overdue", "Overdue invoices", finance.overdueCount, "/finance?filter=overdue");
-      if (can(user, "refund.approve")) {
-        const pendingRefunds = await prisma.refund.count({ where: { status: "PENDING_APPROVAL" } });
-        push("refunds", "Refunds awaiting approval", pendingRefunds, "/finance?filter=refunds");
+      if (overdue.length > 0) {
+        attention.push({ key: "overdue", jobId: null, title: "Payments", reason: `${overdue.length} overdue invoice${overdue.length === 1 ? "" : "s"}`, href: "/finance", tone: "warning" });
       }
-    } else if (can(user, "refund.approve")) {
-      const pendingRefunds = await prisma.refund.count({ where: { status: "PENDING_APPROVAL" } });
-      push("refunds", "Refunds awaiting approval", pendingRefunds, "/finance?filter=refunds");
-    }
-
-    // Customer-profile capabilities (AMC / NRI) for the customer role.
-    let features: { amc: boolean; nri: boolean } | undefined;
-    if (user.customerId) {
-      const contracts = await prisma.amcContract.findMany({ where: { customerId: user.customerId }, select: { status: true, nriContactPhone: true, nriContactEmail: true } });
-      features = customerFeatures(contracts);
     }
 
     return NextResponse.json({
@@ -153,7 +156,6 @@ export async function GET() {
         attention,
         queue,
         finance,
-        features,
       },
     });
   } catch (err) {

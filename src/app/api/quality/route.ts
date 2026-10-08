@@ -43,8 +43,14 @@ export async function GET() {
         : prisma.complaint.findMany({ where: none }),
     ]);
 
+    const inspectorIds = Array.from(new Set(checks.map((c) => c.inspectorId)));
+    const inspectors = inspectorIds.length
+      ? await prisma.user.findMany({ where: { id: { in: inspectorIds } }, select: { id: true, name: true } })
+      : [];
+    const nameOf = new Map(inspectors.map((u) => [u.id, u.name]));
+
     return ok({
-      qualityChecks: checks.map(serializeQualityCheck),
+      qualityChecks: checks.map((c) => ({ ...serializeQualityCheck(c), inspectorName: nameOf.get(c.inspectorId) ?? "QC" })),
       qualityIssues: issues.map(serializeQualityIssue),
       reworkTasks: tasks.map(serializeReworkTask),
       complaints: complaints.map(serializeComplaint),
@@ -87,6 +93,12 @@ const ReinspectSchema = z.object({
 
 const ReworkDispatchSchema = z.object({ action: z.literal("dispatch-rework"), jobId: z.string().min(1).max(64) });
 
+const ResolveComplaintSchema = z.object({
+  action: z.literal("resolve-complaint"),
+  complaintId: z.string().min(1).max(64),
+  notes: z.string().max(1000).default(""),
+});
+
 const ComplaintSchema = z.object({
   action: z.literal("request-attention"),
   jobId: z.string().min(1).max(64),
@@ -94,13 +106,9 @@ const ComplaintSchema = z.object({
   category: z.enum(["quality", "punctuality", "staff_behavior", "damage", "missed_area", "billing"]),
 });
 
-/** First active user holding the given permission — the owner for complaints. */
-async function firstUserWith(permission: "complaints.manage"): Promise<{ id: string; name: string } | null> {
-  const { ROLES, scopeOf } = await import("@/lib/rbac");
-  const roles = ROLES.filter((r) => scopeOf(r, permission) !== "NONE" && r !== "super_admin");
-  const row =
-    (await prisma.user.findFirst({ where: { role: { in: roles }, active: true }, orderBy: { createdAt: "asc" } })) ??
-    (await prisma.user.findFirst({ where: { role: "super_admin", active: true }, orderBy: { createdAt: "asc" } }));
+/** Complaints are owned by the Admin desk — the first active admin. */
+async function firstUserWith(_permission: "complaints.manage"): Promise<{ id: string; name: string } | null> {
+  const row = await prisma.user.findFirst({ where: { role: "admin", active: true }, orderBy: { createdAt: "asc" } });
   return row ? { id: row.id, name: row.name } : null;
 }
 
@@ -113,6 +121,7 @@ async function firstUserWith(permission: "complaints.manage"): Promise<{ id: str
  *   complete-rework   rework.complete (assigned field worker)
  *   reinspect-pass    qc.reinspect
  *   request-attention complaints.create / complaints.manage
+ *   resolve-complaint complaints.manage
  */
 export async function POST(request: Request) {
   try {
@@ -183,7 +192,14 @@ export async function POST(request: Request) {
           /* notification failure must never fail the QC decision */
         }
       } else {
-        await prisma.job.update({ where: { id: d.jobId }, data: { status: "PASS", qualityCheckId: qc.id } });
+        // QC passed → straight to the customer's approval (no extra desk step).
+        await prisma.$transaction([
+          prisma.job.update({ where: { id: d.jobId }, data: { status: "CUSTOMER_APPROVAL", qualityCheckId: qc.id } }),
+          prisma.qualityIssue.updateMany({
+            where: { jobId: d.jobId, status: { notIn: ["resolved", "reinspected_pass"] } },
+            data: { status: "reinspected_pass", resolvedAt: new Date() },
+          }),
+        ]);
         try {
           const { onQcPassed } = await import("@/lib/server/workflow-service");
           void onQcPassed(d.jobId, { id: user.id, name: user.name }).catch(() => {});
@@ -198,8 +214,8 @@ export async function POST(request: Request) {
         type: "QC_SUBMITTED",
         message:
           d.decision === "PASS"
-            ? `QC audit PASSED (${d.score}%) — ready for customer sign-off`
-            : `QC audit flagged rework (${d.score}%) — ${d.issues.length} defect${d.issues.length === 1 ? "" : "s"} assigned to field staff`,
+            ? `QC passed — waiting for customer approval`
+            : `QC: rework required — ${d.issues.length} issue${d.issues.length === 1 ? "" : "s"} sent to the Field Manager`,
         actor: { id: user.id, name: user.name, role: user.role },
       });
       if (d.decision === "REWORK_REQUIRED") {
@@ -219,7 +235,7 @@ export async function POST(request: Request) {
         entityId: qc.id,
         jobId: d.jobId,
         previousState: job.status,
-        newState: d.decision === "PASS" ? "PASS" : "REWORK_ASSIGNED",
+        newState: d.decision === "PASS" ? "CUSTOMER_APPROVAL" : "REWORK_ASSIGNED",
         details: `score=${d.score} issues=${d.issues.length}`,
         request,
       });
@@ -294,6 +310,8 @@ export async function POST(request: Request) {
         return fail(`Reinspection applies after rework is completed (current: ${job.status}).`, 409);
       }
       const now = new Date();
+      // Every reinspection is a QC round in the job's history.
+      await prisma.qualityCheck.create({ data: { jobId: d.jobId, inspectorId: user.id, score: 100, decision: "PASS", notes: d.notes || "Reinspection passed" } });
       await prisma.job.update({ where: { id: d.jobId }, data: { status: "PASS" } });
       try {
         const { onQcPassed } = await import("@/lib/server/workflow-service");
@@ -316,6 +334,27 @@ export async function POST(request: Request) {
       });
       void recordAudit({ actor: user, action: "QC_REINSPECTION_PASSED", entityType: "job", entityId: d.jobId, jobId: d.jobId, previousState: job.status, newState: "CUSTOMER_APPROVAL", details: d.notes, request });
       return ok({ jobId: d.jobId, status: "CUSTOMER_APPROVAL" });
+    }
+
+    if (action === "resolve-complaint") {
+      const parsed = ResolveComplaintSchema.safeParse(body);
+      if (!parsed.success) return fail("Invalid payload.", 400);
+      const complaint = await prisma.complaint.findUnique({ where: { id: parsed.data.complaintId } });
+      if (!complaint) return fail("Customer issue not found.", 404);
+      const { user } = await authorizeJob(complaint.jobId, "complaints.manage");
+      if (complaint.status === "resolved") return ok({ id: complaint.id, status: "resolved" });
+      await prisma.complaint.update({
+        where: { id: complaint.id },
+        data: { status: "resolved", resolutionNotes: parsed.data.notes || null, resolvedAt: new Date() },
+      });
+      await recordActivity({
+        jobId: complaint.jobId,
+        type: "STATUS_CHANGED",
+        message: `Customer issue resolved${parsed.data.notes ? ` — ${parsed.data.notes}` : ""}`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
+      void recordAudit({ actor: user, action: "COMPLAINT_RESOLVED", entityType: "complaint", entityId: complaint.id, jobId: complaint.jobId, details: parsed.data.notes, request });
+      return ok({ id: complaint.id, status: "resolved" });
     }
 
     if (action === "request-attention") {

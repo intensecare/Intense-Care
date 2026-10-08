@@ -3,125 +3,158 @@
 import React from "react";
 import Link from "next/link";
 import { AdminLayout } from "@/components/common/AdminLayout";
-import { PageHeader } from "@/components/common/PageHeader";
-import { StatTile, AttentionPanel, NextActionChip } from "@/components/workspace/WorkspaceWidgets";
-import { RevenueTrendChart } from "@/components/common/RevenueTrendChart";
-import { useWorkspace } from "@/lib/use-workspace";
-import { useApp } from "@/lib/app-context";
+import { StatusBadge } from "@/components/common/JobStatusBadge";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState, Skeleton } from "@/components/ui/states";
+import { useWorkspace, type WorkspaceAttentionItem } from "@/lib/use-workspace";
 import { useAuth } from "@/lib/auth-context";
-import { formatCurrency, formatDate, formatTimeSlot } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Briefcase, Receipt, ChevronRight } from "lucide-react";
+import { formatCurrency, formatDate, formatTimeSlot, cn } from "@/lib/utils";
+import { CalendarDays, Activity, ClipboardCheck, RotateCcw, UserCheck, CheckCircle2, ChevronRight, AlertTriangle, Plus, Wallet } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+}
 
 /**
- * SUPER ADMIN home — "Business Overview" (§5).
- * Answers "what needs my attention?" in one screen: today's numbers,
- * the attention list (deep-linked), revenue, and the live queue. The admin
- * never has to open every module to find out what is going on.
+ * ADMIN — "Today's Operations".
+ * Five numbers, then only what needs action, then today's jobs.
  */
-export default function BusinessOverviewPage() {
-  const { data, error, loading } = useWorkspace();
-  const { invoices, payments } = useApp();
-  const { can } = useAuth();
+export default function OperationsDashboardPage() {
+  const { data, error, loading, refresh } = useWorkspace(15000);
+  const { currentUser } = useAuth();
+  const router = useRouter();
   const counts = data?.counts;
-  const fin = data?.finance;
-  const queue = (data?.queue ?? []).filter((q) => q.actionable).slice(0, 8);
+  const today = data?.today ?? new Date().toISOString().slice(0, 10);
+  const todays = (data?.queue ?? []).filter((q) => q.scheduledDate === today);
+
+  const metrics = [
+    { label: "Today's Jobs", value: counts?.today, href: "/schedule", Icon: CalendarDays, tone: "neutral" as const },
+    { label: "Active", value: counts?.active, href: "/jobs?status=IN_PROGRESS", Icon: Activity, tone: "info" as const },
+    { label: "QC Pending", value: counts?.qcPending, href: "/quality-queue", Icon: ClipboardCheck, tone: "warning" as const },
+    { label: "Rework", value: counts?.rework, href: "/jobs?status=REWORK_REQUIRED", Icon: RotateCcw, tone: "error" as const },
+    { label: "Approval Pending", value: counts?.approvalPending, href: "/jobs?status=CUSTOMER_APPROVAL", Icon: UserCheck, tone: "warning" as const },
+  ];
 
   return (
     <AdminLayout>
-      <PageHeader
-        title="Business Overview"
-        description="What needs your attention today — every number links to the place to act."
-        actions={
-          <>
-            {can("quotes.manage") && (
-              <Link href="/quotations?raise=true">
-                <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs">
-                  <Receipt className="h-3.5 w-3.5 text-zinc-400" /> New Quotation
-                </Button>
-              </Link>
-            )}
-            {can("jobs.create") && (
-              <Link href="/jobs?create=true">
-                <Button size="sm" className="h-9 gap-1.5 text-xs text-white">
-                  <Briefcase className="h-3.5 w-3.5" /> New Booking
-                </Button>
-              </Link>
-            )}
-          </>
-        }
-      />
-
-      {error && <div className="mb-4 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-        <StatTile label="Today's Jobs" value={counts?.today ?? (loading ? "…" : 0)} href="/operations" />
-        <StatTile label="Jobs In Progress" value={counts?.inProgress ?? 0} href="/operations" tone={counts?.inProgress ? "success" : "neutral"} />
-        <StatTile label="QC Pending" value={counts?.qcPending ?? 0} href="/quality-queue" tone={counts?.qcPending ? "warning" : "neutral"} />
-        <StatTile label="Rework Pending" value={counts?.rework ?? 0} href="/quality" tone={counts?.rework ? "alert" : "neutral"} />
-      </div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <StatTile label="Customer Issues" value={data?.attention.find((a) => a.key === "complaints")?.count ?? 0} href="/quality" tone={data?.attention.some((a) => a.key === "complaints") ? "alert" : "neutral"} />
-        <StatTile label="Payments Pending" value={fin ? formatCurrency(fin.pending) : "—"} href="/finance" hint={fin ? `${fin.pendingCount} invoice${fin.pendingCount === 1 ? "" : "s"} · ${fin.overdueCount} overdue` : undefined} tone={fin?.overdueCount ? "warning" : "neutral"} />
-        <StatTile label="AMC Visits Due" value={data?.attention.find((a) => a.key === "amc")?.count ?? 0} href="/amc" hint="next 7 days" />
-        <StatTile label="Revenue (this month)" value={fin ? formatCurrency(fin.revenueMonth) : "—"} href="/reports" tone="success" hint={fin ? `${formatCurrency(fin.collected)} collected all-time` : undefined} />
+      <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+          <p className="text-base text-zinc-500">{greeting()}, {currentUser?.name?.split(" ")[0]}</p>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-950">Today&apos;s Operations</h1>
+          <p className="text-sm text-zinc-500 mt-1">{formatDate(today)}</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <AttentionPanel items={data?.attention ?? []} />
+      {error && <ErrorState className="mb-6" message="Something went wrong while loading today's operations." onRetry={() => void refresh()} />}
 
-          <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
-            <div className="px-4 py-3 border-b border-zinc-100 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-900">Live queue — jobs waiting on someone</h3>
-              <Link href="/operations" className="text-xs text-zinc-600 hover:text-zinc-900 inline-flex items-center gap-1">
-                View operations <ChevronRight className="h-3 w-3" />
-              </Link>
+      {/* Metrics */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6 sm:mb-8">
+        {metrics.map(({ label, value, href, Icon, tone }) => {
+          const hot = (value ?? 0) > 0 && tone !== "neutral";
+          return (
+            <Link key={label} href={href} className={cn("rounded-2xl border bg-white p-4 sm:p-5 transition-shadow hover:shadow-md flex flex-col justify-between min-h-[108px]", hot ? (tone === "error" ? "border-red-200" : tone === "warning" ? "border-amber-200" : "border-info-200") : "border-zinc-200")}>
+              <span className="flex items-start justify-between gap-2 text-sm font-medium text-zinc-600">
+                {label}
+                <Icon className={cn("h-5 w-5 shrink-0", hot ? (tone === "error" ? "text-red-600" : tone === "warning" ? "text-amber-600" : "text-info-600") : "text-zinc-400")} aria-hidden />
+              </span>
+              {loading && value === undefined ? (
+                <Skeleton className="h-9 w-12 mt-2" />
+              ) : (
+                <span className={cn("text-3xl sm:text-4xl font-semibold tracking-tight mt-2", hot ? (tone === "error" ? "text-red-700" : tone === "warning" ? "text-amber-700" : "text-info-700") : "text-zinc-950")}>{value ?? 0}</span>
+              )}
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        {/* Attention required */}
+        <section className="lg:col-span-2 space-y-6" aria-labelledby="attention-title">
+          <div className="rounded-2xl border border-zinc-200 bg-white overflow-hidden">
+            <div className="px-5 py-4 border-b border-zinc-100 flex items-center justify-between">
+              <h2 id="attention-title" className="text-base font-semibold text-zinc-950 flex items-center gap-2">
+                <AlertTriangle className={cn("h-5 w-5", data?.attention.length ? "text-amber-500" : "text-zinc-300")} aria-hidden /> Attention required
+              </h2>
+              {(data?.attention.length ?? 0) > 0 && <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">{data?.attention.length}</span>}
             </div>
-            {queue.length === 0 ? (
-              <div className="px-4 py-8 text-center text-xs text-zinc-500">Nothing is waiting on the desk right now.</div>
+            {loading && !data ? (
+              <div className="p-5 space-y-3"><Skeleton className="h-12" /><Skeleton className="h-12" /></div>
+            ) : (data?.attention.length ?? 0) === 0 ? (
+              <div className="px-5 py-10 text-center">
+                <CheckCircle2 className="h-9 w-9 text-emerald-500 mx-auto" aria-hidden />
+                <p className="mt-2 text-base font-semibold text-zinc-900">All clear</p>
+                <p className="text-sm text-zinc-500">Nothing needs your attention right now.</p>
+              </div>
             ) : (
               <ul className="divide-y divide-zinc-100">
-                {queue.map((j) => (
-                  <li key={j.id}>
-                    <Link href={`/jobs/${j.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-zinc-50">
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-zinc-900 truncate">
-                          {j.customerName ?? "Customer"} · <span className="font-normal text-zinc-500">{j.serviceName}</span>
-                        </div>
-                        <div className="text-[11px] text-zinc-400">
-                          {formatDate(j.scheduledDate)} · {formatTimeSlot(j.scheduledTimeSlot)} · {j.propertyTitle}
-                        </div>
-                      </div>
-                      <NextActionChip action={j.nextAction} />
+                {data!.attention.map((it: WorkspaceAttentionItem) => (
+                  <li key={it.key}>
+                    <Link href={it.href} className="flex items-center gap-3 px-5 py-4 hover:bg-zinc-50 transition-colors">
+                      <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", it.tone === "alert" ? "bg-red-500" : "bg-amber-500")} aria-hidden />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-semibold text-zinc-950 truncate">{it.title}</span>
+                        <span className={cn("block text-sm", it.tone === "alert" ? "text-red-700" : "text-amber-800")}>{it.reason}</span>
+                      </span>
+                      <ChevronRight className="h-5 w-5 text-zinc-300 shrink-0" aria-hidden />
                     </Link>
                   </li>
                 ))}
               </ul>
             )}
           </div>
-        </div>
 
-        <div className="space-y-6">
-          {can("finance.view") && <RevenueTrendChart invoices={invoices} payments={payments} />}
-          <div className="rounded-lg border border-zinc-200 bg-white divide-y divide-zinc-100">
-            {[
-              { href: "/operations", title: "Operations", desc: "Today's jobs, exceptions and crews" },
-              { href: "/schedule", title: "Schedule", desc: "Calendar + scheduling board" },
-              { href: "/quality-queue", title: "Quality Queue", desc: "Inspect, pass or raise rework" },
-              { href: "/finance", title: "Finance", desc: "Outstanding, payments, refunds" },
-              { href: "/users", title: "Users & Roles", desc: "Accounts across the nine roles" },
-            ].map((l) => (
-              <Link key={l.href} href={l.href} className="px-4 py-3 flex items-center gap-3 hover:bg-zinc-50 group">
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-zinc-800">{l.title}</div>
-                  <p className="text-[11px] text-zinc-400 truncate">{l.desc}</p>
-                </div>
-                <ChevronRight className="h-3.5 w-3.5 text-zinc-300 group-hover:text-zinc-500" />
-              </Link>
-            ))}
+          {data?.finance && (
+            <Link href="/finance" className="flex items-center gap-4 rounded-2xl border border-zinc-200 bg-white p-5 hover:shadow-md transition-shadow">
+              <span className="h-11 w-11 rounded-xl bg-zinc-100 text-zinc-600 flex items-center justify-center shrink-0"><Wallet className="h-5 w-5" aria-hidden /></span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm text-zinc-500">Still to collect</span>
+                <span className="block text-xl font-semibold text-zinc-950">{formatCurrency(data.finance.outstanding)}</span>
+              </span>
+              <span className="text-right">
+                <span className="block text-sm text-zinc-500">This month</span>
+                <span className="block text-base font-semibold text-emerald-700">{formatCurrency(data.finance.collectedMonth)}</span>
+              </span>
+            </Link>
+          )}
+        </section>
+
+        {/* Today's jobs */}
+        <section className="lg:col-span-3 rounded-2xl border border-zinc-200 bg-white overflow-hidden" aria-labelledby="today-title">
+          <div className="px-5 py-4 border-b border-zinc-100 flex items-center justify-between gap-3">
+            <h2 id="today-title" className="text-base font-semibold text-zinc-950">Today&apos;s jobs</h2>
+            <span className="text-sm text-zinc-500">{counts?.completed ?? 0} completed</span>
           </div>
-        </div>
+          {loading && !data ? (
+            <div className="p-5 space-y-3"><Skeleton className="h-14" /><Skeleton className="h-14" /><Skeleton className="h-14" /></div>
+          ) : todays.length === 0 ? (
+            <div className="p-5">
+              <EmptyState icon={CalendarDays} title="No jobs today" description="No jobs are scheduled for today." actionLabel="Create job" onAction={() => router.push("/jobs?create=true")} className="border-0 py-8" />
+            </div>
+          ) : (
+            <ul className="divide-y divide-zinc-100">
+              {todays.map((q) => (
+                <li key={q.id}>
+                  <Link href={`/jobs/${q.id}`} className="grid grid-cols-[4.5rem_1fr_auto] sm:grid-cols-[5rem_1fr_auto_auto] items-center gap-3 px-5 py-4 hover:bg-zinc-50 transition-colors">
+                    <span className="text-sm font-semibold text-zinc-950">{formatTimeSlot(q.scheduledTimeSlot).split(" - ")[0]}</span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-zinc-950 truncate">{q.customerName ?? "Customer"}</span>
+                      <span className="block text-sm text-zinc-500 truncate">{q.serviceName}{q.city ? ` · ${q.city}` : ""}</span>
+                      <span className="sm:hidden mt-1.5 block"><StatusBadge status={q.status} size="sm" /></span>
+                    </span>
+                    <span className="hidden sm:block"><StatusBadge status={q.status} size="sm" /></span>
+                    <ChevronRight className="h-5 w-5 text-zinc-300" aria-hidden />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="px-5 py-3 border-t border-zinc-100 flex items-center justify-between">
+            <Link href="/jobs" className="text-sm font-semibold text-rose-600 inline-flex items-center gap-1">All jobs <ChevronRight className="h-4 w-4" aria-hidden /></Link>
+            <Link href="/jobs?create=true" className="text-sm font-semibold text-zinc-700 inline-flex items-center gap-1"><Plus className="h-4 w-4" aria-hidden /> New job</Link>
+          </div>
+        </section>
       </div>
     </AdminLayout>
   );

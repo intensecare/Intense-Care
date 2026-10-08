@@ -4,15 +4,14 @@ import bcrypt from "bcryptjs";
 import "dotenv/config";
 
 /**
- * Database seed — creates the FIRST super_admin account only.
+ * Database seed — creates the FIRST Admin account only.
  *
  * Credentials come from environment variables (SEED_SUPERADMIN_EMAIL /
  * SEED_SUPERADMIN_PASSWORD) so no secrets are committed to the repository.
  * There are no other hardcoded users, catalogs, or demo data anywhere in the
  * application: services, rubrics, partners, and staff accounts are all
- * created through the app by the company. Accounts for the other eight RBAC
- * roles (ops_manager, scheduler, field_manager, field_staff, qc_inspector,
- * accounts, referral_partner, customer) are created on Users & Roles.
+ * created through the app by the company. Field Manager and QC accounts are
+ * created on Users; customers never sign in (they use their service link).
  *
  * Run with: npm run db:seed
  */
@@ -41,21 +40,21 @@ async function main() {
   const user = await prisma.user.upsert({
     where: { email: SUPERADMIN_EMAIL!.toLowerCase() },
     create: {
-      name: "Super Admin",
+      name: "Admin",
       email: SUPERADMIN_EMAIL!.toLowerCase(),
       phone: process.env.SEED_SUPERADMIN_PHONE || "",
-      role: "super_admin",
+      role: "admin",
       passwordHash,
       active: true,
     },
     update: {
-      role: "super_admin",
+      role: "admin",
       passwordHash,
       active: true,
     },
   });
 
-  console.log(`Seeded superadmin: ${user.email} (${user.id}, role=${user.role})`);
+  console.log(`Seeded admin: ${user.email} (${user.id}, role=${user.role})`);
 }
 
 main()

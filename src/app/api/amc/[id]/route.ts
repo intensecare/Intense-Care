@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nextJobSerial } from "@/lib/server/job-serial";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission } from "@/lib/server/authz";
@@ -67,6 +68,7 @@ async function spawnVisitJob(
   const slot = visit.scheduledSlot?.trim() || AMC_JOB_TIME_SLOT;
   const job = await prisma.job.create({
     data: {
+      jobSerial: await nextJobSerial(prisma),
       customerId: contract.customerId,
       propertyId: contract.propertyId,
       serviceId: service.id,

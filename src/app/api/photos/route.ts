@@ -8,10 +8,12 @@ import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { recordActivity } from "@/lib/server/activity";
 
+const PHOTO_LABEL = { before: "Before", after: "After", qc: "QC evidence", rework: "Rework" } as const;
+
 const BodySchema = z.object({
   jobId: z.string().min(1).max(64),
   area: z.string().min(1).max(80),
-  photoType: z.enum(["before", "after"]),
+  photoType: z.enum(["before", "after", "qc", "rework"]),
   image: z.string().min(64), // base64 data URL; strict shape validated below
   caption: z.string().max(300).optional(),
 });
@@ -74,7 +76,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { user } = await authorizeJob(jobId, "photos.upload");
+    const { user } = await authorizeJob(jobId, photoType === "qc" ? "qc.inspect" : "photos.upload");
 
     const job = await prisma.job.findUnique({ where: { id: jobId } });
     if (!job) {
@@ -124,7 +126,7 @@ export async function POST(request: Request) {
     await recordActivity({
       jobId,
       type: "PHOTO_UPLOADED",
-      message: `${photoType === "before" ? "Before" : "After"} photo uploaded for ${area.trim()}${caption?.trim() ? ` — “${caption.trim()}”` : ""}`,
+      message: `${PHOTO_LABEL[photoType]} photo uploaded for ${area.trim()}${caption?.trim() ? ` — “${caption.trim()}”` : ""}`,
       actor: { id: user.id, name: user.name, role: user.role },
     });
 
@@ -134,7 +136,7 @@ export async function POST(request: Request) {
         id: photo.id,
         jobId: photo.jobId,
         area: photo.area,
-        photoType: photo.photoType as "before" | "after",
+        photoType: photo.photoType as "before" | "after" | "qc" | "rework",
         photoUrl: photo.photoUrl,
         thumbnailUrl: photo.thumbnailUrl,
         caption: photo.caption,

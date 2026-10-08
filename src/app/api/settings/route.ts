@@ -24,7 +24,7 @@ export async function GET() {
 }
 
 /**
- * PATCH /api/settings — update configuration (super_admin only). Persists to
+ * PATCH /api/settings — update configuration (Admin only). Persists to
  * the DB singleton; already-issued invoices are never rewritten (see lib/tax).
  */
 export async function PATCH(request: Request) {

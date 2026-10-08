@@ -83,11 +83,11 @@ export function SearchableSelect({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
         className={`
-          w-full h-9 rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-900
-          focus:outline-none focus:ring-1 focus:ring-slate-900
+          w-full h-11 rounded-xl border border-zinc-300 bg-white px-3.5 text-sm text-zinc-900
+          focus:outline-none focus:ring-2 focus:ring-rose-500/40
           flex items-center justify-between gap-2
           disabled:opacity-50 disabled:cursor-not-allowed
-          ${isOpen ? "ring-1 ring-slate-900" : ""}
+          ${isOpen ? "ring-2 ring-rose-500/40" : ""}
         `}
       >
         <span className="truncate flex-1 text-left">
@@ -119,7 +119,7 @@ export function SearchableSelect({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search options..."
-                className="w-full h-8 pl-8 pr-2 text-xs border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full h-10 pl-8 pr-2 text-sm border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500/40"
                 autoFocus
               />
               {searchQuery && (
@@ -137,7 +137,7 @@ export function SearchableSelect({
           {/* Options List */}
           <div className="py-1">
             {filteredOptions.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-slate-500 text-center">
+              <div className="px-3 py-4 text-sm text-slate-500 text-center">
                 {emptyMessage}
               </div>
             ) : (
@@ -147,7 +147,7 @@ export function SearchableSelect({
                   type="button"
                   onClick={() => handleSelect(option.value)}
                   className={`
-                    w-full px-3 py-2 text-xs text-left hover:bg-slate-50 transition-colors
+                    w-full px-3 py-2.5 text-sm min-h-11 text-left hover:bg-slate-50 transition-colors
                     ${option.value === value ? "bg-slate-100 font-medium text-slate-900" : "text-slate-700"}
                   `}
                 >

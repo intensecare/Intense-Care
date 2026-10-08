@@ -1,8 +1,19 @@
 "use client";
 
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { FieldJobList } from "@/components/field/FieldJobFlow";
 
-/** Field Manager / Team Leader home — "My Jobs" (§8). */
+function MyJobs() {
+  const tab = useSearchParams()?.get("tab") ?? "home";
+  return <FieldJobList tab={["home", "jobs", "tasks", "profile"].includes(tab) ? tab : "home"} />;
+}
+
+/** Field Manager app — Home · Jobs · Tasks · Profile (only their assigned jobs). */
 export default function MyJobsPage() {
-  return <FieldJobList mode="manager" />;
+  return (
+    <Suspense>
+      <MyJobs />
+    </Suspense>
+  );
 }

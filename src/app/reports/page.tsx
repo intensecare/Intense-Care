@@ -1,333 +1,170 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
+import { EmptyState } from "@/components/common/EmptyState";
+import { DataTable } from "@/components/ui/data-table";
+import { SkeletonList } from "@/components/ui/states";
 import { useApp } from "@/lib/app-context";
-import { ASSIGNABLE_ROLES } from "@/lib/rbac";
-import { formatCurrency } from "@/lib/utils";
-import {
-  BarChart3,
-  TrendingUp,
-  ShieldCheck,
-  Star,
-  Users,
-  Clock,
-  Sparkles,
-  Share2,
-  Calendar,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useAuth } from "@/lib/auth-context";
+import { formatCurrency, cn } from "@/lib/utils";
+import { BarChart3 } from "lucide-react";
 
+const DONE = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
+type Period = "month" | "quarter" | "year";
+
+/** Reports — a handful of numbers that answer "how are we doing?". */
 export default function ReportsPage() {
-  const { jobs, services, users, partners, complaints, qualityChecks } = useApp();
+  const { jobs, services, users, complaints, qualityChecks, loading } = useApp();
+  const { can } = useAuth();
+  const [period, setPeriod] = useState<Period>("month");
 
-  // Customer satisfaction metrics resolved from server-recorded feedback
-  // (stored on completion invites by POST /api/feedback).
-  const [feedbackRows, setFeedbackRows] = React.useState<
-    { jobId: string; rating: number; tags: string[]; comment: string | null; googleReviewClicked: boolean }[]
-  >([]);
+  const from = useMemo(() => {
+    const d = new Date();
+    if (period === "month") return `${d.toISOString().slice(0, 7)}-01`;
+    if (period === "quarter") return new Date(d.getFullYear(), d.getMonth() - 2, 1).toISOString().slice(0, 10);
+    return `${d.getFullYear()}-01-01`;
+  }, [period]);
 
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // Feedback rows come back per job; gather for completed jobs only.
-      const done = jobs.filter((j) => j.status === "COMPLETED" || j.status === "FEEDBACK_REQUESTED").slice(0, 50);
-      const rows = await Promise.all(
-        done.map(async (j) => {
-          try {
-            const res = await fetch(`/api/feedback?jobId=${encodeURIComponent(j.id)}`);
-            const json = await res.json().catch(() => null);
-            if (res.ok && json?.success && json.data) {
-              return {
-                jobId: j.id,
-                rating: json.data.rating as number,
-                tags: (json.data.tags || []) as string[],
-                comment: (json.data.comment ?? null) as string | null,
-                googleReviewClicked: Boolean(json.data.googleReviewClicked),
-              };
-            }
-          } catch (e) {}
-          return null;
-        })
-      );
-      if (!cancelled) {
-        setFeedbackRows(rows.filter(Boolean) as typeof feedbackRows);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [jobs]);
+  const inPeriod = jobs.filter((j) => j.scheduledDate >= from && j.status !== "CANCELLED");
+  const ids = new Set(inPeriod.map((j) => j.id));
+  const done = inPeriod.filter((j) => DONE.includes(j.status));
+  const checks = qualityChecks.filter((q) => ids.has(q.jobId));
+  // First-time pass: the job's FIRST QC round passed.
+  const firstRounds = Array.from(new Set(checks.map((q) => q.jobId))).map((id) => checks.filter((q) => q.jobId === id).sort((a, b) => (a.inspectedAt ?? "").localeCompare(b.inspectedAt ?? ""))[0]);
+  const firstPass = firstRounds.length ? Math.round((firstRounds.filter((q) => q.status === "PASS").length / firstRounds.length) * 100) : null;
+  const rated = inPeriod.filter((j) => typeof j.customerFeedbackRating === "number");
+  const avgRating = rated.length ? Math.round((rated.reduce((a, j) => a + (j.customerFeedbackRating ?? 0), 0) / rated.length) * 10) / 10 : null;
+  const custCounts = new Map<string, number>();
+  jobs.forEach((j) => custCounts.set(j.customerId, (custCounts.get(j.customerId) ?? 0) + 1));
+  const repeat = custCounts.size ? Math.round((Array.from(custCounts.values()).filter((n) => n > 1).length / custCounts.size) * 100) : null;
+  const issues = complaints.filter((c) => ids.has(c.jobId));
+  const openIssues = issues.filter((c) => c.status !== "resolved" && c.status !== "closed").length;
+  const showMoney = can("finance.view");
+  const revenue = done.reduce((a, j) => a + (j.amount ?? 0), 0);
 
-  const [period, setPeriod] = useState<"month" | "quarter" | "year">("month");
+  const byService = services
+    .map((s) => {
+      const list = done.filter((j) => j.serviceId === s.id);
+      return { id: s.id, name: s.name, jobs: list.length, revenue: list.reduce((a, j) => a + (j.amount ?? 0), 0) };
+    })
+    .filter((r) => r.jobs > 0)
+    .sort((a, b) => b.jobs - a.jobs);
+  const maxJobs = Math.max(1, ...byService.map((r) => r.jobs));
 
-  // Quality metrics — computed from real QC audit records
-  const auditedChecks = qualityChecks.filter((qc) => qc.status === "PASS" || qc.status === "REWORK_REQUIRED");
-  const avgQcScore = qualityChecks.length > 0
-    ? Math.round(qualityChecks.reduce((acc, qc) => acc + qc.score, 0) / qualityChecks.length)
-    : 0;
-  const firstPassRate = auditedChecks.length > 0
-    ? Math.round((qualityChecks.filter((qc) => qc.status === "PASS").length / auditedChecks.length) * 100)
-    : 100;
-  const reworkRate = auditedChecks.length > 0 ? 100 - firstPassRate : 0;
-
-  // CSAT — computed from server-recorded customer feedback
-  const ratedFeedback = feedbackRows.filter((f) => typeof f.rating === "number");
-  const avgCsat = ratedFeedback.length > 0
-    ? Math.round((ratedFeedback.reduce((acc, f) => acc + f.rating, 0) / ratedFeedback.length) * 10) / 10
-    : 0;
-  const fiveStarCount = ratedFeedback.filter((f) => f.rating === 5).length;
-  const fiveStarRate = ratedFeedback.length > 0
-    ? Math.round((fiveStarCount / ratedFeedback.length) * 100)
-    : 0;
-
-  // Repeat client rate — customers with 2+ bookings / all customers with bookings
-  const customersWithBookings = new Set(jobs.map((j) => j.customerId));
-  const repeatCustomers = Array.from(customersWithBookings).filter(
-    (cid) => jobs.filter((j) => j.customerId === cid).length >= 2
-  ).length;
-  const repeatRate = customersWithBookings.size > 0
-    ? Math.round((repeatCustomers / customersWithBookings.size) * 100)
-    : 0;
-
-  // Analytics Calculations
-  const completedJobs = jobs.filter((j) => j.status === "COMPLETED" || j.status === "FEEDBACK_REQUESTED");
-  const totalRevenue = jobs.reduce((acc, j) => acc + (j.amount ?? 0), 0);
-
-  // Revenue by Service Breakdown
-  const serviceBreakdown = services.map((s) => {
-    const srvJobs = jobs.filter((j) => j.serviceId === s.id);
-    const rev = srvJobs.reduce((acc, j) => acc + (j.amount ?? 0), 0);
-    return {
-      name: s.name,
-      count: srvJobs.length,
-      revenue: rev,
-      percentage: Math.round((rev / (totalRevenue || 1)) * 100),
-    };
-  });
-
-  // Per-Worker Performance (direct assignment model — no squads)
-  const workerPerformance = users
-    .filter((u) => ASSIGNABLE_ROLES.includes(u.role))
-    .map((w) => {
-      const workerJobs = jobs.filter((j) => (j.assignedStaffIds || []).includes(w.id));
-      const done = workerJobs.filter((j) => j.status === "COMPLETED" || j.status === "FEEDBACK_REQUESTED").length;
-      const leadJobs = workerJobs.filter((j) => j.assignedStaffIds?.[0] === w.id).length;
+  const managers = users
+    .filter((u) => u.role === "field_manager")
+    .map((u) => {
+      const mine = inPeriod.filter((j) => j.assignedManagerId === u.id || j.assignedStaffIds.includes(u.id));
+      const mineIds = new Set(mine.map((j) => j.id));
+      const mineChecks = qualityChecks.filter((q) => mineIds.has(q.jobId));
+      const r = mine.filter((j) => typeof j.customerFeedbackRating === "number");
       return {
-        id: w.id,
-        name: w.name,
-        total: workerJobs.length,
-        completed: done,
-        leadJobs,
-        revenue: workerJobs.reduce((acc, j) => acc + (j.amount ?? 0), 0),
+        id: u.id,
+        name: u.name,
+        jobs: mine.length,
+        completed: mine.filter((j) => DONE.includes(j.status)).length,
+        rework: mineChecks.filter((q) => q.status !== "PASS").length,
+        rating: r.length ? (r.reduce((a, j) => a + (j.customerFeedbackRating ?? 0), 0) / r.length).toFixed(1) : "—",
       };
-    });
+    })
+    .sort((a, b) => b.completed - a.completed);
+
+  const metrics = [
+    { label: "Jobs completed", value: String(done.length), hint: `${inPeriod.length} booked` },
+    { label: "First-time QC pass", value: firstPass === null ? "—" : `${firstPass}%`, hint: "passed without rework", tone: firstPass !== null && firstPass < 80 ? "text-amber-700" : "text-emerald-700" },
+    { label: "Customer rating", value: avgRating === null ? "—" : `${avgRating} ★`, hint: `${rated.length} rating${rated.length === 1 ? "" : "s"}` },
+    showMoney
+      ? { label: "Revenue (completed)", value: formatCurrency(revenue), hint: "from completed jobs" }
+      : { label: "Repeat customers", value: repeat === null ? "—" : `${repeat}%`, hint: "booked more than once" },
+  ];
 
   return (
     <AdminLayout>
       <PageHeader
-        title="Operations & Growth Analytics"
-        description="Comprehensive business performance dashboard: service unit economics, field-worker delivery benchmarks, rework rates, and referral channel conversions."
-        breadcrumbs={[
-          { label: "Operations", href: "/" },
-          { label: "Reports & Analytics" },
-        ]}
+        title="Reports"
+        description="How the business is doing."
         actions={
-          <div className="inline-flex rounded-md border border-slate-200 bg-white p-1 text-xs">
-            <button
-              onClick={() => setPeriod("month")}
-              className={`px-3 py-1 rounded font-medium ${
-                period === "month" ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Current Month
-            </button>
-            <button
-              onClick={() => setPeriod("quarter")}
-              className={`px-3 py-1 rounded font-medium ${
-                period === "quarter" ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Q3 2026
-            </button>
-            <button
-              onClick={() => setPeriod("year")}
-              className={`px-3 py-1 rounded font-medium ${
-                period === "year" ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Full Year
-            </button>
+          <div className="inline-flex rounded-xl bg-zinc-100 p-1" role="radiogroup" aria-label="Period">
+            {([["month", "This month"], ["quarter", "3 months"], ["year", "This year"]] as const).map(([k, l]) => (
+              <button key={k} role="radio" aria-checked={period === k} onClick={() => setPeriod(k)} className={cn("h-9 px-3.5 rounded-lg text-sm font-medium", period === k ? "bg-white shadow-sm font-semibold text-zinc-950" : "text-zinc-600")}>
+                {l}
+              </button>
+            ))}
           </div>
         }
       />
 
-      {/* Row 1: High Level Executive Metrics — all computed from live data */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-        <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold text-slate-500">
-            Average Quality Score
-          </div>
-          <div className="text-2xl font-semibold text-slate-900 mt-1">{avgQcScore}%</div>
-          <div className="text-[11px] text-emerald-600 font-medium">{firstPassRate}% First-Pass Rate</div>
-        </div>
-
-        <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold text-slate-500">
-            Rework Defect Rate
-          </div>
-          <div className="text-2xl font-semibold text-amber-700 mt-1">{reworkRate}%</div>
-          <div className="text-[11px] text-slate-400">Industry benchmark: 12%</div>
-        </div>
-
-        <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold text-slate-500">
-            Customer CSAT Rating
-          </div>
-          <div className="text-2xl font-semibold text-amber-600 mt-1 flex items-center gap-1">
-            <Star className="h-5 w-5 fill-amber-400 text-amber-400" />
-            {avgCsat || "—"} {avgCsat ? "/ 5.0" : ""}
-          </div>
-          <div className="text-[11px] text-slate-400">{fiveStarRate}% 5-Star Reviews</div>
-        </div>
-
-        <div className="p-4 rounded-lg border border-slate-200 bg-white shadow-xs">
-          <div className="text-xs font-semibold text-slate-500">
-            Repeat Client Rate
-          </div>
-          <div className="text-2xl font-semibold text-blue-700 mt-1">{repeatRate}%</div>
-          <div className="text-[11px] text-emerald-600 font-medium">{repeatCustomers} repeat client{repeatCustomers === 1 ? "" : "s"}</div>
-        </div>
-      </div>
-
-      {/* Row 2: Service Unit Economics & Worker Benchmarks */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* Service Revenue Distribution */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-900">
-              Revenue by Service Package
-            </h3>
-            <span className="text-xs text-slate-400">Gross Contribution</span>
-          </div>
-
-          <div className="space-y-3">
-            {serviceBreakdown.map((s) => (
-              <div key={s.name} className="space-y-1 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-800">{s.name}</span>
-                  <span className="font-semibold text-slate-900">
-                    {formatCurrency(s.revenue)} ({s.percentage}%)
-                  </span>
-                </div>
-                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-slate-900 rounded-full"
-                    style={{ width: `${Math.max(5, s.percentage)}%` }}
-                  />
-                </div>
+      {loading && jobs.length === 0 ? (
+        <SkeletonList rows={3} />
+      ) : inPeriod.length === 0 ? (
+        <EmptyState icon={BarChart3} title="No jobs in this period" description="Reports fill in as jobs are booked and completed." />
+      ) : (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {metrics.map((m) => (
+              <div key={m.label} className="rounded-2xl border border-zinc-200 bg-white p-4 sm:p-5">
+                <div className="text-sm text-zinc-500">{m.label}</div>
+                <div className={cn("text-2xl sm:text-3xl font-semibold mt-1 break-words", "tone" in m && m.tone ? m.tone : "text-zinc-950")}>{m.value}</div>
+                <div className="text-xs text-zinc-500 mt-1">{m.hint}</div>
               </div>
             ))}
           </div>
-        </div>
 
-        {/* Worker Performance Matrix */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-900">
-              Field Worker Delivery & SLA Benchmarks
-            </h3>
-            <span className="text-xs text-slate-400">Performance Index</span>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <section className="rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6">
+              <h2 className="text-base font-semibold text-zinc-950 mb-4">Completed jobs by service</h2>
+              {byService.length === 0 ? (
+                <p className="text-sm text-zinc-500">No completed jobs yet in this period.</p>
+              ) : (
+                <ul className="space-y-4">
+                  {byService.map((r) => (
+                    <li key={r.id}>
+                      <div className="flex items-baseline justify-between gap-3 text-sm">
+                        <span className="font-medium text-zinc-900 min-w-0 truncate">{r.name}</span>
+                        <span className="text-zinc-600 shrink-0">{r.jobs} job{r.jobs === 1 ? "" : "s"}{showMoney ? ` · ${formatCurrency(r.revenue)}` : ""}</span>
+                      </div>
+                      <div className="mt-1.5 h-2 rounded-full bg-zinc-100 overflow-hidden" aria-hidden>
+                        <div className="h-full rounded-full bg-rose-500" style={{ width: `${(r.jobs / maxJobs) * 100}%` }} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6">
+              <h2 className="text-base font-semibold text-zinc-950 mb-4">Customer issues</h2>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl bg-zinc-50 p-4"><div className="text-sm text-zinc-500">Reported</div><div className="text-2xl font-semibold text-zinc-950">{issues.length}</div></div>
+                <div className="rounded-xl bg-zinc-50 p-4"><div className="text-sm text-zinc-500">Still open</div><div className={cn("text-2xl font-semibold", openIssues ? "text-red-700" : "text-emerald-700")}>{openIssues}</div></div>
+              </div>
+              {repeat !== null && showMoney && <p className="text-sm text-zinc-600 mt-4"><strong className="text-zinc-950">{repeat}%</strong> of customers booked more than once.</p>}
+            </section>
           </div>
 
-          <div className="space-y-3">
-            {workerPerformance.length === 0 ? (
-              <div className="text-xs text-slate-400 p-4 text-center">
-                No field workers registered yet.
-              </div>
+          <section className="space-y-3">
+            <h2 className="text-lg font-semibold text-zinc-950">Field Managers</h2>
+            {managers.length === 0 ? (
+              <p className="text-sm text-zinc-500">No Field Managers yet.</p>
             ) : (
-              workerPerformance.map((w) => (
-                <div
-                  key={w.id}
-                  className="p-3 rounded-lg border border-slate-100 bg-slate-50/70 text-xs flex items-center justify-between gap-3"
-                >
-                  <div>
-                    <div className="font-semibold text-slate-900">{w.name}</div>
-                    <div className="text-[11px] text-slate-500">
-                      {w.completed} job{w.completed === 1 ? "" : "s"} closed • led {w.leadJobs} as lead
-                    </div>
-                  </div>
-
-                  <div className="text-right">
-                    <div className="font-semibold text-slate-900">
-                      {formatCurrency(w.revenue)}
-                    </div>
-                    <div className="text-[11px] text-slate-500 font-semibold">
-                      {w.total} assigned
-                    </div>
-                  </div>
-                </div>
-              ))
+              <DataTable
+                caption="Field Manager performance"
+                rows={managers}
+                rowKey={(m) => m.id}
+                columns={[
+                  { key: "name", header: "Field Manager", mobile: "title", cell: (m) => <span className="font-semibold">{m.name}</span> },
+                  { key: "jobs", header: "Jobs", align: "right", cell: (m) => m.jobs },
+                  { key: "done", header: "Completed", align: "right", cell: (m) => m.completed },
+                  { key: "rework", header: "Rework rounds", align: "right", cell: (m) => <span className={m.rework ? "text-amber-700 font-semibold" : ""}>{m.rework}</span> },
+                  { key: "rating", header: "Avg rating", align: "right", cell: (m) => m.rating },
+                ]}
+              />
             )}
-          </div>
+          </section>
         </div>
-      </div>
-
-      {/* Row 3: Referral Channels & Complaint Resolution SLAs */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Referral Channels */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-900">
-              Partner Channel Attribution & ROI
-            </h3>
-            <span className="text-xs text-slate-400">Conversion Funnel</span>
-          </div>
-
-          <div className="space-y-3">
-            {partners.map((p) => (
-              <div key={p.id} className="p-3 rounded-lg border border-slate-100 text-xs space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-900">{p.name}</span>
-                  <span className="font-semibold text-emerald-700">{formatCurrency(p.totalRevenueGenerated)}</span>
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-500">
-                  <span>Code: <strong className="font-mono text-slate-700">{p.code}</strong></span>
-                  <span>{p.totalConversions} conversions from {p.totalReferrals} leads ({Math.round((p.totalConversions / p.totalReferrals) * 100)}%)</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Complaint Resolution SLA */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-900">
-              Quality Incident & Complaint SLAs
-            </h3>
-            <span className="text-xs text-slate-400">Resolution Speed</span>
-          </div>
-
-          <div className="space-y-3 text-xs">
-            {complaints.map((c) => (
-              <div key={c.id} className="p-3 rounded-lg border border-slate-100 bg-slate-50/60 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono font-semibold text-slate-900">{c.jobId}</span>
-                  <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
-                    {c.status}
-                  </span>
-                </div>
-                <p className="text-slate-800 font-medium">{c.description}</p>
-                <div className="text-[11px] text-slate-400">
-                  Assigned Manager: <strong className="text-slate-700">{c.assignedOwnerName}</strong>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
     </AdminLayout>
   );
 }
