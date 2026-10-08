@@ -6,12 +6,29 @@ import { Lock, Mail, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 
+/** One demo account per role. Provisioned by .e2e-tmp/demo-accounts.mjs. */
+const DEMO_ACCOUNTS = [
+  { role: "super_admin", label: "Super Admin", email: "pahima@intensecare.com" },
+  { role: "ops_manager", label: "Operations", email: "ops.demo@intensecare.com" },
+  { role: "scheduler", label: "Scheduler", email: "scheduler.demo@intensecare.com" },
+  { role: "field_manager", label: "Field Manager", email: "fieldmgr.demo@intensecare.com" },
+  { role: "field_staff", label: "Field Staff", email: "field.demo@intensecare.com" },
+  { role: "qc_inspector", label: "Quality", email: "qc.demo@intensecare.com" },
+  { role: "accounts", label: "Accounts", email: "accounts.demo@intensecare.com" },
+  { role: "referral_partner", label: "Partner", email: "sneha.demo@intensecare.com" },
+  { role: "customer", label: "Customer", email: "rishab.demo@intensecare.com" },
+] as const;
+
+const DEMO_PASSWORD = "intense123";
+
 export default function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [demoOpen, setDemoOpen] = useState(false);
+  const [demoBusy, setDemoBusy] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
