@@ -130,7 +130,7 @@ export default function OperationsDashboardPage() {
             <div className="p-5 space-y-3"><Skeleton className="h-14" /><Skeleton className="h-14" /><Skeleton className="h-14" /></div>
           ) : todays.length === 0 ? (
             <div className="p-5">
-              <EmptyState icon={CalendarDays} title="No jobs today" description="No jobs are scheduled for today." actionLabel="Create job" onAction={() => router.push("/jobs?create=true")} className="border-0 py-8" />
+              <EmptyState icon={CalendarDays} title="No jobs today" description="No jobs are scheduled for today." actionLabel="Create job" onAction={() => router.push("/jobs/new")} className="border-0 py-8" />
             </div>
           ) : (
             <ul className="divide-y divide-zinc-100">
@@ -152,7 +152,7 @@ export default function OperationsDashboardPage() {
           )}
           <div className="px-5 py-3 border-t border-zinc-100 flex items-center justify-between">
             <Link href="/jobs" className="text-sm font-semibold text-rose-600 inline-flex items-center gap-1">All jobs <ChevronRight className="h-4 w-4" aria-hidden /></Link>
-            <Link href="/jobs?create=true" className="text-sm font-semibold text-zinc-700 inline-flex items-center gap-1"><Plus className="h-4 w-4" aria-hidden /> New job</Link>
+            <Link href="/jobs/new" className="text-sm font-semibold text-zinc-700 inline-flex items-center gap-1"><Plus className="h-4 w-4" aria-hidden /> New job</Link>
           </div>
         </section>
       </div>

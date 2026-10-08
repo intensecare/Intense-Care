@@ -21,6 +21,8 @@ import {
   FileText,
   PieChart,
   Sparkles as SparklesIcon,
+  FileSignature,
+  Star,
   Search,
   Plus,
   X,
@@ -46,6 +48,8 @@ const ICONS: Record<string, React.ElementType> = {
   "/gst/invoices": FileText,
   "/gst/reports": BarChart3,
   "/assistant": SparklesIcon,
+  "/quotations": FileSignature,
+  "/reviews": Star,
   "/reports": BarChart3,
   "/users": UserCog,
   "/settings": Settings,
@@ -124,11 +128,14 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
             <img src="/logo.png" alt="" className="h-full w-full object-contain" />
           </span>
           <span className="leading-tight">
-            <span className="block text-sm font-semibold text-zinc-950">Intense Care</span>
+            <span className="block text-sm font-bold tracking-[0.14em] text-zinc-950">INTENSE CARE</span>
             <span className="block text-xs text-zinc-500">{workspace.title}</span>
           </span>
         </Link>
         <nav aria-label="Main" className="flex-1 overflow-y-auto p-3 space-y-0.5">
+          {secondaryNav.length > 0 && (
+            <div className="px-3 pt-1 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Main</div>
+          )}
           {[...primaryNav, ...secondaryNav].map((item, i) => {
             const Icon = ICONS[item.href] ?? Briefcase;
             const active = isActive(item.href);
@@ -200,7 +207,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
           )}
           <span className="hidden sm:inline-flex">{textSize}</span>
           {can("jobs.create") && (
-            <Link href="/jobs?create=true" className="h-10 px-3 sm:px-4 rounded-xl bg-rose-500 text-white text-sm font-semibold inline-flex items-center gap-1.5 hover:bg-rose-600 shrink-0">
+            <Link href="/jobs/new" className="h-10 px-3 sm:px-4 rounded-xl bg-rose-500 text-white text-sm font-semibold inline-flex items-center gap-1.5 hover:bg-rose-600 shrink-0">
               <Plus className="h-5 w-5" aria-hidden /> <span className="hidden sm:inline">New Job</span><span className="sr-only sm:hidden">New Job</span>
             </Link>
           )}

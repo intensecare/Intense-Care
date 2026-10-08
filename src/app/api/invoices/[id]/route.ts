@@ -29,6 +29,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
             service: { select: { name: true } },
             property: { select: { address: true, city: true, postalCode: true } },
             customer: { select: { name: true, phone: true, email: true, address: true, gstin: true } },
+            locationAddress: true,
           },
         },
       },
@@ -51,7 +52,8 @@ export async function GET(_request: Request, { params }: { params: { id: string 
       },
       customer: {
         name: c.name,
-        address: c.address || [row.job.property.address, row.job.property.city, row.job.property.postalCode].filter(Boolean).join(", "),
+        address: row.billingAddress || c.address || [row.job.property.address, row.job.property.city, row.job.property.postalCode].filter(Boolean).join(", "),
+        serviceAddress: row.serviceAddress || row.job.locationAddress || [row.job.property.address, row.job.property.city].filter(Boolean).join(", "),
         gstin: row.customerGstin ?? undefined,
         // Contact details are for Admin only — a Tax Officer sees what a GST invoice needs.
         phone: full ? c.phone : undefined,
@@ -64,6 +66,10 @@ export async function GET(_request: Request, { params }: { params: { id: string 
         email: settings.companyEmail,
         gstin: row.invoiceType === "GST" ? row.supplierGstin || settings.gstin || "" : "",
         sacCode: row.invoiceType === "GST" ? settings.sacCode || "" : "",
+        tagline: settings.companyTagline,
+        logo: settings.logoDataUrl,
+        signature: settings.signatureDataUrl,
+        signatoryName: settings.signatoryName,
       },
     });
   } catch (err) {

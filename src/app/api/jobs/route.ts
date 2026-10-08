@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
-import { nextJobSerial } from "@/lib/server/job-serial";
-import { nextInvoiceNumber } from "@/lib/server/invoices";
-import { computeInvoiceFigures } from "@/lib/tax";
+import { validateCrew, createJobWithInvoice, cleanVisibility, afterJobCreated } from "@/lib/server/job-create";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, jobWhereFor, dispatchWindowApplies } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
-import { syncJobEvent } from "@/lib/server/google-calendar";
 import {
   serializeJob,
   serializeInvoice,
@@ -15,21 +12,14 @@ import {
   withStaffNames,
   fail,
   readJson,
-  nextDocNumber,
 } from "@/lib/server/serialize";
 import { projectJob } from "@/lib/server/projections";
 import { recordAudit } from "@/lib/server/audit";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import { dispatchCutoffTime } from "@/lib/server/policy";
 import { getSystemSettings } from "@/lib/server/settings";
-import { getTaxRate } from "@/lib/tax";
 import { logger } from "@/lib/server/logger";
-import { ASSIGNABLE_ROLES, can } from "@/lib/rbac";
-
-/** Service row including its rubric, used to instantiate the job checklist. */
-const SERVICE_WITH_RUBRIC_INCLUDE = {
-  checklistTemplate: { orderBy: { position: "asc" as const } },
-} as const;
+import { can } from "@/lib/rbac";
 
 /** Include shape shared by every job-list fetch (display joins only). */
 const JOB_LIST_INCLUDE = {
@@ -99,9 +89,18 @@ const CreateJobSchema = z.object({
   assignedStaffIds: z.array(z.string().max(64)).default([]),
   assignedManagerId: z.string().max(64).optional(),
   notes: z.string().max(2000).optional(),
+  /** Notes the customer may see (internal notes stay in `notes`). */
+  customerNotes: z.string().max(2000).optional(),
   referralPartnerId: z.string().max(64).optional(),
-  /** The Admin's choice for this job's invoice. GST unless told otherwise. */
-  invoiceType: z.enum(["GST", "NON_GST"]).default("GST"),
+  propertyTitle: z.string().max(160).optional(),
+  /** Service location (map pin). Defaults to the property's location. */
+  locationLat: z.number().min(-90).max(90).nullable().optional(),
+  locationLng: z.number().min(-180).max(180).nullable().optional(),
+  locationAddress: z.string().max(500).optional(),
+  /** Per-job customer visibility (unset keys follow the company default). */
+  customerVisibility: z.record(z.string(), z.boolean()).optional(),
+  /** The Admin's choice for this job's invoice; default follows the service's GST setting. */
+  invoiceType: z.enum(["GST", "NON_GST"]).optional(),
   /** GST only: inter-state supply → IGST instead of CGST + SGST. */
   interState: z.boolean().optional().default(false),
 });
@@ -117,7 +116,7 @@ export async function POST(request: Request) {
     const parsed = CreateJobSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json(
-        { success: false, error: "Invalid job payload.", details: parsed.error.flatten() },
+        { success: false, error: parsed.error.issues[0]?.message || "Invalid job payload.", details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -131,48 +130,14 @@ export async function POST(request: Request) {
       }
     }
 
-    const service = await prisma.service.findUnique({
-      where: { id: d.serviceId },
-      include: SERVICE_WITH_RUBRIC_INCLUDE,
-    });
+    const service = await prisma.service.findUnique({ where: { id: d.serviceId }, select: { id: true, name: true, active: true, gstTreatment: true } });
     if (!service) return fail("Service package not found. Create it on the Services page first.", 404);
     if (!service.active) return fail("This service package is inactive.", 409);
 
-    // Crew validation + double-booking guard (mirrors PATCH /api/jobs/[id]).
-    const crewIds = Array.from(new Set([...(d.assignedManagerId ? [d.assignedManagerId] : []), ...d.assignedStaffIds]));
-    let assignedManagerId: string | null = d.assignedManagerId ?? null;
-    if (crewIds.length > 0) {
-      if (!can(user, "jobs.assign")) return fail("Your role may create bookings but not assign crews.", 403);
-      const rows = await prisma.user.findMany({
-        where: { id: { in: crewIds }, role: { in: ASSIGNABLE_ROLES }, active: true },
-        select: { id: true, role: true },
-      });
-      const valid = new Map(rows.map((r) => [r.id, r.role]));
-      if (crewIds.some((id) => !valid.has(id))) {
-        return fail("One or more selected workers are not active field accounts.", 400);
-      }
-      if (!assignedManagerId) {
-        assignedManagerId = d.assignedStaffIds.find((id) => valid.get(id) === "field_manager") ?? null;
-      }
-      const terminal = ["COMPLETED", "CANCELLED", "CLOSED"];
-      const sameSlot = await prisma.job.findMany({
-        where: {
-          scheduledDate: d.scheduledDate,
-          scheduledTimeSlot: d.scheduledTimeSlot,
-          status: { notIn: terminal },
-          OR: [{ assignedStaffIds: { hasSome: crewIds } }, { assignedManagerId: { in: crewIds } }],
-        },
-        select: { id: true },
-      });
-      if (sameSlot.length > 0) {
-        return fail("Worker already booked on another job in this date & time slot (double-booking is not allowed).", 409);
-      }
-    }
+    const crew = await validateCrew(user, d);
 
     // Customer (inline creation supported).
     let customerId = d.customerId;
-    let customerName = d.customerName ?? "Customer";
-    let customerGstin: string | null = null;
     if (!customerId) {
       if (!d.customerName || !d.customerPhone) {
         return fail("Customer name and phone are required for a new customer.", 400);
@@ -195,97 +160,51 @@ export async function POST(request: Request) {
     } else {
       const existing = await prisma.customer.findUnique({ where: { id: customerId } });
       if (!existing) return fail("Customer not found.", 404);
-      customerName = existing.name;
-      customerGstin = existing.gstin;
     }
 
-    // Property (inline creation supported).
+    // Property (inline creation supported). A map pin on a new property is kept.
     let propertyId = d.propertyId;
     if (!propertyId) {
-      if (!d.propertyAddress) return fail("Property address is required.", 400);
+      const address = d.propertyAddress || d.locationAddress;
+      if (!address) return fail("Property address is required.", 400);
       const created = await prisma.property.create({
         data: {
           customerId,
-          title: `${(d.customerName || "Customer").split(" ")[0]}'s Property`,
-          address: d.propertyAddress,
+          title: d.propertyTitle || `${(d.customerName || "Customer").split(" ")[0]}'s Property`,
+          address,
+          lat: d.locationLat ?? null,
+          lng: d.locationLng ?? null,
         },
       });
       propertyId = created.id;
-    } else {
-      const existing = await prisma.property.findUnique({ where: { id: propertyId } });
-      if (!existing) return fail("Property not found.", 404);
-      if (existing.customerId !== customerId) return fail("Property does not belong to this customer.", 400);
     }
 
     const settings = await getSystemSettings();
-    const subtotal = service.basePrice;
-    const figures = computeInvoiceFigures({
-      invoiceType: d.invoiceType,
-      subtotal,
-      gstRatePercent: settings.taxRatePercent,
-      interState: d.interState,
-    });
-    const isGst = figures.invoiceType === "GST";
-
-    const result = await prisma.$transaction(async (tx) => {
-      const job = await tx.job.create({
-        data: {
-          jobSerial: await nextJobSerial(tx, customerName, d.scheduledDate),
-          customerId,
-          propertyId,
-          serviceId: service.id,
-          scheduledDate: d.scheduledDate,
-          scheduledTimeSlot: d.scheduledTimeSlot,
-          assignedStaffIds: d.assignedStaffIds,
-          assignedManagerId,
-          amount: subtotal,
-          status: crewIds.length > 0 ? "ASSIGNED" : "SCHEDULED",
-          notes: d.notes,
-          referralPartnerId: d.referralPartnerId,
-        },
-      });
-
-      if (service.checklistTemplate.length > 0) {
-        await tx.jobChecklistItem.createMany({
-          data: service.checklistTemplate.map((item) => ({
-            jobId: job.id,
-            area: item.area,
-            task: item.task,
-            critical: item.critical,
-          })),
-        });
-      }
-
-      const invoice = await tx.invoice.create({
-        data: {
-          invoiceNumber: await nextInvoiceNumber(tx, figures.invoiceType),
-          invoiceType: figures.invoiceType,
-          jobId: job.id,
-          customerId,
-          subtotal: figures.subtotal,
-          tax: figures.tax,
-          gstRate: figures.gstRate,
-          cgst: figures.cgst,
-          sgst: figures.sgst,
-          igst: figures.igst,
-          interState: isGst && d.interState,
-          customerGstin: isGst ? customerGstin : null,
-          supplierGstin: isGst ? settings.gstin?.trim() || null : null,
-          total: figures.total,
-          balanceDue: figures.total,
-          dueDate: d.scheduledDate,
-        },
-      });
-
-      await tx.customer.update({ where: { id: customerId }, data: { totalBookings: { increment: 1 } } });
-      if (d.referralPartnerId) {
-        await tx.referralPartner.update({
-          where: { id: d.referralPartnerId },
-          data: { totalReferrals: { increment: 1 } },
-        });
-      }
-      return { job, invoice };
-    });
+    const invoiceType = d.invoiceType ?? (service.gstTreatment === "NON_GST" ? "NON_GST" : "GST");
+    const result = await createJobWithInvoice(
+      {
+        customerId,
+        propertyId,
+        serviceId: service.id,
+        scheduledDate: d.scheduledDate,
+        scheduledTimeSlot: d.scheduledTimeSlot,
+        assignedManagerId: crew.assignedManagerId,
+        assignedStaffIds: crew.assignedStaffIds,
+        notes: d.notes,
+        customerNotes: d.customerNotes,
+        referralPartnerId: d.referralPartnerId,
+        location:
+          d.locationLat !== undefined || d.locationAddress
+            ? { lat: d.locationLat ?? null, lng: d.locationLng ?? null, address: d.locationAddress ?? null }
+            : null,
+        customerVisibility: cleanVisibility(d.customerVisibility),
+        invoice: { type: invoiceType, interState: d.interState },
+      },
+      settings
+    );
+    if (d.referralPartnerId) {
+      await prisma.referralPartner.update({ where: { id: d.referralPartnerId }, data: { totalReferrals: { increment: 1 } } }).catch(() => {});
+    }
 
     logger.info("jobs.created", { jobId: result.job.id, serviceId: service.id, by: user.id });
     void recordAudit({
@@ -298,16 +217,7 @@ export async function POST(request: Request) {
       details: `${service.name} on ${d.scheduledDate} ${d.scheduledTimeSlot}`,
       request,
     });
-
-    void syncJobEvent(result.job.id).catch(() => {});
-    void (async () => {
-      try {
-        const { ensureCustomerLink } = await import("@/lib/server/qr-service");
-        await ensureCustomerLink(result.job.id, { id: user.id, name: user.name });
-      } catch (e) {
-        logger.warn("jobs.customer_link_ensure_failed", { jobId: result.job.id, error: e instanceof Error ? e.message : String(e) });
-      }
-    })();
+    afterJobCreated(result.job.id, user);
 
     const full = await prisma.job.findUnique({ where: { id: result.job.id }, include: JOB_LIST_INCLUDE });
     const names = await userNameMap();

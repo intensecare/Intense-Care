@@ -116,7 +116,11 @@ test("workspaces: five separate experiences, each with its own home", () => {
   assert.deepEqual(navFor("tax_officer").map((n) => n.label), ["GST Dashboard", "GST Invoices", "GST Reports", "Intense AI"]);
   assert.deepEqual(
     navFor("admin").filter((n) => !n.secondary).map((n) => n.label),
-    ["Dashboard", "Intense AI", "Jobs", "Customers", "Invoices", "QC", "Reports", "Users"]
+    ["Dashboard", "Intense AI", "Jobs", "Customers", "Quotations", "Invoices", "QC", "Reports", "Users"]
+  );
+  assert.deepEqual(
+    navFor("admin").filter((n) => n.secondary).map((n) => n.label),
+    ["Schedule", "Properties", "Services", "GST", "Reviews & Feedback", "Settings"]
   );
   assert.equal(homePathFor("admin"), "/");
   assert.equal(homePathFor("field_manager"), "/my-jobs");
@@ -128,7 +132,7 @@ test("workspaces: five separate experiences, each with its own home", () => {
 });
 
 test("routing: Field Manager and QC can't open the Operations desk; customer pages are public", () => {
-  for (const path of ["/", "/jobs", "/jobs/JOB-1", "/customers", "/finance", "/reports", "/users", "/settings"]) {
+  for (const path of ["/", "/jobs", "/jobs/JOB-1", "/jobs/new", "/quotations", "/reviews", "/customers", "/finance", "/reports", "/users", "/settings"]) {
     assert.equal(routeAllowed("field_manager", path), false, `FM ${path}`);
     assert.equal(routeAllowed("qc_inspector", path), false, `QC ${path}`);
   }
@@ -136,6 +140,7 @@ test("routing: Field Manager and QC can't open the Operations desk; customer pag
   assert.equal(routeAllowed("qc_inspector", "/quality-queue/JOB-1"), true);
   assert.equal(routeAllowed("admin", "/my-jobs"), false, "Admin manages jobs from the job page");
   assert.equal(isPublicPath("/customer/service/abc"), true);
+  assert.equal(isPublicPath("/customer/quote/abc"), true);
   assert.equal(isPublicPath("/partner-portal/x"), false, "referral portal removed");
 });
 

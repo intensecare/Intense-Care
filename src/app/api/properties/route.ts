@@ -24,6 +24,8 @@ const CreateSchema = z.object({
   preferredTime: z.string().max(80).optional(),
   recurringService: z.boolean().optional().default(false),
   recurringFrequency: z.enum(["weekly", "biweekly", "monthly", "quarterly"]).optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
 });
 
 const UpdateSchema = z.object({
@@ -42,6 +44,8 @@ const UpdateSchema = z.object({
   preferredTime: z.string().max(80).nullable().optional(),
   recurringService: z.boolean().optional(),
   recurringFrequency: z.enum(["weekly", "biweekly", "monthly", "quarterly"]).nullable().optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
 });
 
 /** GET /api/properties — all properties (managers/admins). */
@@ -96,6 +100,8 @@ export async function POST(request: Request) {
         preferredTime: d.preferredTime,
         recurringService: d.recurringService,
         recurringFrequency: d.recurringService ? d.recurringFrequency : undefined,
+        lat: d.lat ?? null,
+        lng: d.lng ?? null,
       },
     });
     void recordAudit({ actor: user, action: "PROPERTY_CREATED", entityType: "property", entityId: created.id, request });

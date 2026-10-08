@@ -24,11 +24,14 @@ import {
   ListChecks,
   Sparkles,
   User,
+  ScanLine,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { MobileLayout, ProfilePanel } from "@/components/common/MobileLayout";
 import { StatusBadge } from "@/components/common/JobStatusBadge";
 import { PromptModal } from "@/components/common/PromptModal";
+import { QrScanner } from "@/components/common/QrScanner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -44,7 +47,8 @@ type FieldJob = Job & { customerName?: string; customerPhone?: string; propertyT
 const DONE = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
 const startTime = (slot: string) => formatTimeSlot(slot).split(" - ")[0];
 const addressOf = (j: FieldJob) => (j.propertyTitle ?? "").split(" - ").slice(1).join(" - ") || j.propertyTitle || "";
-const mapsUrl = (j: FieldJob) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addressOf(j))}`;
+const mapsUrl = (j: FieldJob) =>
+  `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(typeof j.locationLat === "number" && typeof j.locationLng === "number" ? `${j.locationLat},${j.locationLng}` : addressOf(j))}`;
 
 /* ========================================================================= */
 /* Field Manager job steps                                                    */
@@ -97,6 +101,8 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
   const [toast, setToast] = useState<string | null>(null);
   const [gps, setGps] = useState<"ready" | "searching" | "unavailable" | "verified">("ready");
   const [bypassOpen, setBypassOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [screen, setScreen] = useState<"checklist" | "photos">("checklist");
   const [openArea, setOpenArea] = useState<string | null>(null);
   const [target, setTarget] = useState<{ area: string; type: JobPhoto["photoType"] } | null>(null);
@@ -176,23 +182,28 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
       );
     });
 
-  const arrive = async (bypassReason?: string) => {
+  /**
+   * Arrival: GPS first. If GPS can't confirm it, the Field Manager scans the
+   * customer's secure QR; if that's impossible too, they continue with a
+   * reason. The method (GPS / QR / reason) is saved in the job's activity log.
+   */
+  const arrive = async (opts: { bypassReason?: string; qrToken?: string } = {}) => {
     setBusy(true);
     setError(null);
-    const coords = bypassReason ? null : await locate();
-    const r = await patch({ status: "ARRIVED", arrival: { ...(coords ?? {}), ...(bypassReason ? { bypassReason } : {}) } });
+    const coords = opts.bypassReason || opts.qrToken ? null : await locate();
+    const r = await patch({ status: "ARRIVED", arrival: { ...(coords ?? {}), ...(opts.bypassReason ? { bypassReason: opts.bypassReason } : {}), ...(opts.qrToken ? { qrToken: opts.qrToken } : {}) } });
     setBusy(false);
     if (!r.ok) {
-      if (r.status === 409 && !bypassReason) {
+      if (r.status === 409 && !opts.bypassReason) {
         setError(r.error ?? "We couldn't confirm your location.");
-        setBypassOpen(true);
+        setVerifyOpen(true);
         return;
       }
       setError(r.error ?? "Could not record your arrival.");
       return;
     }
-    setGps(coords ? "verified" : "ready");
-    flash("Arrival recorded ✓ The customer has been sent the link.");
+    setGps(coords || opts.qrToken ? "verified" : "ready");
+    flash(opts.qrToken ? "Location verified by QR ✓ Arrival recorded." : "Arrival recorded ✓ The customer has been sent the link.");
     await refreshJobs();
   };
 
@@ -524,6 +535,34 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
         </section>
       )}
 
+      <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Verify your location</DialogTitle>
+            <DialogDescription>{error ?? "GPS couldn't confirm you're at the property."}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Button size="lg" className="w-full" onClick={() => { setVerifyOpen(false); setScanOpen(true); }}>
+              <ScanLine className="h-5 w-5" aria-hidden /> Scan QR to Verify Location
+            </Button>
+            <Button size="lg" variant="outline" className="w-full" loading={busy} onClick={() => { setVerifyOpen(false); void arrive(); }}>
+              <MapPin className="h-5 w-5" aria-hidden /> Try GPS again
+            </Button>
+            <button type="button" onClick={() => { setVerifyOpen(false); setBypassOpen(true); }} className="w-full min-h-11 text-sm font-semibold text-zinc-600 underline underline-offset-4">
+              Can&apos;t scan? Continue with a reason
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <QrScanner
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        description="Ask the customer to show their service QR (on their phone or the printed card), then point the camera at it."
+        onToken={(token) => {
+          setScanOpen(false);
+          void arrive({ qrToken: token });
+        }}
+      />
       <PromptModal
         isOpen={bypassOpen}
         onClose={() => setBypassOpen(false)}
@@ -534,7 +573,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
         onSubmit={(reason) => {
           if (reason.length < 5) return;
           setBypassOpen(false);
-          void arrive(reason);
+          void arrive({ bypassReason: reason });
         }}
       />
       <ConfirmModal

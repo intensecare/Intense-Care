@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
+import { cleanVisibility } from "@/lib/server/job-create";
+import { resolveQrToken } from "@/lib/server/qr-service";
 import { requireUser, authorizeJob, HttpError } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
@@ -47,6 +50,8 @@ const ArrivalSchema = z.object({
   lng: z.number().min(-180).max(180).optional(),
   accuracy: z.number().min(0).max(100000).optional(),
   bypassReason: z.string().min(5).max(300).optional(),
+  /** GPS unavailable? The Field Manager scans the customer's secure QR for this job / property. */
+  qrToken: z.string().min(16).max(200).optional(),
 });
 
 function geofenceMeters(): number {
@@ -75,6 +80,13 @@ const PatchSchema = z.object({
   /** Super Admin override of the state machine — must carry a reason (audited). */
   override: z.boolean().optional(),
   reason: z.string().max(500).optional(),
+  /** Admin: the job's map location, notes for the customer, what the customer sees. */
+  location: z
+    .object({ lat: z.number().min(-90).max(90).nullable(), lng: z.number().min(-180).max(180).nullable(), address: z.string().max(500).nullable() })
+    .nullable()
+    .optional(),
+  customerNotes: z.string().max(2000).nullable().optional(),
+  customerVisibility: z.record(z.string(), z.boolean()).nullable().optional(),
 });
 
 /**
@@ -226,6 +238,26 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       return respondWithJob(user, id);
     }
 
+    /* ------------------------- location, customer notes, customer visibility */
+    if ((body.location !== undefined || body.customerNotes !== undefined || body.customerVisibility !== undefined) && !body.status) {
+      // Desk settings of the job — the same authority as assigning it.
+      const { user } = await authorizeJob(id, "jobs.assign");
+      const data: Prisma.JobUpdateInput = { updatedAt: new Date() };
+      if (body.location !== undefined) {
+        data.locationLat = body.location?.lat ?? null;
+        data.locationLng = body.location?.lng ?? null;
+        data.locationAddress = body.location?.address || null;
+      }
+      if (body.customerNotes !== undefined) data.customerNotes = body.customerNotes?.trim() || null;
+      if (body.customerVisibility !== undefined) {
+        const v = cleanVisibility(body.customerVisibility);
+        data.customerVisibility = v ? (v as Prisma.InputJsonValue) : Prisma.DbNull;
+      }
+      await prisma.job.update({ where: { id }, data });
+      void recordAudit({ actor: user, action: "JOB_DETAILS_UPDATED", entityType: "job", entityId: id, jobId: id, details: Object.keys(data).filter((k) => k !== "updatedAt").join(","), request });
+      return respondWithJob(user, id);
+    }
+
     /* -------------------------------------------------------- work notes */
     if (body.notes !== undefined && !body.status) {
       const { user } = await authorizeJob(id, "jobs.update");
@@ -239,7 +271,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (!status) return fail("status is required.", 400);
     const { user } = await requireUser();
 
-    const existing = await prisma.job.findUnique({ where: { id }, include: { property: { select: { lat: true, lng: true } } } });
+    const existing = await prisma.job.findUnique({ where: { id }, include: { property: { select: { lat: true, lng: true } } } }); // incl. locationLat/locationLng
     if (!existing) return fail("Job not found.", 404);
 
     // CUSTOMER_VERIFIED is reachable ONLY through the customer's secure link.
@@ -266,18 +298,34 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (status === "ARRIVED") {
       const arrival = body.arrival ?? {};
       const hasCoords = typeof arrival.lat === "number" && typeof arrival.lng === "number";
-      const propertyHasCoords = typeof existing.property?.lat === "number" && typeof existing.property?.lng === "number";
-      let verification: "gps" | "manual" = "manual";
+      // The job's own map pin first, else the property's.
+      const targetLat = existing.locationLat ?? existing.property?.lat ?? null;
+      const targetLng = existing.locationLng ?? existing.property?.lng ?? null;
+      const fieldUser = scopeOf(user.role, "jobs.arrive") === "ASSIGNED";
+      let verification: "gps" | "qr" | "manual" | "admin_override" = "manual";
       let distance: number | null = null;
-      if (hasCoords && propertyHasCoords) {
-        distance = distanceMeters(arrival.lat!, arrival.lng!, existing.property!.lat!, existing.property!.lng!);
-        verification = distance <= geofenceMeters() + (arrival.accuracy ?? 0) ? "gps" : "manual";
+      if (hasCoords && targetLat !== null && targetLng !== null) {
+        distance = distanceMeters(arrival.lat!, arrival.lng!, targetLat, targetLng);
+        if (distance <= geofenceMeters() + (arrival.accuracy ?? 0)) verification = "gps";
       }
-      if (verification === "manual" && !arrival.bypassReason && scopeOf(user.role, "jobs.arrive") === "ASSIGNED") {
+      if (verification !== "gps" && arrival.qrToken) {
+        // The secure QR proves presence only if it belongs to THIS job or this property.
+        const resolved = await resolveQrToken(arrival.qrToken);
+        const scanned = resolved.ok ? await prisma.job.findUnique({ where: { id: resolved.data.job.id }, select: { id: true, propertyId: true } }) : null;
+        if (!scanned || (scanned.id !== existing.id && scanned.propertyId !== existing.propertyId)) {
+          return fail("That QR code is not for this job's location. Scan the customer's QR for this service.", 409);
+        }
+        verification = "qr";
+      }
+      if (verification === "manual" && !fieldUser) {
+        if (!arrival.bypassReason) return fail("Give a reason for marking arrival on the Field Manager's behalf.", 400);
+        verification = "admin_override";
+      }
+      if (verification === "manual" && !arrival.bypassReason && fieldUser) {
         return fail(
-          hasCoords
-            ? `You appear to be ${Math.round(distance ?? 0)} m from the property. Move closer or give a reason to proceed.`
-            : "Share your GPS location to verify arrival, or give a reason to proceed without it.",
+          hasCoords && distance !== null
+            ? `You appear to be ${Math.round(distance)} m from the location. Move closer, scan the customer's QR, or give a reason.`
+            : "GPS couldn't verify your location. Scan the customer's QR, or give a reason to continue.",
           409
         );
       }
@@ -288,7 +336,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         arrivalAccuracy: arrival.accuracy ?? null,
         arrivalVerification: verification,
         arrivalDistanceM: distance,
-        arrivalBypassReason: arrival.bypassReason ?? null,
+        arrivalBypassReason: verification === "gps" || verification === "qr" ? null : arrival.bypassReason ?? null,
       });
     }
     if (status === "IN_PROGRESS") data.startedAt = new Date();
@@ -325,8 +373,12 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const gpsNote =
       status === "ARRIVED"
         ? data.arrivalVerification === "gps"
-          ? " (GPS verified)"
-          : ` (GPS not verified${data.arrivalBypassReason ? `: ${data.arrivalBypassReason}` : ""})`
+          ? " (verified by GPS)"
+          : data.arrivalVerification === "qr"
+          ? " (verified by QR scan)"
+          : data.arrivalVerification === "admin_override"
+          ? ` (Admin override: ${data.arrivalBypassReason})`
+          : ` (not verified${data.arrivalBypassReason ? `: ${data.arrivalBypassReason}` : ""})`
         : "";
     await recordActivity({
       jobId: id,

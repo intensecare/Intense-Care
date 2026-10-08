@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useMemo, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import React, { useState, useMemo, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -10,40 +10,18 @@ import { SkeletonList } from "@/components/ui/states";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { ASSIGNABLE_ROLES } from "@/lib/rbac";
-import { formatCurrency, formatDate, toLocalDateOffset, formatTimeSlot } from "@/lib/utils";
-import { JobStatus } from "@/lib/types";
-import { onDutyWorkerIds } from "@/lib/staff-availability";
+import { formatDate, formatTimeSlot } from "@/lib/utils";
 import {
   Search,
-  Filter,
   Plus,
-  ArrowUpDown,
-  Calendar,
-  Clock,
-  ShieldCheck,
-  Smartphone,
-  Eye,
-  CheckCircle2,
-  AlertTriangle,
   Briefcase,
-  UserPlus,
-  Building2,
   X,
   ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
 import { JobQrButton } from "@/components/common/JobQr";
-import { Button } from "@/components/ui/button";
-import { Input, Field } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
 
 function JobsPageInner() {
   const {
@@ -52,9 +30,6 @@ function JobsPageInner() {
     properties,
     services,
     users,
-    createJob,
-    createCustomer,
-    createProperty,
     loading,
   } = useApp();
   const { can } = useAuth();
@@ -66,10 +41,14 @@ function JobsPageInner() {
 
   const allJobs = jobs;
 
-  // Deep-link support: /jobs?q=... (navbar global search) and /jobs?create=true
+  // Deep-link support: /jobs?q=... (navbar global search) and /jobs/new
   // ("New Booking" shortcut) now actually drive the page state.
   const initialSearch = searchParams.get("q") || "";
-  const createParam = searchParams.get("create");
+  const router = useRouter();
+  // Old "/jobs/new" links open the New job page.
+  useEffect(() => {
+    if (searchParams.get("create") === "true") router.replace("/jobs/new");
+  }, [searchParams, router]);
 
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") || "ALL");
@@ -97,72 +76,6 @@ function JobsPageInner() {
     ...fieldWorkers.map((w) => ({ value: w.id, label: w.name })),
   ], [fieldWorkers]);
 
-  // Service selection options
-  const serviceOptions = useMemo(() =>
-    services.map((s) => ({
-      value: s.id,
-      label: `${s.name} (${formatCurrency(s.basePrice)} • ~${s.estimatedDurationHours} hrs)`,
-    })),
-  [services]);
-
-  // Customer selection options
-  const customerOptions = useMemo(() =>
-    customers.map((c) => ({ value: c.id, label: `${c.name} (${c.phone})` })),
-  [customers]);
-
-  const [isCreateOpen, setIsCreateOpen] = useState(createParam === "true");
-  const [formError, setFormError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // New Job Form State
-  const [isInlineCustomer, setIsInlineCustomer] = useState(customers.length === 0);
-  const [inlineName, setInlineName] = useState("");
-  const [inlinePhone, setInlinePhone] = useState("");
-  const [inlineEmail, setInlineEmail] = useState("");
-  const [inlineAddress, setInlineAddress] = useState("");
-
-  const [selectedCustomerId, setSelectedCustomerId] = useState(customers[0]?.id || "");
-  const [selectedPropertyId, setSelectedPropertyId] = useState(properties[0]?.id || "");
-  const [selectedServiceId, setSelectedServiceId] = useState(services[0]?.id || "");
-  const [scheduledDate, setScheduledDate] = useState(toLocalDateOffset(1)); // default: tomorrow
-  // Free time window: the ops desk sets any start/end times (manual, not a
-  // fixed preset). Both compose into the canonical scheduledTimeSlot string
-  // ("HH:MM - HH:MM", 24h) stored on the job and shown everywhere.
-  const [timeFrom, setTimeFrom] = useState("09:00");
-  const [timeTo, setTimeTo] = useState("13:30");
-  const composedTimeSlot = `${timeFrom} - ${timeTo}`;
-  const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
-
-  // Availability preview for the booking form: workers on ANY non-terminal job
-  // right now are "on duty"; those on another job with THIS date+slot are
-  // "already assigned" (the server would 409 the booking). The create call
-  // re-validates server-side either way.
-  const onDutyIds = useMemo(() => onDutyWorkerIds(jobs), [jobs]);
-  const slotConflictIds = useMemo(() => {
-    const busy = new Set<string>();
-    for (const j of jobs) {
-      if (j.scheduledDate !== scheduledDate) continue;
-      if (j.scheduledTimeSlot !== composedTimeSlot) continue;
-      if (j.status === "COMPLETED" || j.status === "CANCELLED" || j.status === "CLOSED") continue;
-      for (const id of j.assignedStaffIds || []) busy.add(id);
-    }
-    return busy;
-  }, [jobs, scheduledDate, composedTimeSlot]);
-  const [jobNotes, setJobNotes] = useState("");
-  const [invoiceType, setInvoiceType] = useState<"GST" | "NON_GST">("GST");
-  const [interState, setInterState] = useState(false);
-
-  // Customer properties filter
-  const customerProperties = useMemo(() => {
-    return properties.filter((p) => p.customerId === selectedCustomerId);
-  }, [properties, selectedCustomerId]);
-
-  // Property selection options (filtered by selected customer)
-  const propertyOptions = useMemo(() =>
-    customerProperties.map((p) => ({ value: p.id, label: `${p.title} - ${p.address}` })),
-  [customerProperties]);
-
-  // Filtered Jobs
   const filteredJobs = useMemo(() => {
     return allJobs.filter((job) => {
       const customer = customers.find((c) => c.id === job.customerId);
@@ -192,116 +105,6 @@ function JobsPageInner() {
     });
   }, [allJobs, can, customers, properties, services, searchQuery, statusFilter, paymentFilter, workerFilter]);
 
-  const handleCreateJob = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError(null);
-    setIsSubmitting(true);
-
-    let targetCustId = selectedCustomerId;
-    let targetPropId = selectedPropertyId;
-
-    try {
-      if (isInlineCustomer || customers.length === 0) {
-        if (!inlineName || !inlinePhone || !inlineAddress) {
-          setFormError("Please enter customer name, phone number, and property address.");
-          setIsSubmitting(false);
-          return;
-        }
-        const custResult = await createCustomer({
-          name: inlineName,
-          phone: inlinePhone,
-          email: inlineEmail,
-          address: inlineAddress,
-        });
-        if (!custResult.success || !custResult.customer) {
-          setFormError(custResult.message);
-          setIsSubmitting(false);
-          return;
-        }
-        targetCustId = custResult.customer.id;
-
-        const propResult = await createProperty({
-          customerId: targetCustId,
-          title: `${inlineName}'s Residence`,
-          address: inlineAddress,
-        });
-        if (!propResult.success || !propResult.property) {
-          setFormError(propResult.message);
-          setIsSubmitting(false);
-          return;
-        }
-        targetPropId = propResult.property.id;
-      } else {
-        if (!targetCustId) {
-          setFormError("Please select a customer.");
-          setIsSubmitting(false);
-          return;
-        }
-        if (!targetPropId) {
-          setFormError("Please select a property location for the selected customer.");
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
-      const targetService = selectedServiceId || services[0]?.id;
-      if (!targetService || !selectedServiceId) {
-        setFormError("Please select a service package.");
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (!timeFrom || !timeTo) {
-        setFormError("Please set both the start and end time of the service window.");
-        setIsSubmitting(false);
-        return;
-      }
-      if (timeFrom >= timeTo) {
-        setFormError("The end time must be after the start time.");
-        setIsSubmitting(false);
-        return;
-      }
-
-      const result = await createJob({
-        customerId: targetCustId,
-        propertyId: targetPropId,
-        serviceId: targetService,
-        scheduledDate,
-        scheduledTimeSlot: composedTimeSlot,
-        assignedStaffIds,
-        notes: jobNotes,
-        referralPartnerId: undefined,
-        invoiceType,
-        interState: invoiceType === "GST" ? interState : false,
-      });
-
-      if (!result.success) {
-        setFormError(result.message);
-        setIsSubmitting(false);
-        return;
-      }
-
-      setIsCreateOpen(false);
-      setFormError(null);
-      setJobNotes("");
-      setInvoiceType("GST");
-      setInterState(false);
-      setInlineName("");
-      setInlinePhone("");
-      setInlineAddress("");
-      setAssignedStaffIds([]);
-      setIsSubmitting(false);
-    } catch {
-      setFormError("Something went wrong while saving the booking. Please retry.");
-      setIsSubmitting(false);
-    }
-  };
-
-  const openCreate = () => {
-    setFormError(null);
-    setIsInlineCustomer(customers.length === 0);
-    setIsCreateOpen(true);
-  };
   const managerName = (job: (typeof filteredJobs)[number]) =>
     (job.assignedStaffNames ?? (job.assignedStaffIds || []).map((id) => users.find((u) => u.id === id)?.name).filter(Boolean))[0] ??
     users.find((u) => u.id === job.assignedManagerId)?.name;
@@ -314,9 +117,9 @@ function JobsPageInner() {
         description={`${allJobs.length} job${allJobs.length === 1 ? "" : "s"} · every job keeps one Job ID from booking to feedback`}
         actions={
           can("jobs.create") ? (
-            <Button onClick={openCreate}>
+            <Link href="/jobs/new" className="h-11 px-4 rounded-xl bg-rose-500 text-white text-sm font-semibold inline-flex items-center gap-2 hover:bg-rose-600">
               <Plus className="h-5 w-5" aria-hidden /> New Job
-            </Button>
+            </Link>
           ) : undefined
         }
       />
@@ -355,7 +158,7 @@ function JobsPageInner() {
       {loading && allJobs.length === 0 ? (
         <SkeletonList rows={4} />
       ) : allJobs.length === 0 ? (
-        <EmptyState icon={Briefcase} title="No jobs yet" description="Create the first job to start the workflow." actionLabel={can("jobs.create") ? "Create job" : undefined} onAction={openCreate} />
+        <EmptyState icon={Briefcase} title="No jobs yet" description="Create the first job to start the workflow." actionLabel={can("jobs.create") ? "Create job" : undefined} onAction={() => router.push("/jobs/new")} />
       ) : filteredJobs.length === 0 ? (
         <EmptyState icon={Search} title="No matching jobs" description="Try a different search or clear the filters." />
       ) : (
@@ -444,271 +247,6 @@ function JobsPageInner() {
         </>
       )}
 
-      {/* New Booking Wizard Dialog */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>New job</DialogTitle>
-            <DialogDescription>
-              Pick the customer, service and time. The checklist and the customer link are created automatically.
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleCreateJob} className="space-y-5">
-            {formError && (
-              <div role="alert" className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium">
-                {formError}
-              </div>
-            )}
-            {/* Customer Mode Selection */}
-            {customers.length > 0 && (
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                <span className="text-sm font-medium text-zinc-800">Customer</span>
-                <button
-                  type="button"
-                  onClick={() => setIsInlineCustomer(!isInlineCustomer)}
-                  className="h-10 px-2 text-sm text-rose-600 font-semibold flex items-center gap-1"
-                >
-                  {isInlineCustomer ? "Choose existing customer" : "+ New customer"}
-                </button>
-              </div>
-            )}
-
-            {isInlineCustomer || customers.length === 0 ? (
-              <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-200 space-y-4">
-                <div className="text-sm font-semibold text-zinc-900 flex items-center gap-1.5">
-                  <UserPlus className="h-3.5 w-3.5 text-blue-600" />
-                  New customer and property
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-zinc-800">Customer name *</label>
-                    <Input
-                      value={inlineName}
-                      onChange={(e) => setInlineName(e.target.value)}
-                      placeholder="E.g., Dr. Ananya Sen"
-                      required
-                      className="text-xs bg-white"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-zinc-800">Phone *</label>
-                    <Input
-                      value={inlinePhone}
-                      onChange={(e) => setInlinePhone(e.target.value)}
-                      placeholder="+91 98860 12345"
-                      required
-                      className="text-xs bg-white font-mono"
-                    />
-                  </div>
-                  <div className="space-y-1 sm:col-span-2">
-                    <label className="text-sm font-medium text-zinc-800">Property address *</label>
-                    <Input
-                      value={inlineAddress}
-                      onChange={(e) => setInlineAddress(e.target.value)}
-                      placeholder="E.g., Flat 402, Prestige Golfshire, Bengaluru"
-                      required
-                      className="text-xs bg-white"
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Customer Selection */}
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-zinc-800">
-                    Customer *
-                  </label>
-                  <SearchableSelect
-                    value={selectedCustomerId}
-                    onChange={(value) => {
-                      setSelectedCustomerId(value);
-                      const matchProp = properties.find((p) => p.customerId === value);
-                      if (matchProp) setSelectedPropertyId(matchProp.id);
-                    }}
-                    options={customerOptions}
-                    placeholder="Search customer by name or phone..."
-                    required
-                    name="customerId"
-                  />
-                </div>
-
-                {/* Property Selection */}
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-zinc-800">
-                    Property *
-                  </label>
-                  <SearchableSelect
-                    value={selectedPropertyId}
-                    onChange={setSelectedPropertyId}
-                    options={propertyOptions}
-                    placeholder="Select a property"
-                    required
-                    name="propertyId"
-                    emptyMessage="No properties registered for this customer"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Service Selection */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-zinc-800">
-                  Service *
-                </label>
-                <SearchableSelect
-                  value={selectedServiceId}
-                  onChange={setSelectedServiceId}
-                  options={serviceOptions}
-                  placeholder="Select a service package"
-                  required
-                  name="serviceId"
-                />
-              </div>
-
-              {/* Date */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-zinc-800">
-                  Date *
-                </label>
-                <Input
-                  type="date"
-                  value={scheduledDate}
-                  onChange={(e) => setScheduledDate(e.target.value)}
-                  className="text-xs"
-                  required
-                />
-              </div>
-
-              {/* Time Window — freely settable from/to (manual, no fixed presets) */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-zinc-800">
-                  Time window *
-                </label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="time"
-                    value={timeFrom}
-                    onChange={(e) => setTimeFrom(e.target.value)}
-                    className="text-xs flex-1"
-                    required
-                  />
-                  <span className="text-xs text-slate-400 font-semibold shrink-0">→</span>
-                  <Input
-                    type="time"
-                    value={timeTo}
-                    onChange={(e) => setTimeTo(e.target.value)}
-                    className="text-xs flex-1"
-                    required
-                  />
-                </div>
-                <p className="text-xs text-slate-400">
-                  Service window: <strong className="text-slate-600">{composedTimeSlot}</strong>
-                </p>
-              </div>
-
-              {/* Field Manager assignment (optional; first pick leads) */}
-              <fieldset className="space-y-2 sm:col-span-2">
-                <legend className="text-sm font-medium text-zinc-800">Field Manager <span className="font-normal text-zinc-500">(optional)</span></legend>
-                {fieldWorkers.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No Field Managers yet — add one under Users.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {fieldWorkers.map((w) => {
-                      const isSelected = assignedStaffIds.includes(w.id);
-                      const slotConflict = slotConflictIds.has(w.id);
-                      const onDuty = onDutyIds.has(w.id);
-                      const availability = slotConflict ? "Busy at this time" : onDuty ? "On another job" : "Free";
-                      return (
-                        <button
-                          key={w.id}
-                          type="button"
-                          aria-pressed={isSelected}
-                          onClick={() =>
-                            setAssignedStaffIds((prev) =>
-                              prev.includes(w.id) ? prev.filter((id) => id !== w.id) : [...prev, w.id]
-                            )
-                          }
-                          className={`min-h-11 px-3.5 py-2 rounded-xl text-sm font-medium border transition-colors inline-flex items-center gap-2 text-left ${
-                            isSelected
-                              ? "bg-zinc-900 text-white border-zinc-900"
-                              : "bg-white text-zinc-800 border-zinc-300 hover:bg-zinc-50"
-                          }`}
-                        >
-                          <span
-                            aria-hidden
-                            className={`h-2.5 w-2.5 rounded-full shrink-0 ${
-                              slotConflict ? "bg-red-500" : onDuty ? "bg-amber-500" : "bg-emerald-500"
-                            }`}
-                          />
-                          <span>
-                            {w.name}
-                            {isSelected && assignedStaffIds[0] === w.id && assignedStaffIds.length > 1 && " · Lead"}
-                            <span className={`block text-xs ${isSelected ? "text-zinc-300" : slotConflict ? "text-red-700" : onDuty ? "text-amber-700" : "text-zinc-500"}`}>
-                              {availability}
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {assignedStaffIds.length === 0 && fieldWorkers.length > 0 && (
-                  <p className="text-sm text-zinc-500">You can assign someone later from the Schedule.</p>
-                )}
-              </fieldset>
-            </div>
-
-            <fieldset className="space-y-2">
-              <legend className="text-sm font-medium text-zinc-800">Invoice <span className="text-red-600" aria-hidden>*</span></legend>
-              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Invoice type">
-                {(["GST", "NON_GST"] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    role="radio"
-                    aria-checked={invoiceType === t}
-                    onClick={() => setInvoiceType(t)}
-                    className={`min-h-12 rounded-xl border-2 px-3 text-sm sm:text-base font-semibold ${invoiceType === t ? "border-rose-500 bg-rose-50 text-rose-700" : "border-zinc-200 bg-white text-zinc-700"}`}
-                  >
-                    {t === "GST" ? "GST Invoice" : "Non-GST Invoice"}
-                  </button>
-                ))}
-              </div>
-              {invoiceType === "GST" ? (
-                <label className="flex items-center gap-3 text-sm text-zinc-700 min-h-11">
-                  <input type="checkbox" checked={interState} onChange={(e) => setInterState(e.target.checked)} className="h-5 w-5 accent-rose-500" />
-                  Customer is in another state (charge IGST instead of CGST + SGST)
-                </label>
-              ) : (
-                <p className="text-sm text-zinc-500">No GST is charged on a Non-GST invoice.</p>
-              )}
-            </fieldset>
-
-            <Field label="Notes for the team" htmlFor="nj-notes" hint="Access, focus areas, anything the Field Manager should know">
-              <textarea
-                id="nj-notes"
-                value={jobNotes}
-                onChange={(e) => setJobNotes(e.target.value)}
-                rows={3}
-                placeholder="e.g. Focus on kitchen grease and master bath limescale"
-                className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
-              />
-            </Field>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" loading={isSubmitting}>
-                {isSubmitting ? "Creating…" : "Create job"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
     </AdminLayout>
   );
 }

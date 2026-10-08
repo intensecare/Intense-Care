@@ -6,7 +6,9 @@ import { resolveQrToken, clientIp, rateLimit } from "@/lib/server/qr-service";
 import { recordActivity } from "@/lib/server/activity";
 import { logger } from "@/lib/server/logger";
 import { notifyReworkAssigned } from "@/lib/server/notify";
-import { getSystemSettings } from "@/lib/server/settings";
+import { getSystemSettings, resolveVisibility } from "@/lib/server/settings";
+import { ensureQuoteShareLink } from "@/lib/server/quotations";
+import { parseLines } from "@/lib/server/serialize";
 
 /**
  * /customer/job/{token} API — THE customer journey, one link.
@@ -74,6 +76,14 @@ export async function GET(request: Request, { params }: { params: { token: strin
           customerFeedbackAt: true,
           googleReviewClicked: true,
           jobSerial: true,
+          customerVisibility: true,
+          customerNotes: true,
+          customerFeedbackComment: true,
+          locationLat: true,
+          locationLng: true,
+          locationAddress: true,
+          paymentStatus: true,
+          quoteId: true,
         },
       }),
       // This job's invoice (the customer's own document).
@@ -93,27 +103,40 @@ export async function GET(request: Request, { params }: { params: { token: strin
       ? "checking"
       : null;
 
-    // Minimum info only — no internal notes, no QC findings, no other customers.
-    // The invoice is the customer's own document for this job.
+    // What this customer may see: company default + this job's own settings.
+    // Everything not allowed is left OUT of the response (not just hidden).
+    const vis = resolveVisibility(settings.customerVisibility, jobRow?.customerVisibility);
+    const quote = vis.quotation && jobRow?.quoteId ? await prisma.quote.findUnique({ where: { id: jobRow.quoteId } }) : null;
+    const quoteUrl = quote ? await ensureQuoteShareLink(quote.id).then((u) => new URL(u).pathname).catch(() => null) : null;
+    const serviceName = (await prisma.service.findUnique({ where: { id: job.serviceId }, select: { name: true } }))?.name ?? "Service";
+    const shownPhotos = photos.filter((p) => (p.photoType === "before" ? vis.beforePhotos : vis.afterPhotos));
+
     return NextResponse.json({
       success: true,
       data: {
+        visibility: vis,
         job: {
-          id: jobRow?.jobSerial ?? job.id,
+          id: vis.jobId ? jobRow?.jobSerial ?? null : null,
+          // The status drives the customer's own actions (confirm, approve).
           status: job.status,
-          serviceName: (await prisma.service.findUnique({ where: { id: job.serviceId }, select: { name: true } }))?.name ?? "Service",
-          scheduledDate: job.scheduledDate,
-          scheduledTimeSlot: job.scheduledTimeSlot,
+          showStatus: vis.status,
+          serviceName: vis.service ? serviceName : null,
+          scheduledDate: vis.serviceDate ? job.scheduledDate : null,
+          scheduledTimeSlot: vis.serviceDate ? job.scheduledTimeSlot : null,
           arrivedAt: jobRow?.arrivedAt?.toISOString() ?? null,
           completedAt: jobRow?.completedAt?.toISOString() ?? null,
           customerConfirmedAt: jobRow?.customerConfirmedAt?.toISOString() ?? null,
-          arrivalVerified: jobRow?.arrivalVerification === "gps" || jobRow?.arrivalVerification === "manual",
+          arrivalVerified: ["gps", "qr", "manual", "admin_override"].includes(jobRow?.arrivalVerification ?? ""),
         },
-        property: { title: job.propertyName, address: job.propertyAddress },
+        property: vis.location ? { title: job.propertyName, address: jobRow?.locationAddress || job.propertyAddress } : null,
+        location:
+          vis.location && typeof jobRow?.locationLat === "number" && typeof jobRow?.locationLng === "number"
+            ? { lat: jobRow.locationLat, lng: jobRow.locationLng }
+            : null,
         customer: { name: job.customerName, phoneMasked: `******${job.customerPhone.replace(/[^0-9]/g, "").slice(-4)}` },
-        team,
-        checklist: checklist.map((c) => ({ id: c.id, area: c.area, task: c.task, completed: c.status === "completed" || c.status === "skipped" })),
-        photos: photos.map((p) => ({
+        team: vis.team ? team : [],
+        checklist: vis.status ? checklist.map((c) => ({ id: c.id, area: c.area, task: c.task, completed: c.status === "completed" || c.status === "skipped" })) : [],
+        photos: shownPhotos.map((p) => ({
           id: p.id,
           area: p.area,
           photoType: p.photoType,
@@ -122,51 +145,64 @@ export async function GET(request: Request, { params }: { params: { token: strin
           uploadedAt: p.uploadedAt.toISOString(),
         })),
         // Only a PASS is customer-facing; rework details stay internal.
-        qualityCheck: qc && qc.decision === "PASS" ? { passed: true } : null,
-        qualityResult,
-        invoice: invoiceRow
+        qualityCheck: vis.qcResult && qc && qc.decision === "PASS" ? { passed: true } : null,
+        qualityResult: vis.qcResult ? qualityResult : null,
+        serviceNotes: vis.serviceNotes ? jobRow?.customerNotes ?? null : null,
+        quotation: quote
           ? {
-              invoiceNumber: invoiceRow.invoiceNumber,
-              invoiceType: isGst ? "GST" : "NON_GST",
-              issuedAt: invoiceRow.issuedAt.toISOString(),
-              dueDate: invoiceRow.dueDate,
-              subtotal: invoiceRow.subtotal,
-              discount: invoiceRow.discount,
-              taxable: Math.round((invoiceRow.subtotal - invoiceRow.discount) * 100) / 100,
-              // GST fields only on a GST invoice — never on a Non-GST invoice.
-              ...(isGst
-                ? {
-                    gstRate: invoiceRow.gstRate,
-                    cgst: invoiceRow.cgst,
-                    sgst: invoiceRow.sgst,
-                    igst: invoiceRow.igst,
-                    totalGst: invoiceRow.tax,
-                    customerGstin: invoiceRow.customerGstin ?? undefined,
-                    companyGstin: invoiceRow.supplierGstin || settings.gstin || undefined,
-                  }
-                : {}),
-              total: invoiceRow.total,
-              amountPaid: invoiceRow.amountPaid,
-              balanceDue: invoiceRow.balanceDue,
-              status: invoiceRow.status,
-              companyName: settings.companyName,
-              companyAddress: settings.companyAddress,
+              quoteNumber: quote.quoteNumber,
+              total: quote.total,
+              validUntil: quote.validUntil,
+              status: quote.status,
+              url: quoteUrl,
             }
           : null,
+        invoice:
+          vis.invoice && invoiceRow
+            ? {
+                invoiceNumber: invoiceRow.invoiceNumber,
+                invoiceType: isGst ? "GST" : "NON_GST",
+                issuedAt: invoiceRow.issuedAt.toISOString(),
+                dueDate: invoiceRow.dueDate,
+                subtotal: invoiceRow.subtotal,
+                discount: invoiceRow.discount,
+                taxable: Math.round((invoiceRow.subtotal - invoiceRow.discount) * 100) / 100,
+                items: parseLines(invoiceRow.items),
+                // GST fields only on a GST invoice — never on a Non-GST invoice.
+                ...(isGst
+                  ? {
+                      gstRate: invoiceRow.gstRate,
+                      cgst: invoiceRow.cgst,
+                      sgst: invoiceRow.sgst,
+                      igst: invoiceRow.igst,
+                      totalGst: invoiceRow.tax,
+                      customerGstin: invoiceRow.customerGstin ?? undefined,
+                      companyGstin: invoiceRow.supplierGstin || settings.gstin || undefined,
+                    }
+                  : {}),
+                total: invoiceRow.total,
+                ...(vis.paymentStatus ? { amountPaid: invoiceRow.amountPaid, balanceDue: invoiceRow.balanceDue, status: invoiceRow.status } : {}),
+                companyName: settings.companyName,
+                companyAddress: settings.companyAddress,
+                paymentTerms: invoiceRow.paymentTerms ?? undefined,
+              }
+            : null,
+        paymentStatus: vis.paymentStatus ? jobRow?.paymentStatus ?? null : null,
         approval: jobRow?.approvedAt
           ? { approvedAt: jobRow.approvedAt.toISOString(), approvedBy: jobRow.approvedBy, method: jobRow.approvalMethod }
           : null,
-        feedback: jobRow?.customerFeedbackRating
+        feedback: vis.feedback && jobRow?.customerFeedbackRating
           ? {
               rating: jobRow.customerFeedbackRating,
+              comment: jobRow.customerFeedbackComment ?? null,
               feedbackAt: jobRow.customerFeedbackAt?.toISOString() ?? null,
               googleReviewClicked: jobRow.googleReviewClicked,
             }
           : null,
         complaintCount,
         company: {
-          name: process.env.APP_COMPANY_NAME || "Intense Care",
-          googleReviewUrl: process.env.GOOGLE_BUSINESS_REVIEW_URL || "",
+          name: settings.companyName || process.env.APP_COMPANY_NAME || "Intense Care",
+          googleReviewUrl: vis.feedback ? settings.googleBusinessReviewUrl || process.env.GOOGLE_BUSINESS_REVIEW_URL || "" : "",
         },
       },
     });
@@ -431,12 +467,18 @@ export async function POST(request: Request, { params }: { params: { token: stri
       if (!jobRow.approvedAt) {
         return fail("Feedback opens after you approve the completed service.", 409);
       }
+      const fbSettings = await getSystemSettings();
+      const fbJob = await prisma.job.findUnique({ where: { id: job.id }, select: { customerVisibility: true } });
+      if (!resolveVisibility(fbSettings.customerVisibility, fbJob?.customerVisibility).feedback) {
+        return fail("Feedback isn't available for this service.", 403);
+      }
 
       const updated = await prisma.job.update({
         where: { id: job.id },
         data: {
           customerFeedbackRating: parsed.data.rating,
           googleReviewClicked: parsed.data.googleReviewClicked,
+          ...(parsed.data.comment?.trim() ? { customerFeedbackComment: parsed.data.comment.trim() } : {}),
           customerFeedbackAt: jobRow.customerFeedbackAt ?? new Date(),
         },
       });

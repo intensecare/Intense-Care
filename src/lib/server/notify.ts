@@ -1,3 +1,5 @@
+import { getSystemSettings } from "./settings";
+import type { NotificationSettings } from "@/lib/types";
 import { prisma } from "./prisma";
 import { logger, maskPhone } from "./logger";
 import { deepLinkFor, ROLES, scopeOf, type Permission } from "@/lib/rbac";
@@ -115,6 +117,12 @@ async function sendWhatsAppCloud(phone: string, body: string): Promise<void> {
   if (!res.ok) throw new Error(`WhatsApp API ${res.status}`);
 }
 
+/** Settings → Notifications: each automatic message can be switched off. */
+async function notificationOn(key: keyof NotificationSettings): Promise<boolean> {
+  const settings = await getSystemSettings();
+  return settings.notifications?.[key] !== false;
+}
+
 /** Notification dedup: skip when the same purpose fired for the job recently. */
 async function recentlySent(jobId: string, purpose: string, withinMs = 5 * 60 * 1000): Promise<boolean> {
   const cutoff = new Date(Date.now() - withinMs);
@@ -143,6 +151,7 @@ async function usersWith(permission: Permission): Promise<{ id: string; name: st
 /* -------------------------------------------------------------------------- */
 
 export async function notifyCustomerArrived(jobId: string, link: string): Promise<NotifyResult> {
+  if (!(await notificationOn("customerArrived"))) return { queued: false, provider: "none", reason: "disabled_in_settings" };
   const job = await prisma.job.findUnique({ where: { id: jobId }, include: { customer: true } });
   if (!job?.customer) return { queued: false, provider: "none", reason: "no_customer" };
   if (await recentlySent(jobId, "CUSTOMER_ARRIVED")) return { queued: false, provider: "deduped" };
@@ -152,6 +161,7 @@ export async function notifyCustomerArrived(jobId: string, link: string): Promis
 }
 
 export async function notifyCustomerCompleted(jobId: string, link: string): Promise<NotifyResult> {
+  if (!(await notificationOn("customerCompleted"))) return { queued: false, provider: "none", reason: "disabled_in_settings" };
   const job = await prisma.job.findUnique({ where: { id: jobId }, include: { customer: true } });
   if (!job?.customer) return { queued: false, provider: "none", reason: "no_customer" };
   if (await recentlySent(jobId, "CUSTOMER_COMPLETED")) return { queued: false, provider: "deduped" };
@@ -165,6 +175,7 @@ export async function notifyCustomerCompleted(jobId: string, link: string): Prom
 /* -------------------------------------------------------------------------- */
 
 export async function notifyJobAssigned(jobId: string): Promise<NotifyResult> {
+  if (!(await notificationOn("fieldManagerAssigned"))) return { queued: false, provider: "none", reason: "disabled_in_settings" };
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) return { queued: false, provider: "none", reason: "no_job" };
   if (await recentlySent(jobId, "JOB_ASSIGNED")) return { queued: false, provider: "deduped" };
@@ -181,6 +192,7 @@ export async function notifyJobAssigned(jobId: string): Promise<NotifyResult> {
 }
 
 export async function notifyReworkAssigned(jobId: string, link?: string): Promise<NotifyResult> {
+  if (!(await notificationOn("reworkAssigned"))) return { queued: false, provider: "none", reason: "disabled_in_settings" };
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) return { queued: false, provider: "none", reason: "no_job" };
   const lead = job.assignedManagerId ?? job.assignedStaffIds[0];
@@ -198,6 +210,7 @@ export async function notifyReworkAssigned(jobId: string, link?: string): Promis
 /* -------------------------------------------------------------------------- */
 
 export async function notifyQcReady(jobId: string, link?: string, mode: "inspection" | "reinspection" = "inspection"): Promise<NotifyResult> {
+  if (!(await notificationOn("qcReady"))) return { queued: false, provider: "none", reason: "disabled_in_settings" };
   const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
   if (!job) return { queued: false, provider: "none", reason: "no_job" };
   const purpose = mode === "reinspection" ? "QC_REINSPECT" : "QC_READY";

@@ -21,6 +21,9 @@ const CreateSchema = z.object({
   basePrice: z.number().min(0).max(10000000),
   estimatedDurationHours: z.number().min(0.5).max(72),
   checklistTemplate: z.array(ChecklistItemSchema).max(200).default([]),
+  isCustom: z.boolean().optional(),
+  gstTreatment: z.enum(["DEFAULT", "GST", "NON_GST"]).optional(),
+  notes: z.string().max(2000).nullable().optional(),
 });
 
 const UpdateSchema = z.object({
@@ -31,6 +34,9 @@ const UpdateSchema = z.object({
   basePrice: z.number().min(0).max(10000000).optional(),
   estimatedDurationHours: z.number().min(0.5).max(72).optional(),
   active: z.boolean().optional(),
+  isCustom: z.boolean().optional(),
+  gstTreatment: z.enum(["DEFAULT", "GST", "NON_GST"]).optional(),
+  notes: z.string().max(2000).nullable().optional(),
 });
 
 const AddItemSchema = z.object({
@@ -102,6 +108,9 @@ export async function POST(request: Request) {
         description: d.description,
         basePrice: d.basePrice,
         estimatedDurationHours: d.estimatedDurationHours,
+        isCustom: d.isCustom ?? false,
+        gstTreatment: d.gstTreatment ?? "DEFAULT",
+        notes: d.notes ?? null,
         checklistTemplate: {
           create: d.checklistTemplate.map((item, idx) => ({
             area: item.area,

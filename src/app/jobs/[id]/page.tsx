@@ -7,6 +7,7 @@ import { AdminLayout } from "@/components/common/AdminLayout";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { CustomerLinkCard } from "@/components/common/CustomerLinkCard";
 import { JobQrButton } from "@/components/common/JobQr";
+import { JobHubCards } from "@/components/job/JobHubCards";
 import { InvoiceTypeBadge } from "@/components/invoice/InvoiceDocument";
 import { JobJourney } from "@/components/job/JobJourney";
 import { NextActionCard } from "@/components/job/NextAction";
@@ -353,6 +354,8 @@ export default function JobPage() {
                 <Detail icon={<Star className="h-4 w-4" />} label="Rating" value={`${"★".repeat(job.customerFeedbackRating)}${"☆".repeat(5 - job.customerFeedbackRating)}${job.googleReviewClicked ? " · Google review opened" : ""}`} />
               ) : null}
             </section>
+
+            <JobHubCards job={job} property={property} canEdit={!cancelled && can("jobs.assign")} />
 
             {can("finance.view") && (
               <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-2">

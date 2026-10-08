@@ -13,6 +13,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import type { Customer, Property } from "@/lib/types";
+import { LocationPicker, type LocationValue } from "./LocationPicker";
 
 export interface PropertyFormPayload {
   customerId: string;
@@ -27,6 +28,9 @@ export interface PropertyFormPayload {
   parkingInstructions: string;
   recurringService: boolean;
   recurringFrequency?: "weekly" | "biweekly" | "monthly" | "quarterly";
+  /** Map location (optional). */
+  lat: number | null;
+  lng: number | null;
 }
 
 interface PropertyFormDialogProps {
@@ -72,6 +76,7 @@ export function PropertyFormDialog({
   const [recurring, setRecurring] = useState(false);
   const [recurringFrequency, setRecurringFrequency] =
     useState<PropertyFormPayload["recurringFrequency"]>("monthly");
+  const [loc, setLoc] = useState<LocationValue>({ lat: null, lng: null, address: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -93,6 +98,7 @@ export function PropertyFormDialog({
     setPreferredTime(editing?.preferredTime ?? "");
     setRecurring(editing?.recurringService ?? false);
     setRecurringFrequency(editing?.recurringFrequency ?? "monthly");
+    setLoc({ lat: editing?.lat ?? null, lng: editing?.lng ?? null, address: "" });
   }, [open, editing, defaultCustomerId, customers]);
 
   const customerOptions = customers.map((c) => ({
@@ -119,6 +125,8 @@ export function PropertyFormDialog({
       parkingInstructions: parking,
       recurringService: recurring,
       recurringFrequency: recurring ? recurringFrequency : undefined,
+      lat: loc.lat,
+      lng: loc.lng,
     });
 
     setIsSubmitting(false);
@@ -163,6 +171,11 @@ export function PropertyFormDialog({
               <Input id="pf-pin" inputMode="numeric" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} placeholder="560102" autoComplete="postal-code" />
             </Field>
           </div>
+
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-semibold text-zinc-950">Location on the map <span className="font-normal text-zinc-500">(for navigation and arrival check)</span></legend>
+            {open && <LocationPicker key={editing?.id ?? "new"} idPrefix="pf-loc" value={{ ...loc, address: loc.address || address }} onChange={(v) => { setLoc(v); if (!address && v.address) setAddress(v.address); }} height={220} />}
+          </fieldset>
 
           <fieldset className="space-y-3">
             <legend className="text-sm font-semibold text-zinc-950">Size</legend>

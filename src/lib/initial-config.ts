@@ -24,4 +24,18 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   resendCooldownSeconds: 60,
   refundApprovalLimit: 5000,
   discountApprovalLimitPercent: 10,
+  logoDataUrl: "",
+  signatureDataUrl: "",
+  signatoryName: "Authorised Signatory",
+  invoicePaymentTerms: "Payment due on completion of service.",
+  invoiceNotes: "Thank you for choosing us.",
+  quotationTerms: "Prices are valid until the date shown. Work is scheduled after acceptance. Any extra work is quoted separately.",
+  quotationPaymentTerms: "Full payment on completion of service.",
+  quotationValidityDays: 15,
+  customerVisibility: {
+    jobId: true, service: true, serviceDate: true, location: true, team: true, status: true,
+    beforePhotos: true, afterPhotos: true, qcResult: true, quotation: true, invoice: true,
+    paymentStatus: true, serviceNotes: true, feedback: true,
+  },
+  notifications: { customerArrived: true, customerCompleted: true, fieldManagerAssigned: true, reworkAssigned: true, qcReady: true },
 };

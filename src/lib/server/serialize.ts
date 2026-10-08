@@ -22,6 +22,7 @@ import type {
   CommissionEntry,
   Payout,
   Quote,
+  QuoteLine,
   Expense,
   Refund,
   JobStatus,
@@ -62,7 +63,9 @@ export function serializeProperty(p: Prisma.PropertyGetPayload<object>): Propert
     carpetAreaSqFt: p.areaSqFt,
     bedrooms: p.bedrooms,
     bathrooms: p.bathrooms,
-    gpsCoordinates: { lat: 0, lng: 0 },
+    gpsCoordinates: { lat: p.lat ?? 0, lng: p.lng ?? 0 },
+    lat: p.lat ?? undefined,
+    lng: p.lng ?? undefined,
     accessNotes: p.accessNotes ?? undefined,
     parkingInstructions: p.parkingInstructions ?? undefined,
     preferredTime: p.preferredTime ?? undefined,
@@ -83,6 +86,9 @@ export function serializeService(
     description: s.description,
     basePrice: s.basePrice,
     estimatedDurationHours: s.estimatedDurationHours,
+    isCustom: s.isCustom,
+    gstTreatment: (s.gstTreatment as Service["gstTreatment"]) ?? "DEFAULT",
+    notes: s.notes ?? undefined,
     checklistTemplate: s.checklistTemplate
       .slice()
       .sort((a, b) => a.position - b.position)
@@ -166,6 +172,14 @@ export function serializeJob(
       ? new Date(j.customerFeedbackAt).toISOString()
       : undefined,
     googleReviewClicked: j.googleReviewClicked,
+    customerFeedbackComment: j.customerFeedbackComment ?? undefined,
+    locationLat: j.locationLat ?? undefined,
+    locationLng: j.locationLng ?? undefined,
+    locationAddress: j.locationAddress ?? undefined,
+    customerNotes: j.customerNotes ?? undefined,
+    customerVisibility: (j.customerVisibility as Job["customerVisibility"]) ?? undefined,
+    quoteId: j.quoteId ?? undefined,
+    arrivalVerification: j.arrivalVerification ?? undefined,
     qualityCheckId: j.qualityCheckId ?? undefined,
     referralAttribution: undefined,
     arrivedAt: j.arrivedAt ? new Date(j.arrivedAt).toISOString() : undefined,
@@ -221,6 +235,12 @@ export function serializeInvoice(i: Prisma.InvoiceGetPayload<object>): Invoice {
     issuedAt: new Date(i.issuedAt).toISOString(),
     finalizedAt: i.finalizedAt ? new Date(i.finalizedAt).toISOString() : undefined,
     refundedAmount: i.refundedAmount,
+    items: parseLines(i.items),
+    notes: i.notes ?? undefined,
+    paymentTerms: i.paymentTerms ?? undefined,
+    billingAddress: i.billingAddress ?? undefined,
+    serviceAddress: i.serviceAddress ?? undefined,
+    quoteId: i.quoteId ?? undefined,
     invoiceType: i.invoiceType === "NON_GST" ? "NON_GST" : "GST",
     gstRate: i.gstRate,
     cgst: i.cgst,
@@ -388,32 +408,62 @@ export function serializePayout(p: Prisma.PayoutGetPayload<object>): Payout {
   };
 }
 
-export function serializeQuote(q: Prisma.QuoteGetPayload<object>): Quote {
-  // Line items persisted with the quotation (legacy rows have none).
-  const rawItems: unknown[] = Array.isArray(q.items) ? (q.items as unknown[]) : [];
-  const items = rawItems
+/** Reads quotation / invoice lines (also the older { unitPrice } shape). */
+export function parseLines(raw: unknown): QuoteLine[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
     .filter((it): it is Record<string, unknown> => typeof it === "object" && it !== null && !Array.isArray(it))
-    .map((it) => ({
-      description: String(it.description ?? ""),
-      quantity: Number(it.quantity ?? 1),
-      unitPrice: Number(it.unitPrice ?? 0),
-      amount: Number(it.quantity ?? 1) * Number(it.unitPrice ?? 0),
-    }));
+    .map((it) => {
+      const quantity = Number(it.quantity ?? 1) || 0;
+      const rate = Number(it.rate ?? it.unitPrice ?? 0) || 0;
+      return {
+        serviceId: typeof it.serviceId === "string" ? it.serviceId : null,
+        description: String(it.description ?? ""),
+        quantity,
+        rate,
+        amount: Math.round(quantity * rate * 100) / 100,
+        custom: it.custom === true || typeof it.serviceId !== "string",
+      };
+    });
+}
 
+export function serializeQuote(
+  q: Prisma.QuoteGetPayload<object>,
+  extra: { customerName?: string; propertyTitle?: string } = {}
+): Quote {
+  const today = new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);
+  const expired = (q.status === "sent" || q.status === "draft") && q.validUntil < today;
   return {
     id: q.id,
     quoteNumber: q.quoteNumber,
     customerId: q.customerId,
-    propertyId: q.propertyId,
-    serviceId: q.serviceId,
-    items,
+    customerName: extra.customerName,
+    propertyId: q.propertyId ?? undefined,
+    propertyTitle: extra.propertyTitle,
+    items: parseLines(q.items),
+    quoteType: q.quoteType === "NON_GST" ? "NON_GST" : "GST",
+    gstRate: q.gstRate,
+    cgst: q.cgst,
+    sgst: q.sgst,
+    igst: q.igst,
+    interState: q.interState,
+    customerGstin: q.customerGstin ?? undefined,
     subtotal: q.subtotal,
-    tax: q.tax,
     discount: q.discount,
+    taxable: Math.round((q.subtotal - q.discount) * 100) / 100,
+    tax: q.tax,
     total: q.total,
     validUntil: q.validUntil,
-    status: q.status as Quote["status"],
-    createdAt: new Date(q.createdAt).toISOString(),
+    terms: q.terms ?? undefined,
+    paymentTerms: q.paymentTerms ?? undefined,
+    notes: q.notes ?? undefined,
+    status: (expired ? "expired" : q.status) as Quote["status"],
+    acceptedAt: q.acceptedAt ? q.acceptedAt.toISOString() : undefined,
+    acceptedBy: q.acceptedBy ?? undefined,
+    jobId: q.jobId ?? undefined,
+    hasShareLink: Boolean(q.shareTokenHash),
+    createdAt: q.createdAt.toISOString(),
+    updatedAt: q.updatedAt.toISOString(),
   };
 }
 

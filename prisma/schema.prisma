@@ -101,6 +101,11 @@ model Service {
   basePrice              Float
   estimatedDurationHours Float
   active                 Boolean  @default(true)
+  /// Custom (one-off / bespoke) service vs the standard catalogue.
+  isCustom               Boolean  @default(false)
+  /// DEFAULT (company setting) | GST | NON_GST
+  gstTreatment           String   @default("DEFAULT")
+  notes                  String?
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
@@ -167,6 +172,17 @@ model Job {
   customerFeedbackRating  Int?
   customerFeedbackAt      DateTime?
   googleReviewClicked     Boolean   @default(false)
+  customerFeedbackComment String?
+  /// Service location for THIS job (map pin). Defaults to the property's.
+  locationLat       Float?
+  locationLng       Float?
+  locationAddress   String?
+  /// What the customer may see on their QR page; null = company defaults
+  /// (Settings → Customer Portal). Enforced by the customer API.
+  customerVisibility Json?
+  /// Notes written for the customer. Internal notes stay in `notes`.
+  customerNotes     String?
+  quoteId           String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -241,6 +257,13 @@ model Invoice {
   customerGstin String?
   /// Company GSTIN at the time the invoice was issued.
   supplierGstin String?
+  /// Line items [{ description, quantity, rate, amount }]; null = one line for the job's service.
+  items          Json?
+  notes          String?
+  paymentTerms   String?
+  billingAddress String?
+  serviceAddress String?
+  quoteId        String?
 
   job      Job       @relation(fields: [jobId], references: [id])
   payments Payment[]
@@ -390,19 +413,41 @@ model JobPhoto {
 }
 
 model Quote {
-  id          String   @id @default(cuid())
-  quoteNumber String   @unique
-  customerId  String
-  propertyId  String
-  serviceId   String
-  items       Json?
-  subtotal    Float
-  tax         Float
-  discount    Float    @default(0)
-  total       Float
-  validUntil  String
-  status      String   @default("sent")
-  createdAt   DateTime @default(now())
+  id             String    @id @default(cuid())
+  quoteNumber    String    @unique
+  customerId     String
+  propertyId     String?
+  /// First standard service (legacy); the lines live in `items`.
+  serviceId      String?
+  /// [{ serviceId?, description, quantity, rate, amount, custom }]
+  items          Json?
+  quoteType      String    @default("GST") // GST | NON_GST
+  gstRate        Float     @default(0)
+  cgst           Float     @default(0)
+  sgst           Float     @default(0)
+  igst           Float     @default(0)
+  interState     Boolean   @default(false)
+  customerGstin  String?
+  subtotal       Float
+  tax            Float
+  discount       Float     @default(0)
+  total          Float
+  validUntil     String
+  terms          String?
+  paymentTerms   String?
+  notes          String?
+  /// draft | sent | accepted | declined | converted_to_job | expired
+  status         String    @default("sent")
+  acceptedAt     DateTime?
+  acceptedBy     String?
+  /// Share link for the customer to view/accept: only the hash is stored.
+  shareTokenHash String?   @unique
+  shareTokenEnc  String?
+  jobId          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@index([customerId])
 }
 
 model ReferralPartner {

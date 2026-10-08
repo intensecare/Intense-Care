@@ -24,7 +24,8 @@ import { recordActivity } from "@/lib/server/activity";
 import { can, canApprove, refundNeedsApproval, discountNeedsApproval } from "@/lib/rbac";
 
 /**
- * GET /api/finance — invoices, payments, refunds, expenses, quotes.
+ * GET /api/finance — invoices, payments, refunds, expenses.
+ * (Quotations have their own module: /api/quotations.)
  *   finance.view ALL  (Accounts, Super Admin) → everything
  *   invoice.view OWN  (customer login)        → own invoices + payments only
  */
@@ -34,12 +35,11 @@ export async function GET() {
     const own = scope === "OWN";
     const customerFilter = own ? { customerId: user.customerId ?? "__none__" } : {};
 
-    const [invoices, payments, refunds, expenses, quotes] = await Promise.all([
+    const [invoices, payments, refunds, expenses] = await Promise.all([
       prisma.invoice.findMany({ where: customerFilter, orderBy: { issuedAt: "desc" }, take: 500 }),
       prisma.payment.findMany({ where: customerFilter, orderBy: { paidAt: "desc" }, take: 500 }),
       prisma.refund.findMany({ where: customerFilter, orderBy: { createdAt: "desc" }, take: 500 }),
       own || !can(user, "expenses.manage") ? Promise.resolve([]) : prisma.expense.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
-      own || !can(user, "quotes.manage") ? Promise.resolve([]) : prisma.quote.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
     ]);
     logger.debug("finance.get", { by: user.id, permission, scope });
     return ok({
@@ -47,7 +47,6 @@ export async function GET() {
       payments: payments.map(serializePayment),
       refunds: refunds.map(serializeRefund),
       expenses: expenses.map(serializeExpense),
-      quotes: quotes.map(serializeQuote),
     });
   } catch (err) {
     return errorResponse(err, "finance.get.route_error");
@@ -100,35 +99,6 @@ const ExpenseSchema = z.object({
   reference: z.string().max(160).optional(),
 });
 
-const QuoteSchema = z.object({
-  action: z.literal("create-quote"),
-  customerId: z.string().min(1).max(64),
-  propertyId: z.string().min(1).max(64),
-  serviceId: z.string().min(1).max(64),
-  items: z
-    .array(
-      z.object({
-        description: z.string().min(1).max(300),
-        quantity: z.number().min(0.01).max(100000),
-        unitPrice: z.number().min(0).max(10000000),
-      })
-    )
-    .min(1)
-    .max(100),
-  validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-});
-
-const ConvertSchema = z.object({
-  action: z.literal("convert-quote"),
-  quoteId: z.string().min(1).max(64),
-  scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  scheduledTimeSlot: z
-    .string()
-    .regex(/^\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}$|^\d{1,2}:\d{2}\s*[AP]M\s*[-–]\s*\d{1,2}:\d{2}\s*[AP]M$/i)
-    .max(80)
-    .optional(),
-});
-
 /** Applies an approved refund to the ledger (invoice totals + job status), atomically. */
 async function processRefund(refundId: string) {
   return prisma.$transaction(async (tx) => {
@@ -145,7 +115,7 @@ async function processRefund(refundId: string) {
   });
 }
 
-/** POST /api/finance — payments, invoice finalization/updates, refunds (with approval), expenses, quotes. */
+/** POST /api/finance — payments, invoice finalization/updates, refunds (with approval), expenses. */
 export async function POST(request: Request) {
   try {
     const body = await readJson(request);
@@ -362,115 +332,6 @@ export async function POST(request: Request) {
       return ok({ id: parsed.data.id, deleted: true });
     }
 
-    /* --------------------------------------------------------------- quotes */
-    if (action === "create-quote") {
-      const { user } = await requirePermission("quotes.manage");
-      const parsed = QuoteSchema.safeParse(body);
-      if (!parsed.success) return fail("Invalid quote payload.", 400);
-      const d = parsed.data;
-      const settings = await getSystemSettings();
-      const subtotal = d.items.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0);
-      const rate = getTaxRate(settings);
-      const tax = Math.round(subtotal * rate * 100) / 100;
-      const created = await prisma.quote.create({
-        data: {
-          quoteNumber: nextDocNumber("QUO"),
-          customerId: d.customerId,
-          propertyId: d.propertyId,
-          serviceId: d.serviceId,
-          items: d.items.map((it) => ({ description: it.description, quantity: it.quantity, unitPrice: it.unitPrice })),
-          subtotal,
-          tax,
-          total: subtotal + tax,
-          validUntil: d.validUntil,
-        },
-      });
-      void recordAudit({ actor: user, action: "QUOTE_CREATED", entityType: "quote", entityId: created.id, details: `₹${created.total}`, request });
-      return ok(serializeQuote(created), 201);
-    }
-
-    if (action === "convert-quote") {
-      const { user } = await requireAnyPermission(["quotes.manage", "jobs.create"]);
-      const parsed = ConvertSchema.safeParse(body);
-      if (!parsed.success) return fail("Invalid convert payload.", 400);
-      const quote = await prisma.quote.findUnique({ where: { id: parsed.data.quoteId } });
-      if (!quote) return fail("Quote not found.", 404);
-      if (quote.status !== "sent") return fail("Only open quotations can be converted.", 409);
-
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const scheduledDate = parsed.data.scheduledDate ?? tomorrow.toISOString().slice(0, 10);
-      const scheduledTimeSlot = parsed.data.scheduledTimeSlot ?? "09:00 - 13:30";
-
-      const customer = await prisma.customer.findUnique({ where: { id: quote.customerId }, select: { name: true, gstin: true } });
-      const settings = await getSystemSettings();
-      // A quote that carried tax becomes a GST invoice (intra-state split);
-      // a quote without tax becomes a Non-GST invoice.
-      const isGst = quote.tax > 0;
-      const cgst = isGst ? Math.round((quote.tax / 2) * 100) / 100 : 0;
-      const taxable = quote.subtotal - quote.discount;
-      const { job, invoice } = await prisma.$transaction(async (tx) => {
-        const createdJob = await tx.job.create({
-          data: {
-            jobSerial: await nextJobSerial(tx, customer?.name ?? "Customer", scheduledDate),
-            customerId: quote.customerId,
-            propertyId: quote.propertyId,
-            serviceId: quote.serviceId,
-            scheduledDate,
-            scheduledTimeSlot,
-            amount: quote.total,
-            status: "SCHEDULED",
-            notes: `Converted from quotation ${quote.quoteNumber}`,
-          },
-        });
-        const createdInvoice = await tx.invoice.create({
-          data: {
-            invoiceNumber: await nextInvoiceNumber(tx, isGst ? "GST" : "NON_GST"),
-            invoiceType: isGst ? "GST" : "NON_GST",
-            gstRate: isGst && taxable > 0 ? Math.round((quote.tax * 10000) / taxable) / 100 : 0,
-            cgst,
-            sgst: isGst ? Math.round((quote.tax - cgst) * 100) / 100 : 0,
-            customerGstin: isGst ? customer?.gstin ?? null : null,
-            supplierGstin: isGst ? settings.gstin?.trim() || null : null,
-            jobId: createdJob.id,
-            customerId: quote.customerId,
-            subtotal: quote.subtotal,
-            tax: quote.tax,
-            discount: quote.discount,
-            total: quote.total,
-            balanceDue: quote.total,
-            dueDate: quote.validUntil,
-          },
-        });
-        await tx.customer.update({ where: { id: quote.customerId }, data: { totalBookings: { increment: 1 } } });
-        await tx.quote.update({ where: { id: quote.id }, data: { status: "converted_to_job" } });
-        return { job: createdJob, invoice: createdInvoice };
-      });
-
-      void (async () => {
-        try {
-          const { ensureCustomerLink } = await import("@/lib/server/qr-service");
-          await ensureCustomerLink(job.id, { id: user.id, name: user.name });
-        } catch (e) {
-          logger.warn("finance.customer_link_ensure_failed", { jobId: job.id, error: e instanceof Error ? e.message : String(e) });
-        }
-      })();
-      void recordAudit({ actor: user, action: "QUOTE_CONVERTED", entityType: "quote", entityId: quote.id, jobId: job.id, newState: "SCHEDULED", request });
-      return ok({ invoice: serializeInvoice(invoice), jobId: job.id }, 201);
-    }
-
-    if (action === "delete-quote") {
-      const { user } = await requirePermission("quotes.manage");
-      const parsed = z.object({ action: z.literal("delete-quote"), id: z.string().min(1).max(64) }).safeParse(body);
-      if (!parsed.success) return fail("Invalid quote delete payload.", 400);
-      const quote = await prisma.quote.findUnique({ where: { id: parsed.data.id } });
-      if (!quote) return fail("Quote not found.", 404);
-      if (quote.status !== "sent") return fail("Only open quotations can be deleted; converted quotations are part of job history.", 409);
-      await prisma.quote.delete({ where: { id: parsed.data.id } });
-      logger.info("finance.quote_deleted", { quoteId: parsed.data.id, by: user.id });
-      void recordAudit({ actor: user, action: "QUOTE_DELETED", entityType: "quote", entityId: parsed.data.id, request });
-      return ok({ id: parsed.data.id, deleted: true });
-    }
 
     return fail("Unknown action.", 400);
   } catch (err) {

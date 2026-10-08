@@ -19,7 +19,6 @@ import {
   CommissionRule,
   CommissionEntry,
   Payout,
-  Quote,
   Invoice,
   Payment,
   Expense,
@@ -70,7 +69,6 @@ interface AppContextType {
   commissionRules: CommissionRule[];
   commissionEntries: CommissionEntry[];
   payouts: Payout[];
-  quotes: Quote[];
   invoices: Invoice[];
   payments: Payment[];
   refunds: Refund[];
@@ -78,7 +76,7 @@ interface AppContextType {
   smsGatewayLogs: SmsGatewayLog[];
 
   // Actions
-  /** Re-fetches invoices, payments, refunds, expenses and quotes (finance.view / invoice.view). */
+  /** Re-fetches invoices, payments, refunds and expenses (finance.view / invoice.view). */
   refreshFinance: () => Promise<void>;
   finalizeInvoice: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
   updateInvoice: (invoiceId: string, updates: { discount?: number; dueDate?: string; reason?: string; invoiceType?: "GST" | "NON_GST"; interState?: boolean; customerGstin?: string }) => Promise<{ success: boolean; message: string }>;
@@ -212,19 +210,6 @@ interface AppContextType {
 
   createExpense: (expense: Omit<Expense, "id" | "createdAt" | "createdBy">) => Promise<{ success: boolean; message: string }>;
   deleteExpense: (id: string) => Promise<{ success: boolean; message: string }>;
-  createQuote: (quote: {
-    customerId: string;
-    propertyId: string;
-    serviceId: string;
-    items: { description: string; quantity: number; unitPrice: number }[];
-    validUntil: string;
-  }) => Promise<{ success: boolean; message: string }>;
-  convertQuoteToInvoice: (
-    quoteId: string,
-    schedule?: { scheduledDate: string; scheduledTimeSlot: string }
-  ) => Promise<{ success: boolean; message: string; jobId?: string }>;
-  convertQuoteToJob: (quoteId: string) => Promise<{ success: boolean; message: string }>;
-  deleteQuote: (id: string) => Promise<{ success: boolean; message: string }>;
   assignStaffToJob: (jobId: string, staffIds: string[]) => Promise<{ success: boolean; message: string }>;
   /** Assignment-scoped roster of active field workers (PUT /api/users), visible
    *  to both Admin and ops_manager — backs the dispatcher tower and the
@@ -327,7 +312,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [commissionRules, setCommissionRules] = useState<CommissionRule[]>([]);
   const [commissionEntries, setCommissionEntries] = useState<CommissionEntry[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
-  const [quotes, setQuotes] = useState<Quote[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [refunds, setRefunds] = useState<Refund[]>([]);
@@ -432,13 +416,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     if (allowed("finance.view")) {
       parallel.push(
-        api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[]; expenses: Expense[]; quotes: Quote[] }>("/api/finance").then((r) => {
+        api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[]; expenses: Expense[] }>("/api/finance").then((r) => {
           if (r.ok && r.data) {
             setInvoices(r.data.invoices);
             setPayments(r.data.payments);
             setRefunds(r.data.refunds ?? []);
             setExpenses(r.data.expenses);
-            setQuotes(r.data.quotes);
           }
         })
       );
@@ -576,13 +559,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * that may have settled a commission (e.g. job completion).
    */
   const refreshFinance = useCallback(async () => {
-    const r = await api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[]; expenses: Expense[]; quotes: Quote[] }>("/api/finance");
+    const r = await api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[]; expenses: Expense[] }>("/api/finance");
     if (r.ok && r.data) {
       setInvoices(r.data.invoices);
       setPayments(r.data.payments);
       setRefunds(r.data.refunds ?? []);
       setExpenses(r.data.expenses);
-      setQuotes(r.data.quotes);
     }
   }, []);
 
@@ -1091,6 +1073,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         preferredTime: propertyData.preferredTime,
         recurringService: propertyData.recurringService,
         recurringFrequency: propertyData.recurringFrequency,
+        lat: propertyData.lat ?? null,
+        lng: propertyData.lng ?? null,
       }),
     });
     if (!r.ok || !r.data) return { success: false, message: r.error || "Could not create the property." };
@@ -1305,75 +1289,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Expense deleted." };
   };
 
-  const createQuote = async (quote: {
-    customerId: string;
-    propertyId: string;
-    serviceId: string;
-    items: { description: string; quantity: number; unitPrice: number }[];
-    validUntil: string;
-  }) => {
-    const r = await api<Quote>("/api/finance", {
-      method: "POST",
-      body: JSON.stringify({ action: "create-quote", ...quote }),
-    });
-    if (!r.ok || !r.data) return { success: false, message: r.error || "Could not create the quotation." };
-    // Insert the persisted quotation into the local store so it shows up
-    // without a manual refresh.
-    setQuotes((prev) => [r.data as Quote, ...prev]);
-    await logAudit("job", "quote", "QUOTE_CREATED", `Quotation created (₹ total per line items)`);
-    return { success: true, message: "Quotation created." };
-  };
-
-  const convertQuoteToInvoice = async (
-    quoteId: string,
-    schedule?: { scheduledDate: string; scheduledTimeSlot: string }
-  ) => {
-    const r = await api<{ invoice: Invoice; jobId: string }>("/api/finance", {
-      method: "POST",
-      body: JSON.stringify({ action: "convert-quote", quoteId, ...schedule }),
-    });
-    if (!r.ok) return { success: false, message: r.error || "Conversion failed." };
-    // The server created a booking + tax invoice and closed the quotation.
-    // Re-sync every affected collection so Jobs, Finance and Customers all
-    // reflect the conversion without a manual refresh.
-    await Promise.all([
-      (async () => {
-        const fr = await api<{
-          invoices: Invoice[];
-          payments: Payment[];
-          expenses: Expense[];
-          quotes: Quote[];
-        }>("/api/finance");
-        if (fr.ok && fr.data) {
-          setInvoices(fr.data.invoices);
-          setPayments(fr.data.payments);
-          setExpenses(fr.data.expenses);
-          setQuotes(fr.data.quotes);
-        }
-      })(),
-      refreshJobs(),
-      refreshCustomers(),
-    ]);
-    await logAudit("payment", quoteId, "QUOTE_CONVERTED", "Quotation converted to job + invoice");
-    return { success: true, message: "Quotation converted to job + invoice.", jobId: r.data?.jobId };
-  };
-
-  const convertQuoteToJob = async (quoteId: string) => {
-    return convertQuoteToInvoice(quoteId);
-  };
-
-  const deleteQuote = async (id: string) => {
-    const r = await api("/api/finance", {
-      method: "POST",
-      body: JSON.stringify({ action: "delete-quote", id }),
-    });
-    if (!r.ok) return { success: false, message: r.error || "Could not delete the quotation." };
-    setQuotes((prev) => prev.filter((q) => q.id !== id));
-    await logAudit("payment", id, "QUOTE_DELETED", "Open quotation deleted");
-    return { success: true, message: "Quotation deleted." };
-  };
-
-  // --- Services & rubrics (company-authored, DB-backed) ----------------------------
   const createService = async (serviceData: Omit<Service, "id">) => {
     const r = await api<Service>("/api/services", {
       method: "POST",
@@ -1551,7 +1466,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         commissionRules,
         commissionEntries,
         payouts,
-        quotes,
         invoices,
         payments,
         refunds,
@@ -1597,10 +1511,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         recordPayment,
         createExpense,
         deleteExpense,
-        createQuote,
-        deleteQuote,
-        convertQuoteToInvoice,
-        convertQuoteToJob,
         assignStaffToJob,
         fetchStaffDirectory,
         createService,

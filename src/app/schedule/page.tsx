@@ -86,7 +86,7 @@ export default function SchedulePage() {
         description="Pick a day to see its jobs, assign a Field Manager or reschedule."
         actions={
           can("jobs.create") ? (
-            <Link href="/jobs?create=true">
+            <Link href="/jobs/new">
               <Button>
                 <Plus className="h-5 w-5" aria-hidden /> New Job
               </Button>

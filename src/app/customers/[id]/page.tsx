@@ -95,7 +95,7 @@ export default function CustomerDetailPage() {
         actions={
           <>
             {can("jobs.create") && (
-              <Link href="/jobs?create=true" className="inline-flex h-11 items-center gap-2 rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white hover:bg-rose-600">
+              <Link href="/jobs/new" className="inline-flex h-11 items-center gap-2 rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white hover:bg-rose-600">
                 <Plus className="h-5 w-5" aria-hidden /> New Job
               </Link>
             )}
@@ -179,7 +179,7 @@ export default function CustomerDetailPage() {
           <section className="space-y-3">
             <h2 className="text-lg font-semibold text-zinc-950">Jobs</h2>
             {jobs.length === 0 ? (
-              <EmptyState icon={Briefcase} title="No jobs yet" description="Book the first job for this customer." actionLabel={can("jobs.create") ? "New job" : undefined} onAction={() => router.push("/jobs?create=true")} />
+              <EmptyState icon={Briefcase} title="No jobs yet" description="Book the first job for this customer." actionLabel={can("jobs.create") ? "New job" : undefined} onAction={() => router.push("/jobs/new")} />
             ) : (
               <DataTable
                 caption="Jobs"
