@@ -10,6 +10,21 @@ A simple service-management app for a deep-cleaning business. **Five user types,
 | **Tax Officer** | **GST** (desk, read-only) | GST Dashboard, GST Invoices (search, date and customer filters, GST breakdown, print / PDF), GST Reports (month-wise CGST / SGST / IGST, CSV). Never sees Non-GST invoices, jobs, customers, users or settings, and cannot change anything |
 | **Customer** | **My Service** (QR / secure link, no login, no app) | The page follows the job: Job ID, team, status → CONFIRM & START → progress → quality check → before / after photos → invoice → APPROVE SERVICE → star rating, Google review |
 
+## Structure
+
+Sidebar — **Main:** Dashboard · Intense AI · Jobs · Customers · Quotations · Invoices · QC · Reports · Users. **More:** Schedule · Properties · Services · GST · Reviews & Feedback · Settings. QR, location, rework, approval, custom services, payment, field staff and job tracking are parts of the Job, not separate modules.
+
+- **Jobs are the centre.** New Job (`/jobs/new`) walks through Customer → Property → Location (map: address search, current location, drop / drag the pin, lat / lng, address, Navigate) → Service → Date & time → Field Manager → Notes (internal + for the customer) → Customer visibility. The Job Details page shows customer, property, location, service, schedule, team, work, QC, quotation, invoice, approval and feedback in one place.
+- **Quotations** (`/quotations`): catalogue and custom lines, quantity, rate, discount, GST / Non-GST (CGST + SGST or IGST), terms, payment terms, valid-until. Download PDF / Print (browser *Save as PDF*), Share (share sheet, WhatsApp, copy link), Edit, Duplicate, Convert to Job, Convert to Invoice. The share link `APP_BASE_URL/customer/quote/<token>` carries only a random token; the customer can accept or decline it once while it is valid.
+- **Quotations and invoices print as one professional document:** logo, company details, number and date, customer, property / service address, service table, totals (GST rows only on GST documents), payment terms, notes / T&C and the authorized signature (Settings → Logo & signature).
+- **Services:** Standard and Custom in one module; a custom service has its own price, duration, GST treatment, checklist and notes and works in quotations, jobs, invoices, reports and the customer page.
+- **Customer visibility** (Settings → Customer portal for the company default, and per job on the Job page): Job ID, service, date, location, team, status, before / after photos, QC result, quotation, invoice, payment status, service notes, feedback. **Enforced by the API** — anything hidden is left out of `/api/customer/job/<token>`, the photo proxy and the customer's Intense AI answers, not just hidden in the page. Internal notes, costs, margins, QC comments and staff details are never sent.
+- **Arrival verification:** GPS against the job's pin (else the property's). If GPS can't confirm it, the Field Manager taps **Scan QR to Verify Location** and scans the customer's QR — accepted only when it belongs to this job or this property. Otherwise they continue with a reason. The activity log records *verified by GPS*, *verified by QR scan*, *Admin override* (reason required) or *not verified*.
+- **Reviews & Feedback** (`/reviews`): private ratings and comments from the customer page, complaints, Google review status, and — with `GOOGLE_PLACES_API_KEY` + `GOOGLE_PLACE_ID` — the public Google rating and latest reviews. Kept separate.
+- **Reports:** date range, service and Field Manager filters, cards, charts and CSV export for Jobs, Revenue, Customers, Services, QC, Rework, GST, Invoices, Feedback and FM Performance.
+- **Dashboard:** Today's Jobs, Active, Completed, Pending QC, Rework, Revenue, Pending Invoices, Customer Feedback, and *Attention Required* grouped by QC pending, payment pending, rework, unassigned and upcoming.
+- **Settings is configuration only:** company details, logo & signature, GST details, invoice and quotation defaults, users & permissions, customer portal defaults, notification switches.
+
 ## The job
 
 One Job ID from booking to feedback — rework never creates a new job. The ID is `CUSTOMER-NAME-DDMMYYYY-NNN` (e.g. `RAHUL-SHARMA-08102026-001`, then `-002` for that customer's next job on the same date): the name upper-cased with symbols removed, the service date, and a sequence. It is unique in the database (unique index; concurrent bookings take turns via an advisory lock). Jobs created before this format keep their `JOB-10001` style ID.
@@ -20,7 +35,7 @@ BOOKED → SCHEDULED → ASSIGNED → ARRIVED → CUSTOMER CONFIRMED → IN PROG
                        └→ REWORK REQUIRED → Field Manager fixes → SUBMIT FOR QC → REINSPECTION ┘
 ```
 
-Server-enforced: arrival is GPS-checked against the property (`ARRIVAL_GEOFENCE_METERS`, a reason is required to proceed without GPS); work cannot start until the customer confirms on their link; required checklist items must be done before COMPLETE WORK; status changes are compare-and-set so double taps or two devices can't apply twice.
+Server-enforced: arrival is GPS-checked against the job's location (`ARRIVAL_GEOFENCE_METERS`), or verified by scanning the customer's QR, or continued with a recorded reason; work cannot start until the customer confirms on their link; required checklist items must be done before COMPLETE WORK; status changes are compare-and-set so double taps or two devices can't apply twice.
 
 ## One QR per job
 
@@ -104,4 +119,7 @@ Messages: job assigned (Field Manager), team arrived (customer link), QC ready /
 
 ```bash
 npm test     # roles, permissions, routing, next action, state machine
+# Against a running server + empty test database (see the header of each script):
+node scripts/e2e-verify.mjs   # five user types, the job journey, GST rules, security
+node scripts/erp-verify.mjs   # quotations, job location, visibility, QR arrival, settings, reviews
 ```

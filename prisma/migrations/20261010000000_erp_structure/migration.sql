@@ -46,7 +46,8 @@ CREATE INDEX IF NOT EXISTS "Quote_customerId_idx" ON "Quote"("customerId");
 -- Older quotes: a quote with tax was a GST quote, split CGST/SGST.
 UPDATE "Quote" SET "quoteType" = CASE WHEN "tax" > 0 THEN 'GST' ELSE 'NON_GST' END,
   "cgst" = CASE WHEN "tax" > 0 THEN ROUND(("tax" / 2)::numeric, 2)::double precision ELSE 0 END,
-  "sgst" = CASE WHEN "tax" > 0 THEN "tax" - ROUND(("tax" / 2)::numeric, 2)::double precision ELSE 0 END
+  "sgst" = CASE WHEN "tax" > 0 THEN "tax" - ROUND(("tax" / 2)::numeric, 2)::double precision ELSE 0 END,
+  "gstRate" = CASE WHEN "tax" > 0 AND "subtotal" - "discount" > 0 THEN ROUND(("tax" * 100 / ("subtotal" - "discount"))::numeric, 2)::double precision ELSE 0 END
 WHERE "cgst" = 0 AND "sgst" = 0 AND "igst" = 0;
 ALTER TABLE "Quote" DROP CONSTRAINT IF EXISTS "Quote_type_valid";
 ALTER TABLE "Quote" ADD CONSTRAINT "Quote_type_valid" CHECK ("quoteType" IN ('GST', 'NON_GST'));
