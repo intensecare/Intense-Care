@@ -172,3 +172,8 @@ export function buildWhatsAppShareUrl(phone: string | undefined | null, message:
     ? `https://wa.me/${normalized}?text=${text}`
     : `https://wa.me/?text=${text}`;
 }
+
+/** Exact rupees and paise — for invoice documents and GST figures. */
+export function formatMoney(amount: number): string {
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
+}

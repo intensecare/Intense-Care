@@ -142,7 +142,7 @@ export async function GET() {
         collectedMonth: paid._sum.amount ?? 0,
       };
       if (overdue.length > 0) {
-        attention.push({ key: "overdue", jobId: null, title: "Payments", reason: `${overdue.length} overdue invoice${overdue.length === 1 ? "" : "s"}`, href: "/finance", tone: "warning" });
+        attention.push({ key: "overdue", jobId: null, title: "Invoices", reason: `${overdue.length} overdue invoice${overdue.length === 1 ? "" : "s"}`, href: "/invoices", tone: "warning" });
       }
     }
 

@@ -8,6 +8,7 @@
     "start": "next start -H 0.0.0.0 -p 3000",
     "lint": "next lint",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:demo": "tsx prisma/seed-demo.ts",
     "test": "tsx --test tests/rbac.test.ts && TZ=Asia/Kolkata tsx tests/ops-visibility.test.ts"
   },
   "dependencies": {

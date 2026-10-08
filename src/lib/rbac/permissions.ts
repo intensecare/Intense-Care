@@ -67,6 +67,10 @@ export const PERMISSIONS = [
 
   "finance.view",
   "invoice.view",
+  /** GST invoices + GST reports. The ONLY finance access a Tax Officer has;
+   *  every API that serves it filters to invoiceType = GST server-side. */
+  "gst.view",
+  "gst.reports",
   "invoice.create",
   "invoice.update",
   "invoice.finalize",
@@ -217,10 +221,21 @@ const CUSTOMER: PermissionGrant = {
   ),
 };
 
+/**
+ * Tax Officer — read-only GST access. No jobs, customers, users, Non-GST
+ * invoices, payments or settings; no create / edit / delete of anything.
+ * NOTE: `gst.view` never grants Non-GST invoices — the invoice APIs force
+ * invoiceType = GST for anyone without `finance.view`.
+ */
+const TAX_OFFICER: PermissionGrant = {
+  ...all("gst.view", "gst.reports"),
+};
+
 export const ROLE_PERMISSIONS: Record<Role, PermissionGrant> = {
   admin: ADMIN,
   field_manager: FIELD_MANAGER,
   qc_inspector: QC_INSPECTOR,
+  tax_officer: TAX_OFFICER,
   customer: CUSTOMER,
 };
 

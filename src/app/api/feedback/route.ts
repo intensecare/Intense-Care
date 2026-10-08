@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireUser } from "@/lib/server/authz";
+import { authorizeJob } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 
 /**
@@ -10,12 +10,13 @@ import { errorResponse } from "@/lib/server/http";
  */
 export async function GET(request: Request) {
   try {
-    await requireUser();
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get("jobId");
     if (!jobId) {
       return NextResponse.json({ success: false, error: "jobId is required." }, { status: 400 });
     }
+    // Only someone who may see this job may see its approval and rating.
+    await authorizeJob(jobId, "jobs.view");
 
     const job = await prisma.job.findUnique({
       where: { id: jobId },

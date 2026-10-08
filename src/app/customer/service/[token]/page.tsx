@@ -39,8 +39,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
  *   QC PASSED       → [VIEW BEFORE / AFTER] → [APPROVE SERVICE]
  *   COMPLETED       → Thank you ✓ · rating · [LEAVE GOOGLE REVIEW]
  *
- * The server authorizes every read and action by the token; nothing internal
- * (notes, amounts, QC findings, other customers) is ever returned.
+ * The server authorizes every read and action by the token. The customer sees
+ * their own service, before/after photos, a plain QC result and their own
+ * invoice — never internal notes, QC findings, rework photos or other customers.
  */
 
 interface CustomerPayload {
@@ -61,11 +62,43 @@ interface CustomerPayload {
   checklist: { id: string; area: string; task: string; completed: boolean }[];
   photos: { id: string; area: string; photoType: string; url: string; uploadedAt: string }[];
   qualityCheck: { passed: boolean } | null;
+  /** Customer-facing QC result: checking → (improving) → passed. */
+  qualityResult: "checking" | "improving" | "passed" | null;
+  invoice: CustomerInvoice | null;
   approval: { approvedAt: string; approvedBy: string; method: string } | null;
   feedback: { rating: number; feedbackAt: string | null; googleReviewClicked: boolean } | null;
   complaintCount: number;
   company: { name: string; googleReviewUrl: string };
 }
+
+interface CustomerInvoice {
+  invoiceNumber: string;
+  invoiceType: "GST" | "NON_GST";
+  issuedAt: string;
+  dueDate: string;
+  subtotal: number;
+  discount: number;
+  taxable: number;
+  gstRate?: number;
+  cgst?: number;
+  sgst?: number;
+  igst?: number;
+  totalGst?: number;
+  customerGstin?: string;
+  companyGstin?: string;
+  total: number;
+  amountPaid: number;
+  balanceDue: number;
+  status: string;
+  companyName: string;
+  companyAddress: string;
+}
+
+const QC_TEXT: Record<NonNullable<CustomerPayload["qualityResult"]>, { text: string; tone: string }> = {
+  checking: { text: "Being checked", tone: "text-amber-700" },
+  improving: { text: "Finishing touches", tone: "text-amber-700" },
+  passed: { text: "Passed ✓", tone: "text-emerald-700" },
+};
 
 type Stage = "scheduled" | "arrived" | "in_progress" | "qc_pending" | "approve" | "completed" | "cancelled";
 type Tab = "home" | "service" | "reports" | "profile";
@@ -239,7 +272,7 @@ export default function CustomerServicePage() {
   })();
 
   return (
-    <Shell jobId={job.id} action={primary} tab={tab} onTab={go}>
+    <Shell action={primary} tab={tab} onTab={go}>
       {success && (
         <div role="status" className="rounded-2xl bg-emerald-600 text-white text-base font-semibold px-4 py-3 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden /> {success}
@@ -278,8 +311,26 @@ export default function CustomerServicePage() {
             </div>
             <div className="flex items-center justify-between gap-3 rounded-2xl bg-zinc-50 px-4 py-3">
               <span className="text-sm text-zinc-500">Status</span>
-              <span className={cn("text-base font-semibold", status.tone === "success" ? "text-emerald-700" : status.tone === "warning" ? "text-amber-700" : status.tone === "info" ? "text-info-700" : status.tone === "error" ? "text-red-700" : "text-zinc-800")}>{status.text}</span>
+              <span className={cn("text-base font-semibold text-right", status.tone === "success" ? "text-emerald-700" : status.tone === "warning" ? "text-amber-700" : status.tone === "info" ? "text-info-700" : status.tone === "error" ? "text-red-700" : "text-zinc-800")}>{status.text}</span>
             </div>
+            <dl className="divide-y divide-zinc-100 text-sm">
+              <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Job ID</dt><dd className="font-mono font-semibold text-zinc-900 text-right break-all">{job.id}</dd></div>
+              <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Name</dt><dd className="font-medium text-zinc-900 text-right break-words">{data.customer.name}</dd></div>
+              <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Team</dt><dd className="font-medium text-zinc-900 text-right break-words">{team.length ? team.join(", ") : "Being assigned"}</dd></div>
+              {data.qualityResult && (
+                <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Quality check</dt><dd className={cn("font-semibold text-right", QC_TEXT[data.qualityResult].tone)}>{QC_TEXT[data.qualityResult].text}</dd></div>
+              )}
+              {data.invoice && (
+                <div className="flex items-center justify-between gap-3 py-2">
+                  <dt className="text-zinc-500 shrink-0">Invoice</dt>
+                  <dd className="text-right">
+                    <button onClick={() => go("reports")} className="min-h-10 font-semibold text-rose-600 inline-flex items-center gap-1">
+                      {formatInr(data.invoice.total)} · View
+                    </button>
+                  </dd>
+                </div>
+              )}
+            </dl>
 
             {stage === "scheduled" && <p className="text-base text-zinc-600">We&apos;ll update this page the moment your team arrives.</p>}
 
@@ -387,6 +438,7 @@ export default function CustomerServicePage() {
       {tab === "reports" && (
         <>
           {stage === "completed" && (
+            <div className="print:hidden">
             <Panel title="Service report">
               <Detail icon={<Sparkles className="h-5 w-5" aria-hidden />} label="Service" value={job.serviceName} />
               <Detail icon={<Calendar className="h-5 w-5" aria-hidden />} label="Date" value={when} />
@@ -395,10 +447,14 @@ export default function CustomerServicePage() {
               {data.approval && <Detail icon={<CheckCircle2 className="h-5 w-5" aria-hidden />} label="Approved" value={new Date(data.approval.approvedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />}
               <Detail icon={<ClipboardList className="h-5 w-5" aria-hidden />} label="Tasks" value={`${doneCount} of ${checklist.length} done`} />
             </Panel>
+            </div>
           )}
-          <Panel title="Before / After">
-            <BeforeAfter photos={data.photos} areas={areas} />
-          </Panel>
+          <div className="print:hidden">
+            <Panel title="Before / After">
+              <BeforeAfter photos={data.photos} areas={areas} />
+            </Panel>
+          </div>
+          {data.invoice && <InvoicePanel invoice={data.invoice} customerName={data.customer.name} jobId={job.id} serviceName={job.serviceName} />}
           {stage === "approve" && (
             <button onClick={() => go("home")} className="h-12 w-full rounded-2xl bg-emerald-600 text-white text-base font-semibold">Back to approve</button>
           )}
@@ -489,7 +545,7 @@ const TABS: { key: Tab; label: string; Icon: React.ElementType }[] = [
 function Shell({ jobId, action, tab, onTab, children }: { jobId?: string; action?: React.ReactNode; tab?: Tab; onTab?: (t: Tab) => void; children: React.ReactNode }) {
   return (
     <div className={cn("min-h-screen bg-zinc-50 text-zinc-900", tab ? (action ? "pb-48" : "pb-28") : "pb-10")}>
-      <header className="bg-white/95 backdrop-blur border-b border-zinc-200 sticky top-0 z-30">
+      <header className="print:hidden bg-white/95 backdrop-blur border-b border-zinc-200 sticky top-0 z-30">
         <div className="max-w-lg mx-auto h-16 px-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="h-10 w-10 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0">
@@ -505,7 +561,7 @@ function Shell({ jobId, action, tab, onTab, children }: { jobId?: string; action
       </header>
       <main className="max-w-lg mx-auto px-4 py-5 space-y-4">{children}</main>
       {(action || tab) && (
-        <div className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-zinc-200 pb-[env(safe-area-inset-bottom)]">
+        <div className="print:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-zinc-200 pb-[env(safe-area-inset-bottom)]">
           {action && <div className="max-w-lg mx-auto px-4 pt-3">{action}</div>}
           {tab && onTab && (
             <nav aria-label="Main" className="max-w-lg mx-auto grid grid-cols-4">
@@ -520,6 +576,57 @@ function Shell({ jobId, action, tab, onTab, children }: { jobId?: string; action
         </div>
       )}
     </div>
+  );
+}
+
+const formatInr = (n: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
+
+/** The customer's own invoice. GST fields appear only on a GST invoice. */
+function InvoicePanel({ invoice: inv, customerName, jobId, serviceName }: { invoice: CustomerInvoice; customerName: string; jobId: string; serviceName: string }) {
+  const gst = inv.invoiceType === "GST";
+  const half = (inv.gstRate ?? 0) / 2;
+  const rows: [string, string, boolean?][] = gst
+    ? [
+        ["Taxable amount", formatInr(inv.taxable)],
+        ...(inv.igst ? ([[`IGST @ ${inv.gstRate}%`, formatInr(inv.igst)]] as [string, string][]) : ([[`CGST @ ${half}%`, formatInr(inv.cgst ?? 0)], [`SGST @ ${half}%`, formatInr(inv.sgst ?? 0)]] as [string, string][])),
+        ["Total GST", formatInr(inv.totalGst ?? 0)],
+        ["Grand total", formatInr(inv.total), true],
+      ]
+    : [
+        ["Amount", formatInr(inv.taxable)],
+        ["Grand total", formatInr(inv.total), true],
+      ];
+  return (
+    <section className="bg-white rounded-3xl border border-zinc-200 p-5 shadow-sm space-y-4 print:border-0 print:shadow-none">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-zinc-950">{gst ? "Tax invoice" : "Invoice"}</h2>
+          <p className="text-sm text-zinc-500 font-mono break-all">{inv.invoiceNumber}</p>
+        </div>
+        <span className="text-xs font-semibold px-2.5 py-1 rounded-full border border-zinc-200 bg-zinc-50 text-zinc-700 shrink-0">{gst ? "GST" : "Non-GST"}</span>
+      </div>
+      <dl className="text-sm space-y-1">
+        <div className="flex justify-between gap-3"><dt className="text-zinc-500">From</dt><dd className="text-right font-medium break-words">{inv.companyName}</dd></div>
+        {gst && inv.companyGstin && <div className="flex justify-between gap-3"><dt className="text-zinc-500">GSTIN</dt><dd className="font-mono">{inv.companyGstin}</dd></div>}
+        <div className="flex justify-between gap-3"><dt className="text-zinc-500">Bill to</dt><dd className="text-right font-medium break-words">{customerName}</dd></div>
+        {gst && inv.customerGstin && <div className="flex justify-between gap-3"><dt className="text-zinc-500">Your GSTIN</dt><dd className="font-mono">{inv.customerGstin}</dd></div>}
+        <div className="flex justify-between gap-3"><dt className="text-zinc-500">Date</dt><dd>{new Date(inv.issuedAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}</dd></div>
+        <div className="flex justify-between gap-3"><dt className="text-zinc-500">Job ID</dt><dd className="font-mono text-right break-all">{jobId}</dd></div>
+        <div className="flex justify-between gap-3"><dt className="text-zinc-500">Service</dt><dd className="text-right break-words">{serviceName}</dd></div>
+      </dl>
+      <dl className="rounded-2xl border border-zinc-200 divide-y divide-zinc-100 overflow-hidden">
+        {rows.map(([k, v, strong]) => (
+          <div key={k} className={cn("flex justify-between gap-3 px-4 py-2.5", strong && "bg-zinc-50")}>
+            <dt className={strong ? "font-semibold text-zinc-950" : "text-zinc-600"}>{k}</dt>
+            <dd className={cn("tabular-nums", strong ? "text-lg font-semibold text-zinc-950" : "font-medium")}>{v}</dd>
+          </div>
+        ))}
+        <div className="flex justify-between gap-3 px-4 py-2.5"><dt className="text-zinc-600">{inv.balanceDue > 0 ? "Balance due" : "Payment"}</dt><dd className={cn("font-semibold", inv.balanceDue > 0 ? "text-amber-700" : "text-emerald-700")}>{inv.balanceDue > 0 ? formatInr(inv.balanceDue) : "Paid ✓"}</dd></div>
+      </dl>
+      <button onClick={() => window.print()} className="print:hidden h-12 w-full rounded-2xl border border-zinc-300 bg-white text-base font-semibold text-zinc-900 inline-flex items-center justify-center gap-2">
+        <FileText className="h-5 w-5" aria-hidden /> Download / Print invoice
+      </button>
+    </section>
   );
 }
 

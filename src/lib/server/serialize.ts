@@ -42,6 +42,7 @@ export function serializeCustomer(c: Prisma.CustomerGetPayload<object>): Custome
     source: c.source,
     referralPartnerId: c.referralPartnerId ?? undefined,
     referralCode: c.referralCode ?? undefined,
+    gstin: c.gstin ?? undefined,
     lifetimeRevenue: c.lifetimeRevenue,
     totalBookings: c.totalBookings,
     status: c.status === "inactive" ? "inactive" : "active",
@@ -220,6 +221,14 @@ export function serializeInvoice(i: Prisma.InvoiceGetPayload<object>): Invoice {
     issuedAt: new Date(i.issuedAt).toISOString(),
     finalizedAt: i.finalizedAt ? new Date(i.finalizedAt).toISOString() : undefined,
     refundedAmount: i.refundedAmount,
+    invoiceType: i.invoiceType === "NON_GST" ? "NON_GST" : "GST",
+    gstRate: i.gstRate,
+    cgst: i.cgst,
+    sgst: i.sgst,
+    igst: i.igst,
+    interState: i.interState,
+    customerGstin: i.customerGstin ?? undefined,
+    supplierGstin: i.supplierGstin ?? undefined,
   };
 }
 

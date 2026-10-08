@@ -6,6 +6,7 @@ import { resolveQrToken, clientIp, rateLimit } from "@/lib/server/qr-service";
 import { recordActivity } from "@/lib/server/activity";
 import { logger } from "@/lib/server/logger";
 import { notifyReworkAssigned } from "@/lib/server/notify";
+import { getSystemSettings } from "@/lib/server/settings";
 
 /**
  * /customer/job/{token} API — THE customer journey, one link.
@@ -52,7 +53,7 @@ export async function GET(request: Request, { params }: { params: { token: strin
     }
     const { job } = resolved.data;
 
-    const [checklist, photos, qc, team, complaintCount, jobRow] = await Promise.all([
+    const [checklist, photos, qc, team, complaintCount, jobRow, invoiceRow, settings] = await Promise.all([
       prisma.jobChecklistItem.findMany({ where: { jobId: job.id }, orderBy: { id: "asc" } }),
       // Before/after only — QC and rework evidence is internal.
       prisma.jobPhoto.findMany({ where: { jobId: job.id, photoType: { in: ["before", "after"] } }, orderBy: { uploadedAt: "asc" } }),
@@ -75,9 +76,25 @@ export async function GET(request: Request, { params }: { params: { token: strin
           jobSerial: true,
         },
       }),
+      // This job's invoice (the customer's own document).
+      prisma.invoice.findFirst({ where: { jobId: job.id, status: { not: "CANCELLED" } }, orderBy: { issuedAt: "desc" } }),
+      getSystemSettings(),
     ]);
+    const isGst = invoiceRow?.invoiceType === "GST";
+    const QC_PENDING = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"];
+    const QC_REWORK = ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
+    const DONE = ["PASS", "CUSTOMER_APPROVAL", "COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
+    // A simple, customer-facing QC result. Rework findings stay internal.
+    const qualityResult = DONE.includes(job.status) || qc?.decision === "PASS"
+      ? "passed"
+      : QC_REWORK.includes(job.status)
+      ? "improving"
+      : QC_PENDING.includes(job.status)
+      ? "checking"
+      : null;
 
-    // §9 minimum info only — no notes, no amounts, no other customers.
+    // Minimum info only — no internal notes, no QC findings, no other customers.
+    // The invoice is the customer's own document for this job.
     return NextResponse.json({
       success: true,
       data: {
@@ -106,6 +123,36 @@ export async function GET(request: Request, { params }: { params: { token: strin
         })),
         // Only a PASS is customer-facing; rework details stay internal.
         qualityCheck: qc && qc.decision === "PASS" ? { passed: true } : null,
+        qualityResult,
+        invoice: invoiceRow
+          ? {
+              invoiceNumber: invoiceRow.invoiceNumber,
+              invoiceType: isGst ? "GST" : "NON_GST",
+              issuedAt: invoiceRow.issuedAt.toISOString(),
+              dueDate: invoiceRow.dueDate,
+              subtotal: invoiceRow.subtotal,
+              discount: invoiceRow.discount,
+              taxable: Math.round((invoiceRow.subtotal - invoiceRow.discount) * 100) / 100,
+              // GST fields only on a GST invoice — never on a Non-GST invoice.
+              ...(isGst
+                ? {
+                    gstRate: invoiceRow.gstRate,
+                    cgst: invoiceRow.cgst,
+                    sgst: invoiceRow.sgst,
+                    igst: invoiceRow.igst,
+                    totalGst: invoiceRow.tax,
+                    customerGstin: invoiceRow.customerGstin ?? undefined,
+                    companyGstin: invoiceRow.supplierGstin || settings.gstin || undefined,
+                  }
+                : {}),
+              total: invoiceRow.total,
+              amountPaid: invoiceRow.amountPaid,
+              balanceDue: invoiceRow.balanceDue,
+              status: invoiceRow.status,
+              companyName: settings.companyName,
+              companyAddress: settings.companyAddress,
+            }
+          : null,
         approval: jobRow?.approvedAt
           ? { approvedAt: jobRow.approvedAt.toISOString(), approvedBy: jobRow.approvedBy, method: jobRow.approvalMethod }
           : null,

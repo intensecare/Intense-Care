@@ -1,9 +1,9 @@
 /**
  * RBAC — role workspaces.
  *
- * Four separate experiences, not one dashboard with hidden menus:
+ * Five separate experiences, not one dashboard with hidden menus:
  *   Admin → "Operations"   Field Manager → "My Jobs"   QC → "Quality"
- *   Customer → "My Service" (the secure link — no sign-in)
+ *   Tax Officer → "GST"    Customer → "My Service" (the secure link / QR — no sign-in)
  * Each role has ONE home, ONE primary queue and ONE clear next action. The
  * navigation of a workspace is derived from the permission matrix — an item
  * is shown only when the role holds its permission — and the route guard
@@ -23,6 +23,8 @@ export interface NavItem {
   permission: Permission;
   /** Badge key the layout resolves from live data (optional). */
   badge?: "jobs_open" | "qc_pending" | "rework" | "approvals" | "overdue" | "dispatch";
+  /** Less-used page: grouped under "More" instead of the main menu. */
+  secondary?: boolean;
 }
 
 export interface WorkspaceDef {
@@ -47,15 +49,16 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     nav: [
       { label: "Dashboard", href: "/", permission: "dashboard.view" },
       { label: "Jobs", href: "/jobs", permission: "jobs.view", badge: "jobs_open" },
-      { label: "Schedule", href: "/schedule", permission: "scheduling.manage" },
-      { label: "Quality", href: "/quality-queue", permission: "qc.view", badge: "qc_pending" },
       { label: "Customers", href: "/customers", permission: "customers.view" },
-      { label: "Properties", href: "/properties", permission: "properties.view" },
-      { label: "Services", href: "/services", permission: "services.manage" },
-      { label: "Payments", href: "/finance", permission: "finance.view", badge: "overdue" },
+      { label: "Invoices", href: "/invoices", permission: "finance.view", badge: "overdue" },
+      { label: "QC", href: "/quality-queue", permission: "qc.view", badge: "qc_pending" },
       { label: "Reports", href: "/reports", permission: "reports.view" },
       { label: "Users", href: "/users", permission: "users.manage" },
-      { label: "Settings", href: "/settings", permission: "settings.manage" },
+      { label: "Schedule", href: "/schedule", permission: "scheduling.manage", secondary: true },
+      { label: "Properties", href: "/properties", permission: "properties.view", secondary: true },
+      { label: "Services", href: "/services", permission: "services.manage", secondary: true },
+      { label: "GST", href: "/gst", permission: "gst.view", secondary: true },
+      { label: "Settings", href: "/settings", permission: "settings.manage", secondary: true },
     ],
   },
   field_manager: {
@@ -73,6 +76,18 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     queue: "/quality-queue",
     layout: "mobile",
     nav: [{ label: "Quality", href: "/quality-queue", permission: "qc.inspect", badge: "qc_pending" }],
+  },
+  tax_officer: {
+    role: "tax_officer",
+    title: "GST",
+    home: "/gst",
+    queue: "/gst/invoices",
+    layout: "desk",
+    nav: [
+      { label: "GST Dashboard", href: "/gst", permission: "gst.view" },
+      { label: "GST Invoices", href: "/gst/invoices", permission: "gst.view" },
+      { label: "GST Reports", href: "/gst/reports", permission: "gst.reports" },
+    ],
   },
   customer: {
     // Customers never sign in — this entry only keeps the table total.
@@ -92,6 +107,8 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
 const ROUTE_PERMISSIONS: { prefix: string; permission: Permission; layouts: WorkspaceLayout[] }[] = [
   { prefix: "/jobs/", permission: "jobs.view", layouts: ["desk"] },
   { prefix: "/customers/", permission: "customers.view", layouts: ["desk"] },
+  { prefix: "/invoices/", permission: "finance.view", layouts: ["desk"] },
+  { prefix: "/gst/invoices/", permission: "gst.view", layouts: ["desk"] },
   { prefix: "/quality-queue/", permission: "qc.inspect", layouts: ["desk", "mobile"] },
   { prefix: "/my-jobs/", permission: "jobs.arrive", layouts: ["mobile"] },
 ];

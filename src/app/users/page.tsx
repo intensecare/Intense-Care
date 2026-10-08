@@ -12,12 +12,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { UserPlus, Pencil, Trash2, ShieldCheck, Smartphone, ClipboardCheck, Loader2 } from "lucide-react";
+import { UserPlus, Pencil, Trash2, ShieldCheck, Smartphone, ClipboardCheck, Loader2, Receipt } from "lucide-react";
 
 const ROLE_ICON: Record<Role, React.ElementType> = {
   admin: ShieldCheck,
   field_manager: Smartphone,
   qc_inspector: ClipboardCheck,
+  tax_officer: Receipt,
   customer: ShieldCheck,
 };
 
@@ -25,6 +26,7 @@ const ROLE_TONE: Record<Role, string> = {
   admin: "bg-zinc-900 text-white",
   field_manager: "bg-emerald-50 text-emerald-800 border border-emerald-200",
   qc_inspector: "bg-rose-50 text-rose-700 border border-rose-200",
+  tax_officer: "bg-info-50 text-info-700 border border-info-200",
   customer: "bg-zinc-100 text-zinc-600",
 };
 
@@ -156,7 +158,7 @@ export default function UsersPage() {
             <form onSubmit={save} className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-zinc-700">Role</label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {SIGN_IN_ROLES.map((r) => (
                     <button
                       type="button"

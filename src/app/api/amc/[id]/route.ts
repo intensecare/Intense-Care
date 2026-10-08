@@ -66,9 +66,10 @@ async function spawnVisitJob(
   if (!service.active) return "service_inactive";
 
   const slot = visit.scheduledSlot?.trim() || AMC_JOB_TIME_SLOT;
-  const job = await prisma.job.create({
+  const customer = await prisma.customer.findUnique({ where: { id: contract.customerId }, select: { name: true } });
+  const job = await prisma.$transaction(async (tx) => tx.job.create({
     data: {
-      jobSerial: await nextJobSerial(prisma),
+      jobSerial: await nextJobSerial(tx, customer?.name ?? "Customer", visit.scheduledDate),
       customerId: contract.customerId,
       propertyId: contract.propertyId,
       serviceId: service.id,
@@ -80,7 +81,7 @@ async function spawnVisitJob(
       status: visit.staffIds.length > 0 ? "ASSIGNED" : "SCHEDULED",
       notes: `AMC visit ${visit.visitNumber}/${contract.visitCount} under contract ${contract.contractNumber} — billed under the AMC contract, no per-visit invoice.`,
     },
-  });
+  }));
 
   // Working checklist from the company rubric — same as a regular booking.
   if (service.checklistTemplate.length > 0) {

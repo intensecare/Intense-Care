@@ -106,7 +106,7 @@ export default function OperationsDashboardPage() {
           </div>
 
           {data?.finance && (
-            <Link href="/finance" className="flex items-center gap-4 rounded-2xl border border-zinc-200 bg-white p-5 hover:shadow-md transition-shadow">
+            <Link href="/invoices" className="flex items-center gap-4 rounded-2xl border border-zinc-200 bg-white p-5 hover:shadow-md transition-shadow">
               <span className="h-11 w-11 rounded-xl bg-zinc-100 text-zinc-600 flex items-center justify-center shrink-0"><Wallet className="h-5 w-5" aria-hidden /></span>
               <span className="flex-1 min-w-0">
                 <span className="block text-sm text-zinc-500">Still to collect</span>

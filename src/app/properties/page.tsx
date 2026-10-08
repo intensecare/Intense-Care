@@ -30,7 +30,6 @@ import {
 } from "@/components/common/PropertyFormDialog";
 import { DataTable } from "@/components/ui/data-table";
 import { Notice, SkeletonList } from "@/components/ui/states";
-import { PropertyQrCard } from "@/components/common/PropertyQrCard";
 import type { Property } from "@/lib/types";
 import {
   Dialog,
@@ -181,7 +180,6 @@ export default function PropertiesPage() {
                     );
                   })()}
                 </div>
-                {canEdit && <PropertyQrCard propertyId={detailProperty.id} propertyTitle={detailProperty.title} />}
               </div>
               <DialogFooter>
                 {canDelete && (

@@ -118,6 +118,8 @@ export interface Customer {
   source: string; // 'referral' | 'google' | 'direct' | 'repeat'
   referralPartnerId?: string;
   referralCode?: string;
+  /** Optional customer GSTIN (business customers on GST invoices). */
+  gstin?: string;
   lifetimeRevenue: number;
   totalBookings: number;
   status: "active" | "inactive";
@@ -635,6 +637,15 @@ export interface Invoice {
   issuedAt: string;
   finalizedAt?: string;
   refundedAmount?: number;
+  /** GST | NON_GST — Non-GST invoices never carry GST data. */
+  invoiceType: "GST" | "NON_GST";
+  gstRate: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  interState: boolean;
+  customerGstin?: string;
+  supplierGstin?: string;
 }
 
 export interface Payment {

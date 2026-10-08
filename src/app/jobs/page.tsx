@@ -32,6 +32,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
+import { JobQrButton } from "@/components/common/JobQr";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -57,6 +58,7 @@ function JobsPageInner() {
     loading,
   } = useApp();
   const { can } = useAuth();
+  const canQr = can("links.manage");
 
   const fieldWorkers = users.filter((u) => ASSIGNABLE_ROLES.includes(u.role) && u.active);
 
@@ -147,6 +149,8 @@ function JobsPageInner() {
     return busy;
   }, [jobs, scheduledDate, composedTimeSlot]);
   const [jobNotes, setJobNotes] = useState("");
+  const [invoiceType, setInvoiceType] = useState<"GST" | "NON_GST">("GST");
+  const [interState, setInterState] = useState(false);
 
   // Customer properties filter
   const customerProperties = useMemo(() => {
@@ -267,6 +271,8 @@ function JobsPageInner() {
         assignedStaffIds,
         notes: jobNotes,
         referralPartnerId: undefined,
+        invoiceType,
+        interState: invoiceType === "GST" ? interState : false,
       });
 
       if (!result.success) {
@@ -278,6 +284,8 @@ function JobsPageInner() {
       setIsCreateOpen(false);
       setFormError(null);
       setJobNotes("");
+      setInvoiceType("GST");
+      setInterState(false);
       setInlineName("");
       setInlinePhone("");
       setInlineAddress("");
@@ -373,7 +381,7 @@ function JobsPageInner() {
                   const manager = managerName(job);
                   return (
                     <tr key={job.id} className="hover:bg-zinc-50 transition-colors">
-                      <td className="py-3.5 px-5 font-semibold text-zinc-950 whitespace-nowrap">{job.jobNumber ?? job.id.slice(-6)}</td>
+                      <td className="py-3.5 px-5 font-semibold text-zinc-950 font-mono text-xs break-all max-w-[11rem]">{job.jobNumber ?? job.id.slice(-6)}</td>
                       <td className="py-3.5 px-4">
                         <div className="font-medium text-zinc-950">{customer?.name ?? "Customer"}</div>
                         <div className="text-xs text-zinc-500">{customer?.phone}</div>
@@ -386,9 +394,12 @@ function JobsPageInner() {
                       </td>
                       <td className="py-3.5 px-4"><StatusBadge status={job.status} size="sm" /></td>
                       <td className="py-3.5 px-5 text-right">
-                        <Link href={`/jobs/${job.id}`} className="inline-flex h-9 items-center gap-1 rounded-lg border border-zinc-300 px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50">
-                          Open <ChevronRight className="h-4 w-4" aria-hidden />
-                        </Link>
+                        <div className="inline-flex items-center gap-2">
+                          {canQr && job.status !== "CANCELLED" && <JobQrButton compact jobId={job.id} jobNumber={job.jobNumber} customerName={customer?.name} />}
+                          <Link href={`/jobs/${job.id}`} className="inline-flex h-10 items-center gap-1 rounded-lg border border-zinc-300 px-3 text-sm font-semibold text-zinc-800 hover:bg-zinc-50">
+                            Open <ChevronRight className="h-4 w-4" aria-hidden />
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -404,10 +415,10 @@ function JobsPageInner() {
               const service = services.find((s) => s.id === job.serviceId);
               const manager = managerName(job);
               return (
-                <li key={job.id}>
-                  <Link href={`/jobs/${job.id}`} className="block rounded-2xl border border-zinc-200 bg-white p-4 active:bg-zinc-50">
+                <li key={job.id} className="rounded-2xl border border-zinc-200 bg-white overflow-hidden">
+                  <Link href={`/jobs/${job.id}`} className="block p-4 active:bg-zinc-50">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-semibold text-zinc-500">{job.jobNumber ?? job.id.slice(-6)}</span>
+                      <span className="text-sm font-semibold text-zinc-500 font-mono break-all min-w-0">{job.jobNumber ?? job.id.slice(-6)}</span>
                       <StatusBadge status={job.status} size="sm" />
                     </div>
                     <div className="mt-2 text-base font-semibold text-zinc-950">{service?.name ?? "Service"}</div>
@@ -421,6 +432,11 @@ function JobsPageInner() {
                       <span className="text-sm font-semibold text-rose-600 inline-flex items-center gap-0.5">Open <ChevronRight className="h-4 w-4" aria-hidden /></span>
                     </div>
                   </Link>
+                  {canQr && job.status !== "CANCELLED" && (
+                    <div className="px-4 pb-4 -mt-1">
+                      <JobQrButton jobId={job.id} jobNumber={job.jobNumber} customerName={customer?.name} size="sm" className="w-full" />
+                    </div>
+                  )}
                 </li>
               );
             })}
@@ -644,6 +660,32 @@ function JobsPageInner() {
                 )}
               </fieldset>
             </div>
+
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium text-zinc-800">Invoice <span className="text-red-600" aria-hidden>*</span></legend>
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Invoice type">
+                {(["GST", "NON_GST"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={invoiceType === t}
+                    onClick={() => setInvoiceType(t)}
+                    className={`min-h-12 rounded-xl border-2 px-3 text-sm sm:text-base font-semibold ${invoiceType === t ? "border-rose-500 bg-rose-50 text-rose-700" : "border-zinc-200 bg-white text-zinc-700"}`}
+                  >
+                    {t === "GST" ? "GST Invoice" : "Non-GST Invoice"}
+                  </button>
+                ))}
+              </div>
+              {invoiceType === "GST" ? (
+                <label className="flex items-center gap-3 text-sm text-zinc-700 min-h-11">
+                  <input type="checkbox" checked={interState} onChange={(e) => setInterState(e.target.checked)} className="h-5 w-5 accent-rose-500" />
+                  Customer is in another state (charge IGST instead of CGST + SGST)
+                </label>
+              ) : (
+                <p className="text-sm text-zinc-500">No GST is charged on a Non-GST invoice.</p>
+              )}
+            </fieldset>
 
             <Field label="Notes for the team" htmlFor="nj-notes" hint="Access, focus areas, anything the Field Manager should know">
               <textarea

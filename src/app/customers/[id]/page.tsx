@@ -212,7 +212,7 @@ export default function CustomerDetailPage() {
                   { key: "due", header: "Due", align: "right", cell: (i) => (i.balanceDue > 0 ? <span className="font-semibold text-amber-700">{formatCurrency(i.balanceDue)}</span> : "—") },
                 ]}
               />
-              <Link href="/finance" className="text-sm font-semibold text-rose-600">Record a payment on the Payments page →</Link>
+              <Link href="/invoices" className="text-sm font-semibold text-rose-600">Record a payment on the Invoices page →</Link>
             </section>
           )}
         </div>

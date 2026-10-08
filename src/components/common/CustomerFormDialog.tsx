@@ -12,6 +12,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import type { Customer, ReferralPartner } from "@/lib/types";
+import { isValidGstin } from "@/lib/tax";
 
 export interface CustomerFormPayload {
   name: string;
@@ -23,6 +24,8 @@ export interface CustomerFormPayload {
   referralPartnerId: string | null;
   notes: string;
   status: "active" | "inactive";
+  /** Optional GSTIN for GST invoices ("" = none). */
+  gstin: string;
 }
 
 interface CustomerFormDialogProps {
@@ -57,6 +60,7 @@ export function CustomerFormDialog({
   const [source, setSource] = useState("direct");
   const [partnerId, setPartnerId] = useState("");
   const [notes, setNotes] = useState("");
+  const [gstin, setGstin] = useState("");
   const [status, setStatus] = useState<"active" | "inactive">("active");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -72,13 +76,17 @@ export function CustomerFormDialog({
     setSource(editing?.source || "direct");
     setPartnerId(editing?.referralPartnerId || "");
     setNotes(editing?.notes ?? "");
+    setGstin(editing?.gstin ?? "");
     setStatus(editing?.status === "inactive" ? "inactive" : "active");
   }, [open, editing]);
 
 
+  const gstinError = gstin.trim() && !isValidGstin(gstin) ? "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5." : null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !phone) return;
+    if (gstinError) return;
     setIsSubmitting(true);
     setError("");
 
@@ -92,6 +100,7 @@ export function CustomerFormDialog({
       referralPartnerId: partnerId || null,
       notes,
       status,
+      gstin: gstin.trim().toUpperCase(),
     });
 
     setIsSubmitting(false);
@@ -125,6 +134,9 @@ export function CustomerFormDialog({
           <Field label="Address" htmlFor="cf-address">
             <Input id="cf-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, area, city" autoComplete="street-address" />
           </Field>
+          <Field label="GSTIN" hint="Only for business customers who need a GST invoice" error={gstinError} htmlFor="cf-gstin">
+            <Input id="cf-gstin" value={gstin} onChange={(e) => setGstin(e.target.value.toUpperCase())} placeholder="29ABCDE1234F1Z5" maxLength={15} autoCapitalize="characters" autoComplete="off" />
+          </Field>
           <Field label="Notes" hint="Preferences, access instructions…" htmlFor="cf-notes">
             <textarea id="cf-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm" />
           </Field>
@@ -136,7 +148,7 @@ export function CustomerFormDialog({
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" loading={isSubmitting} disabled={!name.trim() || !phone.trim()}>{isSubmitting ? "Saving…" : isEditing ? "Save changes" : "Add customer"}</Button>
+            <Button type="submit" loading={isSubmitting} disabled={!name.trim() || !phone.trim() || !!gstinError}>{isSubmitting ? "Saving…" : isEditing ? "Save changes" : "Add customer"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

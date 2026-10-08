@@ -15,6 +15,12 @@ import { normalizeRole, canSignIn, type Role } from "@/lib/rbac/roles";
  */
 
 const COOKIE_NAME = "erp_session";
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/",
+};
 const SESSION_TTL_HOURS = Number(process.env.SESSION_TTL_HOURS || 12);
 
 function getSessionSecret(): string {
@@ -62,12 +68,14 @@ export interface SessionUser {
 }
 
 function buildToken(userId: string, issuedAtMs: number, expiresAtMs: number): string {
-  const payload = JSON.stringify({ uid: userId, iat: issuedAtMs, exp: expiresAtMs });
+  // jti = this session's id, so signing out can revoke exactly this session.
+  const jti = crypto.randomBytes(16).toString("base64url");
+  const payload = JSON.stringify({ uid: userId, jti, iat: issuedAtMs, exp: expiresAtMs });
   const encoded = Buffer.from(payload).toString("base64url");
   return `${encoded}.${sign(encoded)}`;
 }
 
-function verifyToken(token: string): { uid: string } | null {
+function verifyToken(token: string): { uid: string; jti: string; exp: number } | null {
   const dot = token.lastIndexOf(".");
   if (dot <= 0) return null;
   const encoded = token.slice(0, dot);
@@ -76,9 +84,9 @@ function verifyToken(token: string): { uid: string } | null {
 
   try {
     const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-    if (typeof payload.uid !== "string") return null;
+    if (typeof payload.uid !== "string" || typeof payload.jti !== "string") return null;
     if (typeof payload.exp !== "number" || payload.exp < Date.now()) return null;
-    return { uid: payload.uid };
+    return { uid: payload.uid, jti: payload.jti, exp: payload.exp };
   } catch {
     return null;
   }
@@ -91,21 +99,36 @@ export async function createSession(user: Pick<SessionUser, "id" | "role">): Pro
   const token = buildToken(user.id, now, expiresAtMs);
 
   const store = await cookies();
-  store.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: Math.floor((expiresAtMs - now) / 1000),
-  });
+  store.set(COOKIE_NAME, token, { ...COOKIE_OPTIONS, maxAge: Math.floor((expiresAtMs - now) / 1000) });
 
   logger.info("session.created", { userId: user.id, role: user.role });
 }
 
-/** Clears the session cookie. */
-export async function destroySession(): Promise<void> {
+/**
+ * Signs out: revokes this session server-side (so a copied cookie stops
+ * working too) and expires the cookie with the SAME attributes it was set
+ * with — a plain delete can miss a `secure` cookie on some browsers.
+ */
+export async function destroySession(): Promise<{ userId: string | null }> {
   const store = await cookies();
-  store.delete(COOKIE_NAME);
+  const token = store.get(COOKIE_NAME)?.value;
+  const parsed = token ? verifyToken(token) : null;
+  if (parsed) {
+    try {
+      await prisma.revokedSession.upsert({
+        where: { jti: parsed.jti },
+        create: { jti: parsed.jti, expiresAt: new Date(parsed.exp) },
+        update: {},
+      });
+      // Housekeeping: revocations are only needed until the cookie expires.
+      await prisma.revokedSession.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+    } catch (err) {
+      logger.error("session.revoke_failed", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  store.set(COOKIE_NAME, "", { ...COOKIE_OPTIONS, maxAge: 0, expires: new Date(0) });
+  if (parsed) logger.info("session.destroyed", { userId: parsed.uid });
+  return { userId: parsed?.uid ?? null };
 }
 
 /** Maps a User row to the session identity (role normalized, scope attrs attached). */
@@ -141,8 +164,12 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const token = store.get(COOKIE_NAME)?.value;
   if (!token) return null;
 
-  const { uid } = verifyToken(token) || {};
-  if (!uid) return null;
+  const parsed = verifyToken(token);
+  if (!parsed) return null;
+  const { uid, jti } = parsed;
+  // Signed out → this session is revoked even if the cookie is replayed.
+  const revoked = await prisma.revokedSession.findUnique({ where: { jti }, select: { jti: true } });
+  if (revoked) return null;
 
   const user = await prisma.user.findUnique({ where: { id: uid } });
   if (!user || !user.active || !canSignIn(user.role)) return null;

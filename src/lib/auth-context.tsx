@@ -39,7 +39,7 @@ interface AuthContextType {
   roleLabel: string;
   workspace: SessionWorkspace;
   login: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
   /** Does the signed-in role hold the permission with any scope? */
   can: (permission: Permission) => boolean;
   /** Effective scope of the permission for the signed-in role. */
@@ -129,11 +129,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const logout = () => {
+  /**
+   * Sign out, in order: (1) the server revokes the session and expires the
+   * cookie — awaited, so the next page load is already signed out;
+   * (2) local/session storage is cleared; (3) a full-page replace to /login
+   * drops every in-memory record and replaces this history entry, and the
+   * page guard (src/middleware.ts) turns any Back navigation into /login.
+   */
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/session", { method: "DELETE", cache: "no-store", credentials: "same-origin" });
+    } catch {
+      // Offline: the cookie may survive, but the guard + server still re-check.
+    }
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch {}
     setCurrentUser(null);
-    fetch("/api/auth/session", { method: "DELETE" }).catch(() => {});
-    router.push("/login");
-  };
+    window.location.replace("/login");
+  }, []);
+
+  // Back/forward cache: a page restored after sign-out is re-checked, never shown.
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted) window.location.reload();
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
 
   const role = currentUser?.role;
   const can = useCallback((permission: Permission) => (role ? rbacCan({ role }, permission) : false), [role]);
