@@ -37,6 +37,10 @@ Server-enforced: arrival is GPS-checked against the property (`ARRIVAL_GEOFENCE_
 - Admin → **Invoices** filters *All / GST Invoices / Non-GST Invoices*; each invoice prints (or saves as PDF) with the job QR.
 - **Tax Officer → GST only, enforced on the server:** `/api/invoices`, `/api/invoices/[id]` and `/api/invoices/report` always filter `invoiceType = 'GST'` for anyone without `finance.view`. Asking for Non-GST invoices returns 403, and a Non-GST invoice id returns 404, however the URL or request is edited.
 
+## Demo sign-in
+
+For client walkthroughs: run `npm run db:seed:demo`, then start the server with `DEMO_LOGINS_ENABLED=true`. The login page shows **Try a demo** — one button each for Admin, Field Manager, QC and Tax Officer, plus **Customer**, which opens the sample job's QR page. The demo accounts (`*@demo.intensecare.local`) have random passwords that are never shown or sent to the browser; the server signs them in by role. Each demo account has exactly its role's normal permissions. Without the flag, the buttons and `/api/auth/demo-login` are gone (404), so keep it off in production.
+
 ## Sign-out
 
 Sign-out revokes the session on the server (a copied cookie stops working), expires the cookie, clears local/session storage (`Clear-Site-Data`) and replaces the page with Login. `src/middleware.ts` redirects every protected page to Login when there is no valid session and serves protected pages with `Cache-Control: no-store`, so Back after sign-out shows Login, not the old page. Customers never sign in — their QR / link is their access.
