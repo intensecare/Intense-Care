@@ -3,9 +3,9 @@
 import React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ChevronLeft, Printer } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { AdminLayout } from "@/components/common/AdminLayout";
-import { Button } from "@/components/ui/button";
+import { DocumentActions } from "@/components/common/DocumentActions";
 import { Skeleton, ErrorState } from "@/components/ui/states";
 import { InvoiceDocument, useInvoiceDetail } from "@/components/invoice/InvoiceDocument";
 
@@ -21,9 +21,10 @@ export default function GstInvoiceDetailPage() {
           <ChevronLeft className="h-4 w-4" aria-hidden /> GST Invoices
         </Link>
         {data && (
-          <Button onClick={() => window.print()}>
-            <Printer className="h-4 w-4" aria-hidden /> Print / Save PDF
-          </Button>
+          <DocumentActions
+            title={`GST invoice ${data.invoice.invoiceNumber}`}
+            shareText={`GST invoice ${data.invoice.invoiceNumber}`}
+          />
         )}
       </div>
       {error ? (

@@ -7,6 +7,8 @@ import { recordActivity } from "@/lib/server/activity";
 import { logger } from "@/lib/server/logger";
 import { notifyReworkAssigned } from "@/lib/server/notify";
 import { getSystemSettings } from "@/lib/server/settings";
+import { effectiveVisibility, isVisible, type CustomerVisibilityKey } from "@/lib/visibility";
+import { parseStoredLines } from "@/lib/documents";
 
 /**
  * /customer/job/{token} API — THE customer journey, one link.
@@ -39,7 +41,15 @@ async function loadTeamNames(jobId: string): Promise<string[]> {
   return users.map((u) => u.name).filter(Boolean);
 }
 
-/** GET — minimum-info journey payload. */
+/**
+ * GET — the customer journey payload, filtered by §6 CUSTOMER VISIBILITY.
+ *
+ * §8 SECURITY RULE: visibility is enforced HERE, not in the browser. A field
+ * whose switch is off is absent from this JSON — it is never sent and then
+ * hidden with CSS. Internal business information (internal notes, QC
+ * findings, cost, margin, suppliers, other customers, internal reports) has
+ * no switch at all and is never part of this response.
+ */
 export async function GET(request: Request, { params }: { params: { token: string } }) {
   try {
     const rl = rateLimit(`cjob:${clientIp(request)}`, 60, 60 * 1000);
@@ -53,33 +63,48 @@ export async function GET(request: Request, { params }: { params: { token: strin
     }
     const { job } = resolved.data;
 
-    const [checklist, photos, qc, team, complaintCount, jobRow, invoiceRow, settings] = await Promise.all([
-      prisma.jobChecklistItem.findMany({ where: { jobId: job.id }, orderBy: { id: "asc" } }),
-      // Before/after only — QC and rework evidence is internal.
-      prisma.jobPhoto.findMany({ where: { jobId: job.id, photoType: { in: ["before", "after"] } }, orderBy: { uploadedAt: "asc" } }),
-      prisma.qualityCheck.findFirst({ where: { jobId: job.id }, orderBy: { createdAt: "desc" } }),
-      loadTeamNames(job.id),
-      prisma.complaint.count({ where: { jobId: job.id } }),
-      prisma.job.findUnique({
-        where: { id: job.id },
-        select: {
-          arrivedAt: true,
-          completedAt: true,
-          customerConfirmedAt: true,
-          approvedAt: true,
-          approvedBy: true,
-          approvalMethod: true,
-          arrivalVerification: true,
-          customerFeedbackRating: true,
-          customerFeedbackAt: true,
-          googleReviewClicked: true,
-          jobSerial: true,
-        },
-      }),
-      // This job's invoice (the customer's own document).
-      prisma.invoice.findFirst({ where: { jobId: job.id, status: { not: "CANCELLED" } }, orderBy: { issuedAt: "desc" } }),
-      getSystemSettings(),
-    ]);
+    const [checklist, photos, qc, team, complaintCount, jobRow, invoiceRow, quoteRow, serviceLines, settings] =
+      await Promise.all([
+        prisma.jobChecklistItem.findMany({ where: { jobId: job.id }, orderBy: { id: "asc" } }),
+        // Before/after only — QC and rework evidence is internal.
+        prisma.jobPhoto.findMany({ where: { jobId: job.id, photoType: { in: ["before", "after"] } }, orderBy: { uploadedAt: "asc" } }),
+        prisma.qualityCheck.findFirst({ where: { jobId: job.id }, orderBy: { createdAt: "desc" } }),
+        loadTeamNames(job.id),
+        prisma.complaint.count({ where: { jobId: job.id } }),
+        prisma.job.findUnique({
+          where: { id: job.id },
+          select: {
+            arrivedAt: true,
+            completedAt: true,
+            customerConfirmedAt: true,
+            approvedAt: true,
+            approvedBy: true,
+            approvalMethod: true,
+            arrivalVerification: true,
+            customerFeedbackRating: true,
+            customerFeedbackAt: true,
+            googleReviewClicked: true,
+            jobSerial: true,
+            serviceAddress: true,
+            serviceLat: true,
+            serviceLng: true,
+            customerNotes: true,
+            customerVisibility: true,
+          },
+        }),
+        // This job's invoice (the customer's own document).
+        prisma.invoice.findFirst({ where: { jobId: job.id, status: { not: "CANCELLED" } }, orderBy: { issuedAt: "desc" } }),
+        // The quotation this job came from, when there was one.
+        prisma.quote.findFirst({ where: { jobId: job.id }, orderBy: { createdAt: "desc" } }),
+        prisma.jobServiceLine.findMany({ where: { jobId: job.id }, orderBy: { position: "asc" } }),
+        getSystemSettings(),
+      ]);
+
+    // §6 The effective configuration: this job's override over the company
+    // default. Locked keys (Job ID, service name, status) are forced on.
+    const visibility = effectiveVisibility(jobRow?.customerVisibility, settings.defaultCustomerVisibility);
+    const show = (key: CustomerVisibilityKey) => isVisible(visibility, key);
+
     const isGst = invoiceRow?.invoiceType === "GST";
     const QC_PENDING = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"];
     const QC_REWORK = ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
@@ -93,80 +118,160 @@ export async function GET(request: Request, { params }: { params: { token: strin
       ? "checking"
       : null;
 
-    // Minimum info only — no internal notes, no QC findings, no other customers.
-    // The invoice is the customer's own document for this job.
+    const serviceName =
+      (await prisma.service.findUnique({ where: { id: job.serviceId }, select: { name: true } }))?.name ?? "Service";
+    const address = jobRow?.serviceAddress || job.propertyAddress || "";
+    const hasPin = typeof jobRow?.serviceLat === "number" && typeof jobRow?.serviceLng === "number";
+
     return NextResponse.json({
       success: true,
       data: {
         job: {
+          // Locked on: a service page must be able to say which job it is.
           id: jobRow?.jobSerial ?? job.id,
           status: job.status,
-          serviceName: (await prisma.service.findUnique({ where: { id: job.serviceId }, select: { name: true } }))?.name ?? "Service",
-          scheduledDate: job.scheduledDate,
-          scheduledTimeSlot: job.scheduledTimeSlot,
+          serviceName,
+          // Every service on the job, by name. Prices live on the documents.
+          services: serviceLines.map((l) => ({
+            name: l.name,
+            description: l.description || undefined,
+            quantity: l.quantity,
+          })),
+          ...(show("serviceDate")
+            ? { scheduledDate: job.scheduledDate, scheduledTimeSlot: job.scheduledTimeSlot }
+            : {}),
           arrivedAt: jobRow?.arrivedAt?.toISOString() ?? null,
           completedAt: jobRow?.completedAt?.toISOString() ?? null,
           customerConfirmedAt: jobRow?.customerConfirmedAt?.toISOString() ?? null,
-          arrivalVerified: jobRow?.arrivalVerification === "gps" || jobRow?.arrivalVerification === "manual",
+          // That the team was verified on site, never HOW (GPS/QR/override).
+          arrivalVerified: Boolean(jobRow?.arrivalVerification),
         },
-        property: { title: job.propertyName, address: job.propertyAddress },
-        customer: { name: job.customerName, phoneMasked: `******${job.customerPhone.replace(/[^0-9]/g, "").slice(-4)}` },
-        team,
-        checklist: checklist.map((c) => ({ id: c.id, area: c.area, task: c.task, completed: c.status === "completed" || c.status === "skipped" })),
-        photos: photos.map((p) => ({
-          id: p.id,
-          area: p.area,
-          photoType: p.photoType,
-          url: `/api/secure-photo/${p.id}?t=${encodeURIComponent(params.token)}`,
-          caption: p.caption,
-          uploadedAt: p.uploadedAt.toISOString(),
-        })),
-        // Only a PASS is customer-facing; rework details stay internal.
-        qualityCheck: qc && qc.decision === "PASS" ? { passed: true } : null,
-        qualityResult,
-        invoice: invoiceRow
+        // §1 The service location, with a navigation link, when permitted.
+        location: show("serviceLocation")
           ? {
-              invoiceNumber: invoiceRow.invoiceNumber,
-              invoiceType: isGst ? "GST" : "NON_GST",
-              issuedAt: invoiceRow.issuedAt.toISOString(),
-              dueDate: invoiceRow.dueDate,
-              subtotal: invoiceRow.subtotal,
-              discount: invoiceRow.discount,
-              taxable: Math.round((invoiceRow.subtotal - invoiceRow.discount) * 100) / 100,
-              // GST fields only on a GST invoice — never on a Non-GST invoice.
-              ...(isGst
-                ? {
-                    gstRate: invoiceRow.gstRate,
-                    cgst: invoiceRow.cgst,
-                    sgst: invoiceRow.sgst,
-                    igst: invoiceRow.igst,
-                    totalGst: invoiceRow.tax,
-                    customerGstin: invoiceRow.customerGstin ?? undefined,
-                    companyGstin: invoiceRow.supplierGstin || settings.gstin || undefined,
-                  }
-                : {}),
-              total: invoiceRow.total,
-              amountPaid: invoiceRow.amountPaid,
-              balanceDue: invoiceRow.balanceDue,
-              status: invoiceRow.status,
-              companyName: settings.companyName,
-              companyAddress: settings.companyAddress,
+              address,
+              ...(hasPin ? { lat: jobRow!.serviceLat, lng: jobRow!.serviceLng } : {}),
+              navigationUrl: hasPin
+                ? `https://www.google.com/maps/dir/?api=1&destination=${jobRow!.serviceLat},${jobRow!.serviceLng}`
+                : address
+                ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`
+                : null,
             }
           : null,
+        customer: { name: job.customerName, phoneMasked: `******${job.customerPhone.replace(/[^0-9]/g, "").slice(-4)}` },
+        // First names only, and only when the switch is on.
+        team: show("teamName") ? team : [],
+        // Progress is counted from the checklist; the tasks themselves are
+        // operational detail, so only the totals cross the boundary.
+        checklist: checklist.map((c) => ({ id: c.id, area: c.area, task: c.task, completed: c.status === "completed" || c.status === "skipped" })),
+        photos: photos
+          .filter((p) => (p.photoType === "before" ? show("beforePhotos") : show("afterPhotos")))
+          .map((p) => ({
+            id: p.id,
+            area: p.area,
+            photoType: p.photoType,
+            url: `/api/secure-photo/${p.id}?t=${encodeURIComponent(params.token)}`,
+            caption: p.caption,
+            uploadedAt: p.uploadedAt.toISOString(),
+          })),
+        // Only a PASS is customer-facing; rework details stay internal.
+        qualityCheck: show("qcResult") && qc && qc.decision === "PASS" ? { passed: true } : null,
+        qualityResult: show("qcResult") ? qualityResult : null,
+        // The note written FOR the customer. Job.notes (internal work notes)
+        // is never read here.
+        serviceNotes: show("serviceNotes") ? jobRow?.customerNotes || null : null,
+        invoice:
+          show("invoice") && invoiceRow
+            ? {
+                invoiceNumber: invoiceRow.invoiceNumber,
+                invoiceType: isGst ? "GST" : "NON_GST",
+                issuedAt: invoiceRow.issuedAt.toISOString(),
+                dueDate: invoiceRow.dueDate,
+                subtotal: invoiceRow.subtotal,
+                discount: invoiceRow.discount,
+                taxable: Math.round((invoiceRow.subtotal - invoiceRow.discount) * 100) / 100,
+                // GST fields only on a GST invoice — never on a Non-GST invoice.
+                ...(isGst
+                  ? {
+                      gstRate: invoiceRow.gstRate,
+                      cgst: invoiceRow.cgst,
+                      sgst: invoiceRow.sgst,
+                      igst: invoiceRow.igst,
+                      totalGst: invoiceRow.tax,
+                      customerGstin: invoiceRow.customerGstin ?? undefined,
+                      companyGstin: invoiceRow.supplierGstin || settings.gstin || undefined,
+                    }
+                  : {}),
+                total: invoiceRow.total,
+                // The payment position is its own switch.
+                ...(show("paymentStatus")
+                  ? { amountPaid: invoiceRow.amountPaid, balanceDue: invoiceRow.balanceDue, status: invoiceRow.status }
+                  : {}),
+                lines: serviceLines.map((l) => ({
+                  name: l.name,
+                  description: l.description || undefined,
+                  quantity: l.quantity,
+                  unitPrice: l.unitPrice,
+                  discount: l.discount,
+                  amount: Math.round((l.quantity * l.unitPrice - l.discount) * 100) / 100,
+                })),
+                companyName: settings.companyName,
+                companyAddress: settings.companyAddress,
+                companyPhone: settings.companyPhone || undefined,
+                companyEmail: settings.companyEmail || undefined,
+                companyLogoUrl: settings.companyLogoUrl || undefined,
+                paymentTerms: settings.paymentTerms || undefined,
+                bankDetails: show("paymentStatus") ? settings.bankDetails || undefined : undefined,
+                sacCode: isGst ? settings.sacCode || undefined : undefined,
+              }
+            : null,
+        // §4 The quotation the customer accepted, when one exists.
+        quotation:
+          show("quotation") && quoteRow
+            ? {
+                quoteNumber: quoteRow.quoteNumber,
+                invoiceType: quoteRow.invoiceType === "NON_GST" ? "NON_GST" : "GST",
+                createdAt: quoteRow.createdAt.toISOString(),
+                validUntil: quoteRow.validUntil,
+                status: quoteRow.status,
+                subtotal: quoteRow.subtotal,
+                discount: quoteRow.discount,
+                tax: quoteRow.tax,
+                total: quoteRow.total,
+                acceptedAt: quoteRow.acceptedAt?.toISOString() ?? null,
+                items: parseStoredLines(quoteRow.items).map((l) => ({
+                  name: l.name,
+                  description: l.description || undefined,
+                  quantity: l.quantity,
+                  unitPrice: l.unitPrice,
+                  discount: l.discount,
+                  amount: Math.round((l.quantity * l.unitPrice - l.discount) * 100) / 100,
+                })),
+              }
+            : null,
+        // §6 Payment position on its own, for the portal summary row.
+        payment:
+          show("paymentStatus") && invoiceRow
+            ? { status: invoiceRow.status, amountPaid: invoiceRow.amountPaid, balanceDue: invoiceRow.balanceDue }
+            : null,
         approval: jobRow?.approvedAt
           ? { approvedAt: jobRow.approvedAt.toISOString(), approvedBy: jobRow.approvedBy, method: jobRow.approvalMethod }
           : null,
-        feedback: jobRow?.customerFeedbackRating
-          ? {
-              rating: jobRow.customerFeedbackRating,
-              feedbackAt: jobRow.customerFeedbackAt?.toISOString() ?? null,
-              googleReviewClicked: jobRow.googleReviewClicked,
-            }
-          : null,
+        feedback:
+          show("customerFeedback") && jobRow?.customerFeedbackRating
+            ? {
+                rating: jobRow.customerFeedbackRating,
+                feedbackAt: jobRow.customerFeedbackAt?.toISOString() ?? null,
+                googleReviewClicked: jobRow.googleReviewClicked,
+              }
+            : null,
         complaintCount,
+        // What this page is allowed to show, so the UI renders the right
+        // sections. The data itself is already filtered above.
+        visibility,
         company: {
-          name: process.env.APP_COMPANY_NAME || "Intense Care",
-          googleReviewUrl: process.env.GOOGLE_BUSINESS_REVIEW_URL || "",
+          name: settings.companyName || process.env.APP_COMPANY_NAME || "Intense Care",
+          googleReviewUrl: settings.googleBusinessReviewUrl || process.env.GOOGLE_BUSINESS_REVIEW_URL || "",
         },
       },
     });

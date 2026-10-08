@@ -1,4 +1,5 @@
 import type { SystemSettings } from "./types";
+import { DEFAULT_CUSTOMER_VISIBILITY } from "./visibility";
 
 /**
  * Structural defaults for system settings ONLY.
@@ -24,4 +25,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   resendCooldownSeconds: 60,
   refundApprovalLimit: 5000,
   discountApprovalLimitPercent: 10,
+  companyLogoUrl: "",
+  paymentTerms: "Payment due on completion of the service.",
+  serviceTerms:
+    "Prices are valid for the quoted scope only. Any additional work is quoted separately before it starts.",
+  bankDetails: "",
+  quotationValidityDays: 15,
+  defaultCustomerVisibility: { ...DEFAULT_CUSTOMER_VISIBILITY },
 };

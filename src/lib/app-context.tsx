@@ -164,17 +164,42 @@ interface AppContextType {
     customerEmail?: string;
     propertyId?: string;
     propertyAddress?: string;
-    serviceId: string;
+    serviceId?: string;
+    /** §3 One or many services: catalog entries and/or custom services. */
+    services?: {
+      serviceId?: string;
+      name?: string;
+      description?: string;
+      quantity: number;
+      unitPrice?: number;
+      discount?: number;
+      durationHours?: number;
+      taxTreatment?: "GST" | "EXEMPT";
+      saveToCatalog?: boolean;
+    }[];
+    /** §1 The official service location chosen on the map. */
+    location?: {
+      address?: string;
+      lat?: number;
+      lng?: number;
+      accuracy?: number;
+      notes?: string;
+    };
     scheduledDate: string;
     scheduledTimeSlot: string;
     /** Directly-assigned field worker ids; first entry becomes the lead
      *  worker who gates the start-work flow. */
     assignedStaffIds?: string[];
+    /** Internal work notes — never customer-facing. */
     notes?: string;
+    /** A note written FOR the customer, subject to visibility. */
+    customerNotes?: string;
     referralPartnerId?: string;
     /** The invoice created with the job: GST or Non-GST. */
     invoiceType?: "GST" | "NON_GST";
     interState?: boolean;
+    /** §6 What the customer may see for this job. */
+    customerVisibility?: Record<string, boolean>;
   }) => Promise<{ success: boolean; message: string; job?: Job }>;
 
   createCustomer: (customerData: Partial<Customer>) => Promise<{ success: boolean; message: string; customer?: Customer }>;
@@ -912,15 +937,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     customerEmail?: string;
     propertyId?: string;
     propertyAddress?: string;
-    serviceId: string;
+    serviceId?: string;
+    /** §3 One or many services: catalog entries and/or custom services. */
+    services?: {
+      serviceId?: string;
+      name?: string;
+      description?: string;
+      quantity: number;
+      unitPrice?: number;
+      discount?: number;
+      durationHours?: number;
+      taxTreatment?: "GST" | "EXEMPT";
+      saveToCatalog?: boolean;
+    }[];
+    /** §1 The official service location chosen on the map. */
+    location?: {
+      address?: string;
+      lat?: number;
+      lng?: number;
+      accuracy?: number;
+      notes?: string;
+    };
     scheduledDate: string;
     scheduledTimeSlot: string;
     assignedStaffIds?: string[];
     notes?: string;
+    customerNotes?: string;
     referralPartnerId?: string;
     /** The invoice created with the job: GST or Non-GST. */
     invoiceType?: "GST" | "NON_GST";
     interState?: boolean;
+    customerVisibility?: Record<string, boolean>;
   }): Promise<{ success: boolean; message: string; job?: Job }> => {
     const r = await api<{
       job: Job & { customerName?: string; customerPhone?: string; propertyTitle?: string; service?: Job extends never ? never : { id: string; name: string; basePrice: number; estimatedDurationHours: number } };
@@ -1089,6 +1136,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         accessNotes: propertyData.accessNotes,
         parkingInstructions: propertyData.parkingInstructions,
         preferredTime: propertyData.preferredTime,
+        lat: propertyData.lat,
+        lng: propertyData.lng,
         recurringService: propertyData.recurringService,
         recurringFrequency: propertyData.recurringFrequency,
       }),
@@ -1383,6 +1432,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         description: serviceData.description,
         basePrice: serviceData.basePrice,
         estimatedDurationHours: serviceData.estimatedDurationHours,
+        taxTreatment: serviceData.taxTreatment,
+        internalNotes: serviceData.internalNotes,
+        isCustom: serviceData.isCustom,
         checklistTemplate: serviceData.checklistTemplate.map(({ area, task, critical }) => ({ area, task, critical })),
       }),
     });

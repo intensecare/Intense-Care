@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { nextJobSerial } from "@/lib/server/job-serial";
 import { nextInvoiceNumber } from "@/lib/server/invoices";
-import { computeInvoiceFigures } from "@/lib/tax";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
@@ -15,27 +14,32 @@ import {
   withStaffNames,
   fail,
   readJson,
-  nextDocNumber,
+  type JobRowWithJoins,
 } from "@/lib/server/serialize";
 import { projectJob } from "@/lib/server/projections";
 import { recordAudit } from "@/lib/server/audit";
+import { recordActivity } from "@/lib/server/activity";
 import { getOpsDateVisibility, filterJobsForOpsManager } from "@/lib/ops-visibility";
 import { dispatchCutoffTime } from "@/lib/server/policy";
 import { getSystemSettings } from "@/lib/server/settings";
-import { getTaxRate } from "@/lib/tax";
+import { computeDocumentFigures } from "@/lib/documents";
+import {
+  ServiceSelectionSchema,
+  ServiceLineError,
+  resolveServiceLines,
+  writeJobServiceLines,
+} from "@/lib/server/service-lines";
+import { LocationSchema, hasCoords } from "@/lib/server/location";
+import { normalizeVisibility, DEFAULT_CUSTOMER_VISIBILITY } from "@/lib/visibility";
 import { logger } from "@/lib/server/logger";
 import { ASSIGNABLE_ROLES, can } from "@/lib/rbac";
-
-/** Service row including its rubric, used to instantiate the job checklist. */
-const SERVICE_WITH_RUBRIC_INCLUDE = {
-  checklistTemplate: { orderBy: { position: "asc" as const } },
-} as const;
 
 /** Include shape shared by every job-list fetch (display joins only). */
 const JOB_LIST_INCLUDE = {
   customer: { select: { name: true, phone: true } },
   property: { select: { title: true, address: true } },
   service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
+  serviceLines: { orderBy: { position: "asc" as const } },
 } as const;
 
 type JobListRow = Prisma.JobGetPayload<{ include: typeof JOB_LIST_INCLUDE }>;
@@ -86,7 +90,12 @@ const CreateJobSchema = z.object({
   customerEmail: z.string().max(200).optional(),
   propertyId: z.string().max(64).optional(),
   propertyAddress: z.string().max(500).optional(),
-  serviceId: z.string().min(1).max(64),
+  /** The primary service. Optional when `services` carries the selection. */
+  serviceId: z.string().min(1).max(64).optional(),
+  /** §3 One or many services — catalog entries and/or custom services. */
+  services: z.array(ServiceSelectionSchema).min(1).max(20).optional(),
+  /** §1 The official service location for this job. */
+  location: LocationSchema.optional(),
   scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   scheduledTimeSlot: z
     .string()
@@ -98,18 +107,27 @@ const CreateJobSchema = z.object({
     ),
   assignedStaffIds: z.array(z.string().max(64)).default([]),
   assignedManagerId: z.string().max(64).optional(),
+  /** Internal work notes — never customer-facing. */
   notes: z.string().max(2000).optional(),
+  /** A note written FOR the customer, subject to visibility. */
+  customerNotes: z.string().max(2000).optional(),
   referralPartnerId: z.string().max(64).optional(),
+  /** A whole-document discount, spread across the service lines. */
+  discount: z.number().min(0).max(10000000).optional(),
   /** The Admin's choice for this job's invoice. GST unless told otherwise. */
   invoiceType: z.enum(["GST", "NON_GST"]).default("GST"),
   /** GST only: inter-state supply → IGST instead of CGST + SGST. */
   interState: z.boolean().optional().default(false),
+  /** §6 What the customer may see for this job (over the company default). */
+  customerVisibility: z.record(z.string(), z.boolean()).optional(),
 });
 
 /**
  * POST /api/jobs — creates a REAL booking: customer + property (inline or
- * existing), job, checklist instantiated from the service rubric, and a tax
- * invoice — all in one transaction. Requires `jobs.create`.
+ * existing), the job with its official service location, one or many priced
+ * service lines, the checklist instantiated from the primary service rubric,
+ * the customer-visibility configuration and a tax invoice — all in one
+ * transaction. Requires `jobs.create`.
  */
 export async function POST(request: Request) {
   try {
@@ -122,6 +140,9 @@ export async function POST(request: Request) {
       );
     }
     const d = parsed.data;
+    if (!d.serviceId && (!d.services || d.services.length === 0)) {
+      return fail("Select at least one service for this job.", 400);
+    }
 
     // Ops managers book only inside their dispatch window (policy, not scope).
     if (dispatchWindowApplies(user)) {
@@ -130,13 +151,6 @@ export async function POST(request: Request) {
         return fail(`Scheduled date ${d.scheduledDate} is not yet open for dispatch.`, 409);
       }
     }
-
-    const service = await prisma.service.findUnique({
-      where: { id: d.serviceId },
-      include: SERVICE_WITH_RUBRIC_INCLUDE,
-    });
-    if (!service) return fail("Service package not found. Create it on the Services page first.", 404);
-    if (!service.active) return fail("This service package is inactive.", 409);
 
     // Crew validation + double-booking guard (mirrors PATCH /api/jobs/[id]).
     const crewIds = Array.from(new Set([...(d.assignedManagerId ? [d.assignedManagerId] : []), ...d.assignedStaffIds]));
@@ -173,6 +187,7 @@ export async function POST(request: Request) {
     let customerId = d.customerId;
     let customerName = d.customerName ?? "Customer";
     let customerGstin: string | null = null;
+    let customerAddress = "";
     if (!customerId) {
       if (!d.customerName || !d.customerPhone) {
         return fail("Customer name and phone are required for a new customer.", 400);
@@ -185,29 +200,38 @@ export async function POST(request: Request) {
           name: d.customerName,
           phone: d.customerPhone,
           email: d.customerEmail || "",
-          address: d.propertyAddress || "",
+          address: d.location?.address || d.propertyAddress || "",
           source: d.referralPartnerId ? "referral" : "direct",
           referralPartnerId: d.referralPartnerId,
           referralCode: partner?.code,
         },
       });
       customerId = created.id;
+      customerAddress = created.address;
     } else {
       const existing = await prisma.customer.findUnique({ where: { id: customerId } });
       if (!existing) return fail("Customer not found.", 404);
       customerName = existing.name;
       customerGstin = existing.gstin;
+      customerAddress = existing.address;
     }
+
+    // §1 The service location: the map pin Admin confirmed, falling back to
+    // the typed address and then to the customer's address on file.
+    const serviceAddress =
+      d.location?.address?.trim() || d.propertyAddress?.trim() || customerAddress || "";
 
     // Property (inline creation supported).
     let propertyId = d.propertyId;
     if (!propertyId) {
-      if (!d.propertyAddress) return fail("Property address is required.", 400);
+      if (!serviceAddress) return fail("A service address is required.", 400);
       const created = await prisma.property.create({
         data: {
           customerId,
-          title: `${(d.customerName || "Customer").split(" ")[0]}'s Property`,
-          address: d.propertyAddress,
+          title: `${(d.customerName || customerName || "Customer").split(" ")[0]}'s Property`,
+          address: serviceAddress,
+          lat: d.location?.lat ?? null,
+          lng: d.location?.lng ?? null,
         },
       });
       propertyId = created.id;
@@ -215,79 +239,123 @@ export async function POST(request: Request) {
       const existing = await prisma.property.findUnique({ where: { id: propertyId } });
       if (!existing) return fail("Property not found.", 404);
       if (existing.customerId !== customerId) return fail("Property does not belong to this customer.", 400);
+      // A property with no coordinates inherits the pin Admin just dropped, so
+      // the next job at the same address can be GPS-verified from the start.
+      if (d.location && hasCoords(d.location) && (existing.lat === null || existing.lng === null)) {
+        await prisma.property.update({
+          where: { id: propertyId },
+          data: { lat: d.location.lat, lng: d.location.lng },
+        });
+      }
     }
 
     const settings = await getSystemSettings();
-    const subtotal = service.basePrice;
-    const figures = computeInvoiceFigures({
-      invoiceType: d.invoiceType,
-      subtotal,
-      gstRatePercent: settings.taxRatePercent,
-      interState: d.interState,
-    });
-    const isGst = figures.invoiceType === "GST";
+    // §6 The job's visibility: the Admin choice over the company default.
+    const visibility = normalizeVisibility(
+      d.customerVisibility,
+      normalizeVisibility(settings.defaultCustomerVisibility, DEFAULT_CUSTOMER_VISIBILITY)
+    );
 
-    const result = await prisma.$transaction(async (tx) => {
-      const job = await tx.job.create({
-        data: {
-          jobSerial: await nextJobSerial(tx, customerName, d.scheduledDate),
-          customerId,
-          propertyId,
-          serviceId: service.id,
-          scheduledDate: d.scheduledDate,
-          scheduledTimeSlot: d.scheduledTimeSlot,
-          assignedStaffIds: d.assignedStaffIds,
-          assignedManagerId,
-          amount: subtotal,
-          status: crewIds.length > 0 ? "ASSIGNED" : "SCHEDULED",
-          notes: d.notes,
-          referralPartnerId: d.referralPartnerId,
-        },
-      });
+    let result: { job: { id: string; status: string }; invoice: Prisma.InvoiceGetPayload<object>; serviceName: string };
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        // §3 One or many services → priced lines + the primary catalog service.
+        const resolved = await resolveServiceLines(tx, {
+          services: d.services,
+          fallbackServiceId: d.serviceId,
+        });
+        const primary = await tx.service.findUnique({
+          where: { id: resolved.primaryServiceId },
+          include: { checklistTemplate: { orderBy: { position: "asc" } } },
+        });
+        if (!primary) throw new ServiceLineError("Service not found.", 404);
 
-      if (service.checklistTemplate.length > 0) {
-        await tx.jobChecklistItem.createMany({
-          data: service.checklistTemplate.map((item) => ({
+        const figures = computeDocumentFigures({
+          invoiceType: d.invoiceType,
+          lines: resolved.lines,
+          gstRatePercent: settings.taxRatePercent,
+          interState: d.interState,
+          documentDiscount: d.discount,
+        });
+        const isGst = figures.invoiceType === "GST";
+
+        const job = await tx.job.create({
+          data: {
+            jobSerial: await nextJobSerial(tx, customerName, d.scheduledDate),
+            customerId: customerId!,
+            propertyId: propertyId!,
+            serviceId: primary.id,
+            scheduledDate: d.scheduledDate,
+            scheduledTimeSlot: d.scheduledTimeSlot,
+            assignedStaffIds: d.assignedStaffIds,
+            assignedManagerId,
+            // The job value is the net service value; GST lives on the invoice.
+            amount: Math.round((figures.taxable + figures.exempt) * 100) / 100,
+            status: crewIds.length > 0 ? "ASSIGNED" : "SCHEDULED",
+            notes: d.notes,
+            customerNotes: d.customerNotes?.trim() || null,
+            referralPartnerId: d.referralPartnerId,
+            // §1 The official service location for this job.
+            serviceAddress: serviceAddress || null,
+            serviceLat: d.location?.lat ?? null,
+            serviceLng: d.location?.lng ?? null,
+            serviceLocationAccuracy: d.location?.accuracy ?? null,
+            locationNotes: d.location?.notes?.trim() || null,
+            // §6 Enforced on every customer-facing response, server-side.
+            customerVisibility: visibility,
+          },
+        });
+
+        await writeJobServiceLines(tx, job.id, resolved.lines);
+
+        if (primary.checklistTemplate.length > 0) {
+          await tx.jobChecklistItem.createMany({
+            data: primary.checklistTemplate.map((item) => ({
+              jobId: job.id,
+              area: item.area,
+              task: item.task,
+              critical: item.critical,
+            })),
+          });
+        }
+
+        const invoice = await tx.invoice.create({
+          data: {
+            invoiceNumber: await nextInvoiceNumber(tx, figures.invoiceType),
+            invoiceType: figures.invoiceType,
             jobId: job.id,
-            area: item.area,
-            task: item.task,
-            critical: item.critical,
-          })),
+            customerId: customerId!,
+            subtotal: figures.subtotal,
+            discount: figures.discount,
+            tax: figures.tax,
+            gstRate: figures.gstRate,
+            cgst: figures.cgst,
+            sgst: figures.sgst,
+            igst: figures.igst,
+            interState: isGst && d.interState,
+            customerGstin: isGst ? customerGstin : null,
+            supplierGstin: isGst ? settings.gstin?.trim() || null : null,
+            total: figures.total,
+            balanceDue: figures.total,
+            dueDate: d.scheduledDate,
+          },
         });
-      }
 
-      const invoice = await tx.invoice.create({
-        data: {
-          invoiceNumber: await nextInvoiceNumber(tx, figures.invoiceType),
-          invoiceType: figures.invoiceType,
-          jobId: job.id,
-          customerId,
-          subtotal: figures.subtotal,
-          tax: figures.tax,
-          gstRate: figures.gstRate,
-          cgst: figures.cgst,
-          sgst: figures.sgst,
-          igst: figures.igst,
-          interState: isGst && d.interState,
-          customerGstin: isGst ? customerGstin : null,
-          supplierGstin: isGst ? settings.gstin?.trim() || null : null,
-          total: figures.total,
-          balanceDue: figures.total,
-          dueDate: d.scheduledDate,
-        },
+        await tx.customer.update({ where: { id: customerId! }, data: { totalBookings: { increment: 1 } } });
+        if (d.referralPartnerId) {
+          await tx.referralPartner.update({
+            where: { id: d.referralPartnerId },
+            data: { totalReferrals: { increment: 1 } },
+          });
+        }
+        return { job, invoice, serviceName: resolved.primaryServiceName };
       });
+    } catch (e) {
+      if (e instanceof ServiceLineError) return fail(e.message, e.status);
+      throw e;
+    }
 
-      await tx.customer.update({ where: { id: customerId }, data: { totalBookings: { increment: 1 } } });
-      if (d.referralPartnerId) {
-        await tx.referralPartner.update({
-          where: { id: d.referralPartnerId },
-          data: { totalReferrals: { increment: 1 } },
-        });
-      }
-      return { job, invoice };
-    });
-
-    logger.info("jobs.created", { jobId: result.job.id, serviceId: service.id, by: user.id });
+    logger.info("jobs.created", { jobId: result.job.id, by: user.id });
     void recordAudit({
       actor: user,
       action: "JOB_CREATED",
@@ -295,9 +363,20 @@ export async function POST(request: Request) {
       entityId: result.job.id,
       jobId: result.job.id,
       newState: result.job.status,
-      details: `${service.name} on ${d.scheduledDate} ${d.scheduledTimeSlot}`,
+      details: `${result.serviceName} on ${d.scheduledDate} ${d.scheduledTimeSlot}`,
       request,
     });
+    // §1/§12 The location decision is part of the job record from minute one.
+    if (serviceAddress || d.location?.lat !== undefined) {
+      void recordActivity({
+        jobId: result.job.id,
+        type: "STATUS_CHANGED",
+        message: hasCoords(d.location ?? {})
+          ? `Service location set — ${serviceAddress || "map pin"} (${d.location!.lat!.toFixed(5)}, ${d.location!.lng!.toFixed(5)})`
+          : `Service location set — ${serviceAddress} (no map pin; arrival will need QR or a reason)`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      }).catch(() => {});
+    }
 
     void syncJobEvent(result.job.id).catch(() => {});
     void (async () => {
@@ -309,7 +388,10 @@ export async function POST(request: Request) {
       }
     })();
 
-    const full = await prisma.job.findUnique({ where: { id: result.job.id }, include: JOB_LIST_INCLUDE });
+    const full: JobRowWithJoins | null = await prisma.job.findUnique({
+      where: { id: result.job.id },
+      include: JOB_LIST_INCLUDE,
+    });
     const names = await userNameMap();
     return NextResponse.json(
       {

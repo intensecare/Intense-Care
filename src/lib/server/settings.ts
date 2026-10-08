@@ -5,6 +5,7 @@
  */
 import { prisma } from "./prisma";
 import type { SystemSettings } from "@/lib/types";
+import { DEFAULT_CUSTOMER_VISIBILITY } from "@/lib/visibility";
 
 export const SETTINGS_ID = "singleton";
 
@@ -26,6 +27,16 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   resendCooldownSeconds: 60,
   refundApprovalLimit: 5000,
   discountApprovalLimitPercent: 10,
+  // §4/§5 Document identity. Empty until configured on the Settings page —
+  // the quotation/invoice prints only real, configured values.
+  companyLogoUrl: "",
+  paymentTerms: "Payment due on completion of the service.",
+  serviceTerms:
+    "Prices are valid for the quoted scope only. Any additional work is quoted separately before it starts.",
+  bankDetails: "",
+  quotationValidityDays: 15,
+  // §6 Company default for the customer portal; per-job overrides win.
+  defaultCustomerVisibility: { ...DEFAULT_CUSTOMER_VISIBILITY },
 };
 
 /** Loads settings from the DB, merged over structural defaults. */

@@ -76,6 +76,19 @@ export interface SystemSettings {
   refundApprovalLimit: number;
   /** §17 approval authority: discounts above this percentage need elevated approval. */
   discountApprovalLimitPercent: number;
+  /** §4/§5 Company logo printed on quotations and invoices (https URL). */
+  companyLogoUrl: string;
+  /** Payment terms printed on quotations and invoices. */
+  paymentTerms: string;
+  /** Service terms printed on quotations. */
+  serviceTerms: string;
+  /** Bank / UPI details printed on invoices. Blank = the block is omitted. */
+  bankDetails: string;
+  /** How long a new quotation stays valid, in days. */
+  quotationValidityDays: number;
+  /** §6 Company-wide default for what a customer may see on their portal.
+   *  Per-job overrides live on Job.customerVisibility. */
+  defaultCustomerVisibility: Record<string, boolean>;
 }
 
 export interface Refund {
@@ -217,10 +230,10 @@ export interface Property {
   carpetAreaSqFt?: number;
   bedrooms?: number;
   bathrooms?: number;
-  gpsCoordinates: {
-    lat: number;
-    lng: number;
-  };
+  /** §1 The property pin. Undefined until someone sets a location, which is
+   *  why arrival at such a property needs a QR scan or a reason. */
+  lat?: number;
+  lng?: number;
   accessNotes?: string;
   parkingInstructions?: string;
   preferredTime?: string;
@@ -244,8 +257,29 @@ export interface Service {
   description: string;
   basePrice: number;
   estimatedDurationHours: number;
+  /** §3 GST = taxable at the configured rate; EXEMPT = never carries GST. */
+  taxTreatment: "GST" | "EXEMPT";
+  /** Desk-only note. Never leaves the admin surfaces. */
+  internalNotes?: string;
+  /** Authored through Services → Custom Service. */
+  isCustom: boolean;
   checklistTemplate: ServiceChecklistTemplateItem[];
   active: boolean;
+}
+
+/** §3 One priced service on a job — a job can carry several. */
+export interface JobServiceLine {
+  id: string;
+  jobId: string;
+  serviceId?: string;
+  name: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxable: boolean;
+  durationHours: number;
+  position: number;
 }
 
 export interface JobChecklistItem {
@@ -572,7 +606,10 @@ export interface Job {
   amount?: number;
   paymentStatus?: PaymentStatus;
   status: JobStatus;
+  /** Internal work notes — never customer-facing. */
   notes?: string;
+  /** A note written FOR the customer, subject to visibility. */
+  customerNotes?: string;
   accessCode?: string;
   /** Set when the customer confirms team arrival via the secure link
    *  (POST /api/customer/job/[token] action=confirm). Gates IN_PROGRESS. */
@@ -596,6 +633,20 @@ export interface Job {
   arrivedAt?: string;
   startedAt?: string;
   completedAt?: string;
+  /** §1 The official service location picked on the map when booking. */
+  serviceAddress?: string;
+  serviceLat?: number;
+  serviceLng?: number;
+  serviceLocationAccuracy?: number;
+  locationNotes?: string;
+  /** §2/§12 How arrival was verified: "gps" | "qr" | "manual". */
+  arrivalVerification?: "gps" | "qr" | "manual";
+  arrivalDistanceM?: number;
+  arrivalBypassReason?: string;
+  /** §6 Per-job customer-visibility override (null = company default). */
+  customerVisibility?: Record<string, boolean>;
+  /** §3 The priced services on this job. */
+  serviceLines?: JobServiceLine[];
   createdAt: string;
   updatedAt: string;
 }
@@ -607,9 +658,14 @@ export interface Quote {
   propertyId: string;
   serviceId: string;
   items: {
+    serviceId?: string | null;
+    name: string;
     description: string;
     quantity: number;
     unitPrice: number;
+    discount: number;
+    taxable: boolean;
+    durationHours: number;
     amount: number;
   }[];
   subtotal: number;
@@ -618,7 +674,22 @@ export interface Quote {
   total: number;
   validUntil: string;
   status: "draft" | "sent" | "accepted" | "declined" | "converted_to_job";
+  /** §4 GST or Non-GST quotation; the converted invoice inherits it. */
+  invoiceType: "GST" | "NON_GST";
+  gstRate: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  interState: boolean;
+  serviceAddress?: string;
+  paymentTerms?: string;
+  serviceTerms?: string;
+  notes?: string;
+  acceptedAt?: string;
+  acceptedBy?: string;
+  jobId?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Invoice {

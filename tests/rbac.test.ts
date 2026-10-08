@@ -117,7 +117,7 @@ test("workspaces: five separate experiences, each with its own home", () => {
   assert.deepEqual(navFor("tax_officer").map((n) => n.label), ["GST Dashboard", "GST Invoices", "GST Reports"]);
   assert.deepEqual(
     navFor("admin").filter((n) => !n.secondary).map((n) => n.label),
-    ["Dashboard", "Intense AI", "Jobs", "Customers", "Invoices", "QC", "Reports", "Users"]
+    ["Dashboard", "Intense AI", "Jobs", "Customers", "Quotations", "Invoices", "QC", "Reports", "Users"]
   );
   assert.equal(homePathFor("admin"), "/");
   assert.equal(homePathFor("field_manager"), "/my-jobs");
@@ -126,6 +126,11 @@ test("workspaces: five separate experiences, each with its own home", () => {
   assert.deepEqual(navFor("qc_inspector").map((n) => n.href), ["/quality-queue"]);
   assert.equal(navFor("customer").length, 0);
   assert.ok(navFor("admin").some((n) => n.href === "/users"));
+  // §4 Quotations are an Admin surface only — no other role holds quotes.manage.
+  assert.ok(navFor("admin").some((n) => n.href === "/quotes"));
+  for (const role of ["field_manager", "qc_inspector", "tax_officer", "customer"] as const) {
+    assert.equal(routeAllowed(role, "/quotes"), false, role + " must not reach quotations");
+  }
 });
 
 test("routing: Field Manager and QC can't open the Operations desk; customer pages are public", () => {

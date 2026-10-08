@@ -100,6 +100,13 @@ model Service {
   description            String
   basePrice              Float
   estimatedDurationHours Float
+  /// §3 Custom services. GST = taxable at the configured rate; EXEMPT = no
+  /// GST is charged on this service even on a GST invoice.
+  taxTreatment           String   @default("GST") // GST | EXEMPT
+  /// Internal note for the desk — NEVER sent to the customer portal.
+  internalNotes          String?
+  /// True when Admin authored it through New Service → Custom Service.
+  isCustom               Boolean  @default(false)
   active                 Boolean  @default(true)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
@@ -137,7 +144,12 @@ model Job {
   amount            Float
   paymentStatus     String    @default("UNPAID")
   status            String    @default("SCHEDULED")
+  // Internal work notes. NEVER customer-facing (see lib/visibility.ts).
   notes             String?
+  // A note written FOR the customer, shown on their portal when the
+  // "Service notes" switch is on. Separate field, so an internal note can
+  // never leak by accident.
+  customerNotes     String?
   qualityCheckId    String?
   referralPartnerId String?
   arrivedAt         DateTime?
@@ -151,12 +163,27 @@ model Job {
   arrivalLat        Float?
   arrivalLng        Float?
   arrivalAccuracy   Float?
+  /// "gps" (inside geofence) | "qr" (customer/property QR scanned when GPS
+  /// was unavailable) | "manual" (explicit admin/field override + reason).
   arrivalVerification String?
   arrivalDistanceM  Float?
   arrivalBypassReason String?
+  /// §2 QR fallback: the QrToken row whose scan verified this arrival.
+  arrivalQrTokenId  String?
   customerConfirmedAt DateTime?
   // Unified QR/link workflow wiring (§3): the customer-confirmation token and
   // the current QR tokens resolve back to this single Job ID — never a copy.
+  // §1 The OFFICIAL service location for this job, chosen by Admin on the map
+  // when the job is created. Copied onto the property when it had no coords.
+  serviceAddress    String?
+  serviceLat        Float?
+  serviceLng        Float?
+  serviceLocationAccuracy Float?
+  locationNotes     String?
+  // §6 Customer visibility: the per-job override of which fields the customer
+  // portal may show. null = the company default (lib/visibility.ts). Every
+  // customer-facing API filters on this server-side — never the UI alone.
+  customerVisibility Json?
   jobSerial         String    @unique // readable Job ID, e.g. RAHUL-SHARMA-08102026-001
   customerTokenId   String?
   approvedAt        DateTime?
@@ -182,10 +209,34 @@ model Job {
   complaints        Complaint[]
   commissionEntries CommissionEntry[]
   qrTokens          QrToken[]
+  serviceLines      JobServiceLine[]
 
   @@index([scheduledDate])
   @@index([status])
   @@index([scheduledDate, status])
+}
+
+/// §3 One priced service on a job. A job can carry several services (Deep
+/// Cleaning + Sofa Cleaning + a one-off Custom Service); the lines are the
+/// document truth for the quotation, the job and the invoice. `serviceId` is
+/// null for a one-off custom line that was never saved to the catalog.
+model JobServiceLine {
+  id            String  @id @default(cuid())
+  jobId         String
+  serviceId     String?
+  name          String
+  description   String  @default("")
+  quantity      Float   @default(1)
+  unitPrice     Float
+  discount      Float   @default(0)
+  /// false = GST is never charged on this line (service is tax-exempt).
+  taxable       Boolean @default(true)
+  durationHours Float   @default(0)
+  position      Int     @default(0)
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
 }
 
 /// Per-job working checklist, instantiated from the service's rubric at
@@ -389,6 +440,9 @@ model JobPhoto {
   @@index([jobId])
 }
 
+/// §4 Quotation — a real business document. The priced lines live in `items`
+/// (the same shape as JobServiceLine) and the GST split is stored with the
+/// quotation so a converted job/invoice inherits exactly what was quoted.
 model Quote {
   id          String   @id @default(cuid())
   quoteNumber String   @unique
@@ -402,7 +456,30 @@ model Quote {
   total       Float
   validUntil  String
   status      String   @default("sent")
+  /// GST | NON_GST — decided when the quotation is raised; the converted
+  /// invoice inherits it. A NON_GST quotation carries no GST fields.
+  invoiceType String   @default("GST")
+  gstRate     Float    @default(0)
+  cgst        Float    @default(0)
+  sgst        Float    @default(0)
+  igst        Float    @default(0)
+  interState  Boolean  @default(false)
+  /// Service/property address printed on the document.
+  serviceAddress String?
+  /// Customer-facing document text (terms shown on the PDF).
+  paymentTerms String?
+  serviceTerms String?
+  notes        String?
+  /// Customer acceptance captured on the quotation.
+  acceptedAt   DateTime?
+  acceptedBy   String?
+  /// Job created from this quotation (set on convert).
+  jobId        String?
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@index([customerId])
+  @@index([status])
 }
 
 model ReferralPartner {

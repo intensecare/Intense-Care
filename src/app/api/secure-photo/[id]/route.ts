@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { resolveQrToken, clientIp, rateLimit } from "@/lib/server/qr-service";
+import { getSystemSettings } from "@/lib/server/settings";
+import { effectiveVisibility, isVisible } from "@/lib/visibility";
 import { logger } from "@/lib/server/logger";
 
 /**
@@ -28,6 +30,18 @@ export async function GET(request: Request, { params }: { params: { id: string }
     if (!photo || photo.jobId !== jobId || !["before", "after"].includes(photo.photoType)) {
       // Token from a DIFFERENT job can never read another job's photo, and
       // QC / rework evidence is internal — never served on the customer link.
+      return new NextResponse("Not found", { status: 404 });
+    }
+
+    // §8 Customer visibility is enforced on the BYTES too, not only on the
+    // list: with "Before photos" switched off for this job, guessing a photo
+    // id with a valid token still returns nothing.
+    const [jobRow, settings] = await Promise.all([
+      prisma.job.findUnique({ where: { id: jobId }, select: { customerVisibility: true } }),
+      getSystemSettings(),
+    ]);
+    const visibility = effectiveVisibility(jobRow?.customerVisibility, settings.defaultCustomerVisibility);
+    if (!isVisible(visibility, photo.photoType === "before" ? "beforePhotos" : "afterPhotos")) {
       return new NextResponse("Not found", { status: 404 });
     }
 

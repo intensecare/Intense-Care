@@ -12,6 +12,13 @@ import { JobJourney } from "@/components/job/JobJourney";
 import { NextActionCard } from "@/components/job/NextAction";
 import { Skeleton } from "@/components/ui/states";
 import { PromptModal } from "@/components/common/PromptModal";
+import { LocationCard, LocationPicker, type LocationValue } from "@/components/common/LocationPicker";
+import { CustomerVisibilityEditor, CustomerVisibilitySummary } from "@/components/common/CustomerVisibility";
+import { Button } from "@/components/ui/button";
+import { Notice } from "@/components/ui/states";
+import { DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { effectiveVisibility, type CustomerVisibility } from "@/lib/visibility";
+import { formatDuration } from "@/lib/documents";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { JOB_STATUS_CONFIG } from "@/lib/state-machine";
@@ -43,8 +50,15 @@ const REWORK = ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
 export default function JobPage() {
   const params = useParams();
   const jobId = String(params?.id ?? "");
-  const { loading, jobs, customers, properties, users, checklistItems, photos, qualityChecks, qualityIssues, reworkTasks, complaints, invoices, currentUser, refreshJobs, refreshPhotos, refreshQuality } = useApp();
+  const { loading, jobs, customers, properties, users, checklistItems, photos, qualityChecks, qualityIssues, reworkTasks, complaints, invoices, currentUser, systemSettings, refreshJobs, refreshPhotos, refreshQuality } = useApp();
   const { can } = useAuth();
+
+  // §1/§6 The two desk-only panels on this page: where the service is, and
+  // what the customer may see of it.
+  const [locationOpen, setLocationOpen] = useState(false);
+  const [visibilityOpen, setVisibilityOpen] = useState(false);
+  const [panelError, setPanelError] = useState<string | null>(null);
+  const [panelBusy, setPanelBusy] = useState(false);
 
   const job = jobs.find((j) => j.id === jobId) as DeskJob | undefined;
   const customer = customers.find((c) => c.id === job?.customerId);
@@ -57,6 +71,11 @@ export default function JobPage() {
   const issues = useMemo(() => qualityIssues.filter((i) => i.jobId === jobId), [qualityIssues, jobId]);
   const jobComplaints = useMemo(() => complaints.filter((c) => c.jobId === jobId), [complaints, jobId]);
   const invoice = invoices.find((i) => i.jobId === jobId);
+  // §6 The effective configuration: this job over the company default.
+  const visibility = useMemo(
+    () => effectiveVisibility(job?.customerVisibility, systemSettings.defaultCustomerVisibility),
+    [job?.customerVisibility, systemSettings.defaultCustomerVisibility]
+  );
 
   const [events, setEvents] = useState<JobActivityEvent[]>([]);
   const [busy, setBusy] = useState(false);
@@ -339,6 +358,76 @@ export default function JobPage() {
               </div>
             )}
 
+            {/* §1 The official service location, with navigation. */}
+            <div className="space-y-2">
+              <LocationCard
+                address={job.serviceAddress || property?.address || job.propertyTitle}
+                lat={job.serviceLat ?? property?.lat}
+                lng={job.serviceLng ?? property?.lng}
+                notes={job.locationNotes}
+              />
+              {can("jobs.update") && !cancelled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPanelError(null);
+                    setLocationOpen(true);
+                  }}
+                  className="text-sm font-semibold text-rose-600 underline-offset-4 hover:underline min-h-10"
+                >
+                  Change service location
+                </button>
+              )}
+            </div>
+
+            {/* §3 Every service priced on this job. */}
+            {job.serviceLines && job.serviceLines.length > 0 && (
+              <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-3">
+                <h2 className="text-base font-semibold text-zinc-900">
+                  Services · {job.serviceLines.length}
+                </h2>
+                <ul className="divide-y divide-zinc-100">
+                  {job.serviceLines.map((l) => (
+                    <li key={l.id} className="py-2.5 flex items-start justify-between gap-3">
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-zinc-900 break-words">
+                          {l.name}
+                          {l.quantity > 1 ? ` ×${l.quantity}` : ""}
+                        </span>
+                        {l.description && (
+                          <span className="block text-xs text-zinc-500 break-words mt-0.5">{l.description}</span>
+                        )}
+                        <span className="block text-xs text-zinc-500 mt-0.5">
+                          {formatDuration(l.durationHours * l.quantity)}
+                          {!l.taxable ? " · GST exempt" : ""}
+                        </span>
+                      </span>
+                      {can("finance.view") && (
+                        <span className="text-sm font-medium text-zinc-900 tabular-nums shrink-0">
+                          {formatMoney(Math.max(0, l.quantity * l.unitPrice - l.discount))}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {/* §6 What the customer sees — the server enforces it. */}
+            {can("jobs.update") && (
+              <CustomerVisibilitySummary
+                value={visibility}
+                onEdit={
+                  cancelled
+                    ? undefined
+                    : () => {
+                        setPanelError(null);
+                        setVisibilityOpen(true);
+                      }
+                }
+              />
+            )}
+
             <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-4">
               <h2 className="text-base font-semibold text-zinc-900">Details</h2>
               <Detail icon={<User className="h-4 w-4" />} label="Customer" value={customer?.name ?? job.customerName ?? "—"} href={customer ? `/customers/${customer.id}` : undefined} />
@@ -346,8 +435,33 @@ export default function JobPage() {
               <Detail icon={<UserPlus className="h-4 w-4" />} label="Field Manager" value={manager?.name ?? "Not assigned"} />
               {property?.accessNotes && <Detail icon={<MapPin className="h-4 w-4" />} label="Access notes" value={property.accessNotes} />}
               <Detail icon={<CheckCircle2 className="h-4 w-4" />} label="Checklist" value={checklist.length ? `${checklist.filter((c) => done(c.status)).length} of ${checklist.length} done` : "No checklist"} />
-              {job.notes && <Detail icon={<Sparkles className="h-4 w-4" />} label="Work notes" value={job.notes} />}
-              {job.arrivedAt && <Detail icon={<MapPin className="h-4 w-4" />} label="Arrived" value={formatDateTime(job.arrivedAt)} />}
+              {job.notes && <Detail icon={<Sparkles className="h-4 w-4" />} label="Work notes (internal)" value={job.notes} />}
+              {job.customerNotes && (
+                <Detail icon={<Sparkles className="h-4 w-4" />} label="Note shown to the customer" value={job.customerNotes} />
+              )}
+              {job.arrivedAt && (
+                <Detail
+                  icon={<MapPin className="h-4 w-4" />}
+                  label="Arrived"
+                  value={`${formatDateTime(job.arrivedAt)}${
+                    job.arrivalVerification
+                      ? ` · ${
+                          job.arrivalVerification === "gps"
+                            ? "GPS verified"
+                            : job.arrivalVerification === "qr"
+                            ? "QR verified"
+                            : "Manual override"
+                        }${
+                          job.arrivalVerification === "gps" && typeof job.arrivalDistanceM === "number"
+                            ? ` (${Math.round(job.arrivalDistanceM)} m)`
+                            : job.arrivalBypassReason
+                            ? `: ${job.arrivalBypassReason}`
+                            : ""
+                        }`
+                      : ""
+                  }`}
+                />
+              )}
               {job.approvedAt && <Detail icon={<CheckCircle2 className="h-4 w-4" />} label="Customer approved" value={formatDateTime(job.approvedAt)} />}
               {job.customerFeedbackRating ? (
                 <Detail icon={<Star className="h-4 w-4" />} label="Rating" value={`${"★".repeat(job.customerFeedbackRating)}${"☆".repeat(5 - job.customerFeedbackRating)}${job.googleReviewClicked ? " · Google review opened" : ""}`} />
@@ -468,7 +582,134 @@ export default function JobPage() {
           await refreshQuality();
         }}
       />
+
+      {/* §1 Re-point the service location (desk only, audited). */}
+      <Dialog open={locationOpen} onOpenChange={setLocationOpen}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Service location</DialogTitle>
+            <DialogDescription>
+              The crew navigates here and their arrival is GPS-checked against this pin.
+            </DialogDescription>
+          </DialogHeader>
+          <LocationEditor
+            initial={{
+              address: job.serviceAddress || property?.address || "",
+              lat: job.serviceLat ?? property?.lat,
+              lng: job.serviceLng ?? property?.lng,
+              notes: job.locationNotes ?? "",
+            }}
+            busy={panelBusy}
+            error={panelError}
+            onCancel={() => setLocationOpen(false)}
+            onSave={async (value) => {
+              setPanelBusy(true);
+              setPanelError(null);
+              const okRes = await patch({
+                location: {
+                  address: value.address.trim(),
+                  lat: value.lat,
+                  lng: value.lng,
+                  accuracy: value.accuracy,
+                  notes: value.notes?.trim() || undefined,
+                },
+              });
+              setPanelBusy(false);
+              if (okRes) setLocationOpen(false);
+              else setPanelError("Could not save the location. Try again.");
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* §6 What the customer sees. Enforced server-side on every response. */}
+      <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Customer visibility</DialogTitle>
+            <DialogDescription>
+              Applies to this job only. Internal information is never shown, whatever is set here.
+            </DialogDescription>
+          </DialogHeader>
+          <VisibilityEditorPanel
+            initial={visibility}
+            busy={panelBusy}
+            error={panelError}
+            onCancel={() => setVisibilityOpen(false)}
+            onSave={async (next) => {
+              setPanelBusy(true);
+              setPanelError(null);
+              const okRes = await patch({ customerVisibility: next });
+              setPanelBusy(false);
+              if (okRes) setVisibilityOpen(false);
+              else setPanelError("Could not save the visibility settings. Try again.");
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
+  );
+}
+
+/** The location dialog body — its own component so its draft state resets. */
+function LocationEditor({
+  initial,
+  onSave,
+  onCancel,
+  busy,
+  error,
+}: {
+  initial: LocationValue;
+  onSave: (value: LocationValue) => void;
+  onCancel: () => void;
+  busy: boolean;
+  error: string | null;
+}) {
+  const [value, setValue] = useState<LocationValue>(initial);
+  return (
+    <div className="space-y-4">
+      {error && <Notice tone="error">{error}</Notice>}
+      <LocationPicker value={value} onChange={setValue} disabled={busy} />
+      <DialogFooter>
+        <Button variant="ghost" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+        <Button onClick={() => onSave(value)} loading={busy} disabled={!value.address.trim()}>
+          Save location
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+/** The visibility dialog body, with its own draft state. */
+function VisibilityEditorPanel({
+  initial,
+  onSave,
+  onCancel,
+  busy,
+  error,
+}: {
+  initial: CustomerVisibility;
+  onSave: (value: CustomerVisibility) => void;
+  onCancel: () => void;
+  busy: boolean;
+  error: string | null;
+}) {
+  const [value, setValue] = useState<CustomerVisibility>(initial);
+  return (
+    <div className="space-y-4">
+      {error && <Notice tone="error">{error}</Notice>}
+      <CustomerVisibilityEditor value={value} onChange={setValue} disabled={busy} />
+      <DialogFooter>
+        <Button variant="ghost" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+        <Button onClick={() => onSave(value)} loading={busy}>
+          Save visibility
+        </Button>
+      </DialogFooter>
+    </div>
   );
 }
 

@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
+import { CustomerVisibilityEditor } from "@/components/common/CustomerVisibility";
+import { effectiveVisibility, type CustomerVisibility } from "@/lib/visibility";
 import { useAuth } from "@/lib/auth-context";
 
 export default function SettingsPage() {
@@ -41,6 +43,18 @@ export default function SettingsPage() {
 
   const [sacCode, setSacCode] = useState(systemSettings.sacCode || "");
   const [googleReviewUrl, setGoogleReviewUrl] = useState(systemSettings.googleBusinessReviewUrl || "");
+
+  // §4/§5 What the quotation and invoice documents print.
+  const [companyLogoUrl, setCompanyLogoUrl] = useState(systemSettings.companyLogoUrl || "");
+  const [paymentTerms, setPaymentTerms] = useState(systemSettings.paymentTerms || "");
+  const [serviceTerms, setServiceTerms] = useState(systemSettings.serviceTerms || "");
+  const [bankDetails, setBankDetails] = useState(systemSettings.bankDetails || "");
+  const [quotationValidityDays, setQuotationValidityDays] = useState(systemSettings.quotationValidityDays || 15);
+
+  // §6 The company default for what customers see. Each job can narrow it.
+  const [defaultVisibility, setDefaultVisibility] = useState<CustomerVisibility>(() =>
+    effectiveVisibility(systemSettings.defaultCustomerVisibility)
+  );
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -88,6 +102,12 @@ export default function SettingsPage() {
       gstin: gstin.trim(),
       sacCode: sacCode.trim(),
       googleBusinessReviewUrl: googleReviewUrl.trim(),
+      companyLogoUrl: companyLogoUrl.trim(),
+      paymentTerms: paymentTerms.trim(),
+      serviceTerms: serviceTerms.trim(),
+      bankDetails: bankDetails.trim(),
+      quotationValidityDays: Math.min(365, Math.max(1, Number(quotationValidityDays) || 15)),
+      defaultCustomerVisibility: defaultVisibility,
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
@@ -128,6 +148,93 @@ export default function SettingsPage() {
             <Field label="GSTIN" htmlFor="st-gstin"><Input id="st-gstin" value={gstin} onChange={(e) => setGstin(e.target.value.toUpperCase())} placeholder="29AAACA9921K1Z2" /></Field>
             <Field label="SAC code" htmlFor="st-sac"><Input id="st-sac" value={sacCode} onChange={(e) => setSacCode(e.target.value)} placeholder="998533" /></Field>
           </div>
+        </section>
+
+        <section className={section} aria-labelledby="s-docs">
+          <div>
+            <h2 id="s-docs" className="text-lg font-semibold text-zinc-950">Quotations &amp; invoices</h2>
+            <p className="text-sm text-zinc-500">What your business documents show. Printed on every PDF you send.</p>
+          </div>
+          <Field
+            label="Logo URL"
+            htmlFor="st-logo"
+            hint="An https link to your logo. Leave empty to print the company name alone."
+          >
+            <Input
+              id="st-logo"
+              type="url"
+              inputMode="url"
+              value={companyLogoUrl}
+              onChange={(e) => setCompanyLogoUrl(e.target.value)}
+              placeholder="https://yourcompany.com/logo.png"
+            />
+          </Field>
+          {companyLogoUrl.trim() && (
+            <div className="flex items-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={companyLogoUrl.trim()}
+                alt="Your logo as it will print"
+                className="h-14 w-14 rounded-xl object-contain border border-zinc-200 bg-white"
+              />
+              <span className="text-sm text-zinc-500">This is how it prints on the document.</span>
+            </div>
+          )}
+          <Field label="Payment terms" htmlFor="st-payterms" hint="Printed on quotations and invoices.">
+            <textarea
+              id="st-payterms"
+              value={paymentTerms}
+              onChange={(e) => setPaymentTerms(e.target.value)}
+              rows={2}
+              className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
+              placeholder="e.g. Payment due on completion of the service."
+            />
+          </Field>
+          <Field label="Service terms" htmlFor="st-svcterms" hint="Printed on quotations.">
+            <textarea
+              id="st-svcterms"
+              value={serviceTerms}
+              onChange={(e) => setServiceTerms(e.target.value)}
+              rows={2}
+              className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
+              placeholder="e.g. Prices cover the quoted scope only."
+            />
+          </Field>
+          <Field
+            label="Bank / payment details"
+            htmlFor="st-bank"
+            hint="Printed on an invoice while money is owed. Leave empty to omit the block."
+          >
+            <textarea
+              id="st-bank"
+              value={bankDetails}
+              onChange={(e) => setBankDetails(e.target.value)}
+              rows={3}
+              className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
+              placeholder="Account name / number / IFSC / UPI ID — one per line"
+            />
+          </Field>
+          <Field label="Quotation validity (days)" htmlFor="st-valid" hint="How long a new quotation stays open.">
+            <Input
+              id="st-valid"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={365}
+              value={quotationValidityDays}
+              onChange={(e) => setQuotationValidityDays(Number(e.target.value))}
+            />
+          </Field>
+        </section>
+
+        <section className={section} aria-labelledby="s-visibility">
+          <div>
+            <h2 id="s-visibility" className="text-lg font-semibold text-zinc-950">Customer visibility</h2>
+            <p className="text-sm text-zinc-500">
+              The starting point for every new job. Each job can hide more on its own page.
+            </p>
+          </div>
+          <CustomerVisibilityEditor value={defaultVisibility} onChange={setDefaultVisibility} />
         </section>
 
         <section className={section} aria-labelledby="s-review">

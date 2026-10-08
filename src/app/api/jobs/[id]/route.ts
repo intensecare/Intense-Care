@@ -11,6 +11,17 @@ import { projectJob } from "@/lib/server/projections";
 import { recordActivity } from "@/lib/server/activity";
 import { recordAudit } from "@/lib/server/audit";
 import { syncJobEvent, cancelJobEvent } from "@/lib/server/google-calendar";
+import {
+  ArrivalSchema,
+  LocationSchema,
+  QrVerificationError,
+  VERIFICATION_LABEL,
+  gpsFailureMessage,
+  hasCoords,
+  verifyArrival,
+} from "@/lib/server/location";
+import { normalizeVisibility, DEFAULT_CUSTOMER_VISIBILITY, hiddenCount } from "@/lib/visibility";
+import { getSystemSettings } from "@/lib/server/settings";
 import { ASSIGNABLE_ROLES, can, scopeOf, type JobStatus } from "@/lib/rbac";
 import type { SessionUser } from "@/lib/server/session";
 
@@ -18,6 +29,7 @@ const JOB_INCLUDE = {
   customer: { select: { name: true, phone: true } },
   property: { select: { title: true, address: true } },
   service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
+  serviceLines: { orderBy: { position: "asc" as const } },
 } as const;
 
 async function respondWithJob(user: SessionUser, id: string, status = 200) {
@@ -38,40 +50,20 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* GPS-verified arrival (§8 / §11)                                             */
-/* -------------------------------------------------------------------------- */
-
-const ArrivalSchema = z.object({
-  lat: z.number().min(-90).max(90).optional(),
-  lng: z.number().min(-180).max(180).optional(),
-  accuracy: z.number().min(0).max(100000).optional(),
-  bypassReason: z.string().min(5).max(300).optional(),
-});
-
-function geofenceMeters(): number {
-  const raw = Number.parseInt(process.env.ARRIVAL_GEOFENCE_METERS || "300", 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : 300;
-}
-
-function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(bLat - aLat);
-  const dLng = toRad(bLng - aLng);
-  const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
 const PatchSchema = z.object({
   status: z.string().min(1).max(32).optional(),
   assignedStaffIds: z.array(z.string().min(1).max(64)).max(20).optional(),
   assignedManagerId: z.string().max(64).nullable().optional(),
   notes: z.string().max(2000).optional(),
+  /** A note written FOR the customer, subject to visibility (desk only). */
+  customerNotes: z.string().max(2000).optional(),
   scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   scheduledTimeSlot: z.string().max(80).optional(),
   arrival: ArrivalSchema.optional(),
+  /** §1 Re-point the official service location (Admin). */
+  location: LocationSchema.optional(),
+  /** §6 Change what the customer may see for this job (Admin). */
+  customerVisibility: z.record(z.string(), z.boolean()).optional(),
   /** Super Admin override of the state machine — must carry a reason (audited). */
   override: z.boolean().optional(),
   reason: z.string().max(500).optional(),
@@ -81,6 +73,8 @@ const PatchSchema = z.object({
  * PATCH /api/jobs/[id] — the ONLY write path for a job's lifecycle:
  *   assignment  (jobs.assign)      crew + field manager
  *   reschedule  (jobs.reschedule)  date / time window
+ *   location    (jobs.update)      the official service location + pin
+ *   visibility  (jobs.update)      what the customer may see
  *   work notes  (jobs.update)      ASSIGNED scope may change notes only
  *   status      (transition permission from TRANSITION_PERMISSION)
  * Every branch resolves permission + scope through the central matrix; the
@@ -226,11 +220,126 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       return respondWithJob(user, id);
     }
 
-    /* -------------------------------------------------------- work notes */
-    if (body.notes !== undefined && !body.status) {
+    /* ---------------------------------------------- §1 service location */
+    if (body.location !== undefined) {
+      // Re-pointing the service location is a desk decision: it moves the
+      // geofence the crew is measured against. ASSIGNED scope cannot do it.
       const { user } = await authorizeJob(id, "jobs.update");
-      await prisma.job.update({ where: { id }, data: { notes: body.notes, updatedAt: new Date() } });
-      void recordAudit({ actor: user, action: "JOB_NOTES_UPDATED", entityType: "job", entityId: id, jobId: id, request });
+      if (scopeOf(user.role, "jobs.update") !== "ALL") {
+        return fail("Only the desk can change the service location of a job.", 403);
+      }
+      const loc = body.location;
+      const current = await prisma.job.findUnique({
+        where: { id },
+        select: { serviceAddress: true, serviceLat: true, serviceLng: true, propertyId: true },
+      });
+      if (!current) return fail("Job not found.", 404);
+
+      await prisma.job.update({
+        where: { id },
+        data: {
+          serviceAddress: loc.address?.trim() || current.serviceAddress,
+          serviceLat: loc.lat ?? current.serviceLat,
+          serviceLng: loc.lng ?? current.serviceLng,
+          serviceLocationAccuracy: loc.accuracy ?? null,
+          locationNotes: loc.notes?.trim() ?? null,
+          updatedAt: new Date(),
+        },
+      });
+      // Keep the property pin in step when it had none.
+      if (hasCoords(loc)) {
+        await prisma.property.updateMany({
+          where: { id: current.propertyId, OR: [{ lat: null }, { lng: null }] },
+          data: { lat: loc.lat, lng: loc.lng },
+        });
+      }
+      await recordActivity({
+        jobId: id,
+        type: "STATUS_CHANGED",
+        message: hasCoords(loc)
+          ? `Service location updated — ${loc.address?.trim() || "map pin"} (${loc.lat!.toFixed(5)}, ${loc.lng!.toFixed(5)})`
+          : `Service address updated — ${loc.address?.trim() || "address"}`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
+      void recordAudit({
+        actor: user,
+        action: "JOB_LOCATION_UPDATED",
+        entityType: "job",
+        entityId: id,
+        jobId: id,
+        previousState: `${current.serviceLat ?? "-"},${current.serviceLng ?? "-"}`,
+        newState: `${loc.lat ?? current.serviceLat ?? "-"},${loc.lng ?? current.serviceLng ?? "-"}`,
+        details: loc.address?.trim() || undefined,
+        reason: body.reason,
+        request,
+      });
+      return respondWithJob(user, id);
+    }
+
+    /* ------------------------------------------ §6 customer visibility */
+    if (body.customerVisibility !== undefined) {
+      const { user } = await authorizeJob(id, "jobs.update");
+      if (scopeOf(user.role, "jobs.update") !== "ALL") {
+        return fail("Only the desk can change what the customer sees.", 403);
+      }
+      const settings = await getSystemSettings();
+      const next = normalizeVisibility(
+        body.customerVisibility,
+        normalizeVisibility(settings.defaultCustomerVisibility, DEFAULT_CUSTOMER_VISIBILITY)
+      );
+      await prisma.job.update({
+        where: { id },
+        data: { customerVisibility: next, updatedAt: new Date() },
+      });
+      const hidden = hiddenCount(next);
+      await recordActivity({
+        jobId: id,
+        type: "STATUS_CHANGED",
+        message:
+          hidden === 0
+            ? "Customer visibility updated — the customer can see everything shareable"
+            : `Customer visibility updated — ${hidden} field${hidden === 1 ? "" : "s"} hidden from the customer`,
+        actor: { id: user.id, name: user.name, role: user.role },
+      });
+      void recordAudit({
+        actor: user,
+        action: "JOB_VISIBILITY_UPDATED",
+        entityType: "job",
+        entityId: id,
+        jobId: id,
+        details: Object.entries(next)
+          .filter(([, v]) => !v)
+          .map(([k]) => `-${k}`)
+          .join(",") || "all visible",
+        request,
+      });
+      return respondWithJob(user, id);
+    }
+
+    /* -------------------------------------------------------- work notes */
+    if ((body.notes !== undefined || body.customerNotes !== undefined) && !body.status) {
+      const { user } = await authorizeJob(id, "jobs.update");
+      // The note the CUSTOMER sees is a desk decision; field roles write the
+      // internal work note only, so an internal note cannot leak by accident.
+      if (body.customerNotes !== undefined && scopeOf(user.role, "jobs.update") !== "ALL") {
+        return fail("Only the desk can write the note the customer sees.", 403);
+      }
+      await prisma.job.update({
+        where: { id },
+        data: {
+          ...(body.notes !== undefined ? { notes: body.notes } : {}),
+          ...(body.customerNotes !== undefined ? { customerNotes: body.customerNotes.trim() || null } : {}),
+          updatedAt: new Date(),
+        },
+      });
+      void recordAudit({
+        actor: user,
+        action: body.customerNotes !== undefined ? "JOB_CUSTOMER_NOTE_UPDATED" : "JOB_NOTES_UPDATED",
+        entityType: "job",
+        entityId: id,
+        jobId: id,
+        request,
+      });
       return respondWithJob(user, id);
     }
 
@@ -239,7 +348,10 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (!status) return fail("status is required.", 400);
     const { user } = await requireUser();
 
-    const existing = await prisma.job.findUnique({ where: { id }, include: { property: { select: { lat: true, lng: true } } } });
+    const existing = await prisma.job.findUnique({
+      where: { id },
+      include: { property: { select: { lat: true, lng: true } } },
+    });
     if (!existing) return fail("Job not found.", 404);
 
     // CUSTOMER_VERIFIED is reachable ONLY through the customer's secure link.
@@ -261,24 +373,35 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const permission = verdict.permission ?? "jobs.update";
     if (!isOverride) await authorizeJob(id, permission);
 
-    // 3. GPS verification on arrival (field scope only; desk overrides are audited).
+    // 3. §2 Arrival verification: GPS first, then the on-site QR scan, then an
+    //    audited manual override. The crew is never blocked from working —
+    //    but the method used is always recorded (§12).
     const data: Record<string, unknown> = { status, updatedAt: new Date() };
     if (status === "ARRIVED") {
       const arrival = body.arrival ?? {};
-      const hasCoords = typeof arrival.lat === "number" && typeof arrival.lng === "number";
-      const propertyHasCoords = typeof existing.property?.lat === "number" && typeof existing.property?.lng === "number";
-      let verification: "gps" | "manual" = "manual";
-      let distance: number | null = null;
-      if (hasCoords && propertyHasCoords) {
-        distance = distanceMeters(arrival.lat!, arrival.lng!, existing.property!.lat!, existing.property!.lng!);
-        verification = distance <= geofenceMeters() + (arrival.accuracy ?? 0) ? "gps" : "manual";
+      let arrivalVerdict;
+      try {
+        arrivalVerdict = await verifyArrival(existing, arrival);
+      } catch (e) {
+        if (e instanceof QrVerificationError) return fail(e.message, e.status);
+        throw e;
       }
-      if (verification === "manual" && !arrival.bypassReason && scopeOf(user.role, "jobs.arrive") === "ASSIGNED") {
-        return fail(
-          hasCoords
-            ? `You appear to be ${Math.round(distance ?? 0)} m from the property. Move closer or give a reason to proceed.`
-            : "Share your GPS location to verify arrival, or give a reason to proceed without it.",
-          409
+      // A field role with no verification at all must say why. The desk can
+      // record an arrival on their behalf (audited as a manual override).
+      if (
+        arrivalVerdict.method === "manual" &&
+        !arrival.bypassReason &&
+        scopeOf(user.role, "jobs.arrive") === "ASSIGNED"
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: gpsFailureMessage(arrivalVerdict),
+            // The field app uses this to offer [Scan QR] before [Give reason].
+            kind: "verification_required",
+            canScanQr: true,
+          },
+          { status: 409 }
         );
       }
       Object.assign(data, {
@@ -286,8 +409,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         arrivalLat: arrival.lat ?? null,
         arrivalLng: arrival.lng ?? null,
         arrivalAccuracy: arrival.accuracy ?? null,
-        arrivalVerification: verification,
-        arrivalDistanceM: distance,
+        arrivalVerification: arrivalVerdict.method,
+        arrivalDistanceM: arrivalVerdict.distanceM,
+        arrivalQrTokenId: arrivalVerdict.qrTokenId,
         arrivalBypassReason: arrival.bypassReason ?? null,
       });
     }
@@ -322,16 +446,18 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       CLOSED: "Job closed and archived",
       CANCELLED: "Job cancelled",
     };
-    const gpsNote =
-      status === "ARRIVED"
-        ? data.arrivalVerification === "gps"
-          ? " (GPS verified)"
-          : ` (GPS not verified${data.arrivalBypassReason ? `: ${data.arrivalBypassReason}` : ""})`
+    // §12 The activity feed names the verification method explicitly.
+    const method = data.arrivalVerification as "gps" | "qr" | "manual" | undefined;
+    const verificationNote =
+      status === "ARRIVED" && method
+        ? ` (${VERIFICATION_LABEL[method]}${
+            method === "manual" && data.arrivalBypassReason ? `: ${data.arrivalBypassReason}` : ""
+          })`
         : "";
     await recordActivity({
       jobId: id,
       type: "STATUS_CHANGED",
-      message: (STATUS_EVENT_MESSAGES[status] || `Job moved to ${JOB_STATUS_CONFIG[status as Job["status"]]?.label || status}`) + gpsNote,
+      message: (STATUS_EVENT_MESSAGES[status] || `Job moved to ${JOB_STATUS_CONFIG[status as Job["status"]]?.label || status}`) + verificationNote,
       actor: { id: user.id, name: user.name, role: user.role },
     });
     void recordAudit({
@@ -343,7 +469,12 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       previousState: existing.status,
       newState: status,
       reason: body.reason ?? (status === "ARRIVED" ? (data.arrivalBypassReason as string | null) : null),
-      details: status === "ARRIVED" ? `verification=${data.arrivalVerification} distance=${data.arrivalDistanceM ?? "n/a"}` : undefined,
+      details:
+        status === "ARRIVED"
+          ? `verification=${method ?? "none"} distance=${data.arrivalDistanceM ?? "n/a"}${
+              method === "qr" ? ` qrToken=${data.arrivalQrTokenId}` : ""
+            }`
+          : undefined,
       request,
     });
 

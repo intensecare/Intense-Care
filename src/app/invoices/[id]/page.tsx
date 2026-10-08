@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ChevronLeft, Printer, CreditCard, Lock } from "lucide-react";
+import { ChevronLeft, CreditCard, Lock } from "lucide-react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Input, Field } from "@/components/ui/input";
 import { Skeleton, ErrorState, Notice } from "@/components/ui/states";
 import { InvoiceDocument, InvoiceTypeBadge, useInvoiceDetail } from "@/components/invoice/InvoiceDocument";
 import { RecordPaymentDialog } from "@/components/invoice/RecordPaymentDialog";
+import { DocumentActions } from "@/components/common/DocumentActions";
 import { useCustomerLink } from "@/components/common/JobQr";
 import { useApp } from "@/lib/app-context";
 import { cn, formatDateTime, formatMoney } from "@/lib/utils";
@@ -79,8 +80,11 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4" aria-hidden /> Print / Save PDF</Button>
-            {inv.balanceDue > 0 && <Button onClick={() => setPaying(true)}><CreditCard className="h-4 w-4" aria-hidden /> Record payment</Button>}
+            {inv.balanceDue > 0 && (
+              <Button onClick={() => setPaying(true)}>
+                <CreditCard className="h-4 w-4" aria-hidden /> Record payment
+              </Button>
+            )}
           </div>
         </div>
         {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}
@@ -128,6 +132,13 @@ export default function InvoiceDetailPage() {
           </section>
         )}
       </div>
+
+      {/* §5 Download PDF / Print / Share, on every document. */}
+      <DocumentActions
+        title={inv.invoiceType === "GST" ? `GST invoice ${inv.invoiceNumber}` : `Invoice ${inv.invoiceNumber}`}
+        shareText={`Invoice ${inv.invoiceNumber} — ${data.customer.name}`}
+        className="mb-4"
+      />
 
       <InvoiceDocument detail={data} qrUrl={linkUrl} />
 

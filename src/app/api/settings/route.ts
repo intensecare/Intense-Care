@@ -8,6 +8,7 @@ import {
   updateSystemSettings,
 } from "@/lib/server/settings";
 import type { SystemSettings } from "@/lib/types";
+import { normalizeVisibility, DEFAULT_CUSTOMER_VISIBILITY } from "@/lib/visibility";
 
 /**
  * GET /api/settings — current company configuration. Any signed-in user may
@@ -50,12 +51,17 @@ export async function PATCH(request: Request) {
       "taxLabel",
       "gstin",
       "sacCode",
+      "companyLogoUrl",
+      "paymentTerms",
+      "serviceTerms",
+      "bankDetails",
     ];
     const numberFields: (keyof SystemSettings)[] = [
       "taxRatePercent",
       "resendCooldownSeconds",
       "refundApprovalLimit",
       "discountApprovalLimitPercent",
+      "quotationValidityDays",
     ];
 
     for (const f of stringFields) {
@@ -64,6 +70,16 @@ export async function PATCH(request: Request) {
     for (const f of numberFields) {
       const v = Number(body[f]);
       if (Number.isFinite(v)) (patch[f] as number) = v;
+    }
+
+    // §6 The company default for customer visibility. Unknown keys are
+    // dropped and locked keys forced on by normalizeVisibility, so a hostile
+    // payload can neither widen the portal nor break it.
+    if (body.defaultCustomerVisibility !== undefined) {
+      patch.defaultCustomerVisibility = normalizeVisibility(
+        body.defaultCustomerVisibility,
+        DEFAULT_CUSTOMER_VISIBILITY
+      );
     }
 
     const updated = await updateSystemSettings(patch);

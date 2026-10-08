@@ -5,6 +5,7 @@
  * the hydrated client store consumes. Dates serialize as ISO strings.
  */
 import { Prisma } from "@prisma/client";
+import { parseStoredLines } from "@/lib/documents";
 import type {
   Customer,
   Property,
@@ -22,6 +23,7 @@ import type {
   CommissionEntry,
   Payout,
   Quote,
+  JobServiceLine,
   Expense,
   Refund,
   JobStatus,
@@ -62,7 +64,8 @@ export function serializeProperty(p: Prisma.PropertyGetPayload<object>): Propert
     carpetAreaSqFt: p.areaSqFt,
     bedrooms: p.bedrooms,
     bathrooms: p.bathrooms,
-    gpsCoordinates: { lat: 0, lng: 0 },
+    lat: p.lat ?? undefined,
+    lng: p.lng ?? undefined,
     accessNotes: p.accessNotes ?? undefined,
     parkingInstructions: p.parkingInstructions ?? undefined,
     preferredTime: p.preferredTime ?? undefined,
@@ -83,6 +86,9 @@ export function serializeService(
     description: s.description,
     basePrice: s.basePrice,
     estimatedDurationHours: s.estimatedDurationHours,
+    taxTreatment: s.taxTreatment === "EXEMPT" ? "EXEMPT" : "GST",
+    internalNotes: s.internalNotes ?? undefined,
+    isCustom: s.isCustom,
     checklistTemplate: s.checklistTemplate
       .slice()
       .sort((a, b) => a.position - b.position)
@@ -112,6 +118,25 @@ export function serializeChecklistItem(i: Prisma.JobChecklistItemGetPayload<obje
   };
 }
 
+/** §3 One priced service on a job. */
+export function serializeJobServiceLine(
+  l: Prisma.JobServiceLineGetPayload<object>
+): JobServiceLine {
+  return {
+    id: l.id,
+    jobId: l.jobId,
+    serviceId: l.serviceId ?? undefined,
+    name: l.name,
+    description: l.description ?? "",
+    quantity: l.quantity,
+    unitPrice: l.unitPrice,
+    discount: l.discount,
+    taxable: l.taxable,
+    durationHours: l.durationHours,
+    position: l.position,
+  };
+}
+
 /**
  * Financial fields of a job are the Admin's domain. ops_manager gets a
  * stripped projection (no amounts, no payment data) enforced at the API
@@ -121,7 +146,12 @@ export type OpsSafeJob = Omit<SerializedJob, "amount" | "paymentStatus">;
 
 export function redactJobForOps(job: SerializedJob): OpsSafeJob {
   const { amount: _amount, paymentStatus: _paymentStatus, ...rest } = job;
-  return rest;
+  // §3 Service lines carry prices. Field Manager and QC see WHAT to do
+  // (service, scope, how long) but never what the job is worth.
+  return {
+    ...rest,
+    serviceLines: rest.serviceLines?.map((l) => ({ ...l, unitPrice: 0, discount: 0 })),
+  };
 }
 
 /** Job shape from the DB joined with customer/property/service display names. */
@@ -132,15 +162,16 @@ export type SerializedJob = Job & {
   service?: Pick<Service, "id" | "name" | "basePrice" | "estimatedDurationHours">;
 };
 
-export function serializeJob(
-  j: Prisma.JobGetPayload<{
-    include: {
-      customer: { select: { name: true; phone: true } };
-      property: { select: { title: true; address: true } };
-      service: { select: { id: true; name: true; basePrice: true; estimatedDurationHours: true } };
-    };
-  }>
-): SerializedJob {
+/** A job row with its display joins, and optionally its priced service lines. */
+export type JobRowWithJoins = Prisma.JobGetPayload<{
+  include: {
+    customer: { select: { name: true; phone: true } };
+    property: { select: { title: true; address: true } };
+    service: { select: { id: true; name: true; basePrice: true; estimatedDurationHours: true } };
+  };
+}> & { serviceLines?: Prisma.JobServiceLineGetPayload<object>[] };
+
+export function serializeJob(j: JobRowWithJoins): SerializedJob {
   return {
     id: j.id,
     jobNumber: j.jobSerial ?? undefined,
@@ -155,6 +186,7 @@ export function serializeJob(
     paymentStatus: j.paymentStatus as PaymentStatus,
     status: j.status as JobStatus,
     notes: j.notes ?? undefined,
+    customerNotes: j.customerNotes ?? undefined,
     customerConfirmedAt: j.customerConfirmedAt
       ? new Date(j.customerConfirmedAt).toISOString()
       : undefined,
@@ -171,6 +203,25 @@ export function serializeJob(
     arrivedAt: j.arrivedAt ? new Date(j.arrivedAt).toISOString() : undefined,
     startedAt: j.startedAt ? new Date(j.startedAt).toISOString() : undefined,
     completedAt: j.completedAt ? new Date(j.completedAt).toISOString() : undefined,
+    // §1 The official service location chosen when the job was booked.
+    serviceAddress: j.serviceAddress ?? undefined,
+    serviceLat: j.serviceLat ?? undefined,
+    serviceLng: j.serviceLng ?? undefined,
+    serviceLocationAccuracy: j.serviceLocationAccuracy ?? undefined,
+    locationNotes: j.locationNotes ?? undefined,
+    // §2/§12 How arrival was verified — GPS, QR or an audited manual override.
+    arrivalVerification: (j.arrivalVerification as Job["arrivalVerification"]) ?? undefined,
+    arrivalDistanceM: j.arrivalDistanceM ?? undefined,
+    arrivalBypassReason: j.arrivalBypassReason ?? undefined,
+    // §6 undefined = the company default applies (lib/visibility.ts).
+    customerVisibility:
+      j.customerVisibility && typeof j.customerVisibility === "object" && !Array.isArray(j.customerVisibility)
+        ? (j.customerVisibility as Record<string, boolean>)
+        : undefined,
+    serviceLines: j.serviceLines
+      ?.slice()
+      .sort((a, b) => a.position - b.position)
+      .map(serializeJobServiceLine),
     createdAt: new Date(j.createdAt).toISOString(),
     updatedAt: new Date(j.updatedAt).toISOString(),
     customerName: j.customer?.name,
@@ -389,16 +440,12 @@ export function serializePayout(p: Prisma.PayoutGetPayload<object>): Payout {
 }
 
 export function serializeQuote(q: Prisma.QuoteGetPayload<object>): Quote {
-  // Line items persisted with the quotation (legacy rows have none).
-  const rawItems: unknown[] = Array.isArray(q.items) ? (q.items as unknown[]) : [];
-  const items = rawItems
-    .filter((it): it is Record<string, unknown> => typeof it === "object" && it !== null && !Array.isArray(it))
-    .map((it) => ({
-      description: String(it.description ?? ""),
-      quantity: Number(it.quantity ?? 1),
-      unitPrice: Number(it.unitPrice ?? 0),
-      amount: Number(it.quantity ?? 1) * Number(it.unitPrice ?? 0),
-    }));
+  // Line items persisted with the quotation. Legacy rows carried only
+  // { description, quantity, unitPrice } and are upgraded in place.
+  const items = parseStoredLines(q.items).map((it) => ({
+    ...it,
+    amount: Math.round((it.quantity * it.unitPrice - it.discount) * 100) / 100,
+  }));
 
   return {
     id: q.id,
@@ -413,7 +460,21 @@ export function serializeQuote(q: Prisma.QuoteGetPayload<object>): Quote {
     total: q.total,
     validUntil: q.validUntil,
     status: q.status as Quote["status"],
+    invoiceType: q.invoiceType === "NON_GST" ? "NON_GST" : "GST",
+    gstRate: q.gstRate,
+    cgst: q.cgst,
+    sgst: q.sgst,
+    igst: q.igst,
+    interState: q.interState,
+    serviceAddress: q.serviceAddress ?? undefined,
+    paymentTerms: q.paymentTerms ?? undefined,
+    serviceTerms: q.serviceTerms ?? undefined,
+    notes: q.notes ?? undefined,
+    acceptedAt: q.acceptedAt ? new Date(q.acceptedAt).toISOString() : undefined,
+    acceptedBy: q.acceptedBy ?? undefined,
+    jobId: q.jobId ?? undefined,
     createdAt: new Date(q.createdAt).toISOString(),
+    updatedAt: q.updatedAt ? new Date(q.updatedAt).toISOString() : undefined,
   };
 }
 
@@ -484,6 +545,13 @@ export function redactJobForCustomer(job: SerializedJob) {
     assignedManagerId: _m,
     assignedStaffIds: _s,
     customerPhone: _p,
+    // §8 Desk-only operational detail never reaches a customer projection:
+    // the pin notes for the crew, the GPS-bypass reason, the measured
+    // distance and the visibility configuration itself.
+    locationNotes: _ln,
+    arrivalBypassReason: _abr,
+    arrivalDistanceM: _adm,
+    customerVisibility: _cv,
     ...rest
   } = job;
   return { ...rest, assignedStaffIds: [] as string[] };

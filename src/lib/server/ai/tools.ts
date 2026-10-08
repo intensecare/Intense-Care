@@ -4,6 +4,8 @@ import { jobWhereFor, authorizeJob, HttpError } from "@/lib/server/authz";
 import { invoiceWhereFor, istDayStart } from "@/lib/server/invoices";
 import type { SessionUser } from "@/lib/server/session";
 import { can, scopeOf, type Permission } from "@/lib/rbac";
+import { getSystemSettings } from "@/lib/server/settings";
+import { effectiveVisibility } from "@/lib/visibility";
 
 /**
  * INTENSE AI — the ONLY way the assistant can read business data.
@@ -800,7 +802,7 @@ const TOOLS: AiTool[] = [
     name: "get_my_service",
     status: "Checking your service",
     permission: "customer",
-    description: "The customer's own service: Job ID, service, date and time, team names, status, checklist progress, quality-check result, invoice and approval/feedback state.",
+    description: "The customer's own service: Job ID, service, date and time, team names, status, checklist progress, quality-check result, invoice and approval/feedback state. Only the fields the business has made visible to this customer are returned.",
     parameters: { type: "OBJECT", properties: {} },
     run: async (p) => {
       if (p.kind !== "customer") throw new HttpError(403, "Not permitted.");
@@ -808,33 +810,49 @@ const TOOLS: AiTool[] = [
         where: { id: p.jobId },
         select: {
           jobSerial: true, status: true, scheduledDate: true, scheduledTimeSlot: true, assignedStaffIds: true, assignedManagerId: true,
-          approvedAt: true, customerFeedbackRating: true,
+          approvedAt: true, customerFeedbackRating: true, customerVisibility: true,
+          serviceAddress: true, customerNotes: true,
           service: { select: { name: true } },
-          property: { select: { title: true } },
+          serviceLines: { select: { name: true, quantity: true }, orderBy: { position: "asc" } },
           checklistItems: { select: { status: true } },
           qualityChecks: { select: { decision: true }, orderBy: { createdAt: "desc" }, take: 1 },
           invoices: { where: { status: { not: "CANCELLED" } }, select: { invoiceNumber: true, invoiceType: true, subtotal: true, discount: true, tax: true, total: true, balanceDue: true, status: true }, take: 1 },
         },
       });
       if (!j) return { error: "Service not found." };
-      const team = await names([j.assignedManagerId, ...j.assignedStaffIds]);
+      // §6/§8 The assistant is not a side channel: it answers from the SAME
+      // visibility configuration the customer portal is filtered by, so a
+      // field switched off cannot be asked out of the model either.
+      const settings = await getSystemSettings();
+      const vis = effectiveVisibility(j.customerVisibility, settings.defaultCustomerVisibility);
+      const team = vis.teamName ? await names([j.assignedManagerId, ...j.assignedStaffIds]) : new Map<string, string>();
       const inv = j.invoices[0];
       const done = j.checklistItems.filter((c) => c.status === "completed" || c.status === "skipped").length;
+      const qcText = DONE.includes(j.status) || ["PASS", "CUSTOMER_APPROVAL"].includes(j.status) ? "passed" : REWORK.includes(j.status) ? "finishing touches" : QC_WAIT.includes(j.status) ? "being checked" : "not yet";
       return {
         jobId: j.jobSerial,
         service: j.service.name,
-        property: j.property.title,
-        date: j.scheduledDate,
-        timeWindow: j.scheduledTimeSlot,
-        team: Array.from(team.values()),
+        services: j.serviceLines.map((l) => (l.quantity > 1 ? `${l.name} x${l.quantity}` : l.name)),
         status: j.status,
         progress: `${done} of ${j.checklistItems.length} tasks done`,
-        qualityCheck: DONE.includes(j.status) || ["PASS", "CUSTOMER_APPROVAL"].includes(j.status) ? "passed" : REWORK.includes(j.status) ? "finishing touches" : QC_WAIT.includes(j.status) ? "being checked" : "not yet",
         approved: !!j.approvedAt,
-        rating: j.customerFeedbackRating ?? null,
-        invoice: inv
-          ? { invoiceNumber: inv.invoiceNumber, type: inv.invoiceType, amount: r2(inv.subtotal - inv.discount), ...(inv.invoiceType === "GST" ? { gst: inv.tax } : {}), total: inv.total, balanceDue: inv.balanceDue, status: inv.status }
-          : null,
+        ...(vis.serviceDate ? { date: j.scheduledDate, timeWindow: j.scheduledTimeSlot } : {}),
+        ...(vis.serviceLocation && j.serviceAddress ? { location: j.serviceAddress } : {}),
+        ...(vis.teamName ? { team: Array.from(team.values()) } : {}),
+        ...(vis.qcResult ? { qualityCheck: qcText } : {}),
+        ...(vis.serviceNotes && j.customerNotes ? { notesForYou: j.customerNotes } : {}),
+        ...(vis.customerFeedback ? { rating: j.customerFeedbackRating ?? null } : {}),
+        invoice:
+          vis.invoice && inv
+            ? {
+                invoiceNumber: inv.invoiceNumber,
+                type: inv.invoiceType,
+                amount: r2(inv.subtotal - inv.discount),
+                ...(inv.invoiceType === "GST" ? { gst: inv.tax } : {}),
+                total: inv.total,
+                ...(vis.paymentStatus ? { balanceDue: inv.balanceDue, status: inv.status } : {}),
+              }
+            : null,
       };
     },
   },

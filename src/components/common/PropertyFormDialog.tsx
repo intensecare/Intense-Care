@@ -12,6 +12,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { LocationPicker } from "@/components/common/LocationPicker";
 import type { Customer, Property } from "@/lib/types";
 
 export interface PropertyFormPayload {
@@ -20,6 +21,9 @@ export interface PropertyFormPayload {
   propertyType: Property["propertyType"];
   address: string;
   city: string;
+  /** §1 The property pin. Jobs here start from it and are GPS-verified against it. */
+  lat?: number;
+  lng?: number;
   bedrooms: number;
   bathrooms: number;
   carpetAreaSqFt: number;
@@ -61,6 +65,9 @@ export function PropertyFormDialog({
   const [title, setTitle] = useState("");
   const [propertyType, setPropertyType] = useState<PropertyFormPayload["propertyType"]>("apartment");
   const [address, setAddress] = useState("");
+  // §1 The map pin for this property.
+  const [lat, setLat] = useState<number | undefined>(undefined);
+  const [lng, setLng] = useState<number | undefined>(undefined);
   const [city, setCity] = useState("Bengaluru");
   const [postalCode, setPostalCode] = useState("");
   const [bedrooms, setBedrooms] = useState(3);
@@ -83,6 +90,8 @@ export function PropertyFormDialog({
     setTitle(editing?.title ?? "");
     setPropertyType(editing?.propertyType || "apartment");
     setAddress(editing?.address ?? "");
+    setLat(editing?.lat);
+    setLng(editing?.lng);
     setCity(editing?.city || "Bengaluru");
     setPostalCode(editing?.postalCode ?? "");
     setBedrooms(editing?.bedrooms ?? 3);
@@ -112,6 +121,8 @@ export function PropertyFormDialog({
       propertyType,
       address,
       city,
+      lat,
+      lng,
       bedrooms,
       bathrooms,
       carpetAreaSqFt: sqFt,
@@ -154,6 +165,18 @@ export function PropertyFormDialog({
           <Field label="Address" required htmlFor="pf-address">
             <Input id="pf-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Flat, tower, community, locality" required autoComplete="street-address" />
           </Field>
+
+          {/* §1 The pin. Set it once here and every job at this property can
+              be GPS-verified from the start. */}
+          <LocationPicker
+            addressLabel="Confirm the address on the map"
+            value={{ address, lat, lng }}
+            onChange={(next) => {
+              setAddress(next.address);
+              setLat(next.lat);
+              setLng(next.lng);
+            }}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="City" htmlFor="pf-city">

@@ -14,9 +14,12 @@ import {
   ok,
   fail,
   readJson,
-  nextDocNumber,
 } from "@/lib/server/serialize";
-import { getTaxRate, computeInvoiceFigures, GSTIN_PATTERN } from "@/lib/tax";
+import { computeInvoiceFigures, GSTIN_PATTERN } from "@/lib/tax";
+import { computeDocumentFigures, parseStoredLines } from "@/lib/documents";
+import { nextQuoteNumber } from "@/lib/server/quotes";
+import { writeJobServiceLines } from "@/lib/server/service-lines";
+import { normalizeVisibility, DEFAULT_CUSTOMER_VISIBILITY } from "@/lib/visibility";
 import { getSystemSettings } from "@/lib/server/settings";
 import { logger } from "@/lib/server/logger";
 import { recordAudit } from "@/lib/server/audit";
@@ -369,22 +372,46 @@ export async function POST(request: Request) {
       if (!parsed.success) return fail("Invalid quote payload.", 400);
       const d = parsed.data;
       const settings = await getSystemSettings();
-      const subtotal = d.items.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0);
-      const rate = getTaxRate(settings);
-      const tax = Math.round(subtotal * rate * 100) / 100;
-      const created = await prisma.quote.create({
-        data: {
-          quoteNumber: nextDocNumber("QUO"),
-          customerId: d.customerId,
-          propertyId: d.propertyId,
-          serviceId: d.serviceId,
-          items: d.items.map((it) => ({ description: it.description, quantity: it.quantity, unitPrice: it.unitPrice })),
-          subtotal,
-          tax,
-          total: subtotal + tax,
-          validUntil: d.validUntil,
-        },
+      // §4 The same lines, numbering and GST split as POST /api/quotes, so a
+      // quotation raised here is the same document either way.
+      const lines = d.items.map((it) => ({
+        serviceId: d.serviceId,
+        name: it.description,
+        description: "",
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        discount: 0,
+        taxable: true,
+        durationHours: 0,
+      }));
+      const figures = computeDocumentFigures({
+        invoiceType: settings.taxRatePercent > 0 ? "GST" : "NON_GST",
+        lines,
+        gstRatePercent: settings.taxRatePercent,
       });
+      const created = await prisma.$transaction(async (tx) =>
+        tx.quote.create({
+          data: {
+            quoteNumber: await nextQuoteNumber(tx),
+            customerId: d.customerId,
+            propertyId: d.propertyId,
+            serviceId: d.serviceId,
+            items: lines,
+            subtotal: figures.subtotal,
+            discount: figures.discount,
+            tax: figures.tax,
+            total: figures.total,
+            invoiceType: figures.invoiceType,
+            gstRate: figures.gstRate,
+            cgst: figures.cgst,
+            sgst: figures.sgst,
+            igst: figures.igst,
+            paymentTerms: settings.paymentTerms || null,
+            serviceTerms: settings.serviceTerms || null,
+            validUntil: d.validUntil,
+          },
+        })
+      );
       void recordAudit({ actor: user, action: "QUOTE_CREATED", entityType: "quote", entityId: created.id, details: `₹${created.total}`, request });
       return ok(serializeQuote(created), 201);
     }
@@ -406,9 +433,10 @@ export async function POST(request: Request) {
       const settings = await getSystemSettings();
       // A quote that carried tax becomes a GST invoice (intra-state split);
       // a quote without tax becomes a Non-GST invoice.
-      const isGst = quote.tax > 0;
-      const cgst = isGst ? Math.round((quote.tax / 2) * 100) / 100 : 0;
+      const isGst = quote.invoiceType === "GST";
+      const cgst = isGst ? (quote.cgst || Math.round((quote.tax / 2) * 100) / 100) : 0;
       const taxable = quote.subtotal - quote.discount;
+      const quotedLines = parseStoredLines(quote.items);
       const { job, invoice } = await prisma.$transaction(async (tx) => {
         const createdJob = await tx.job.create({
           data: {
@@ -418,16 +446,30 @@ export async function POST(request: Request) {
             serviceId: quote.serviceId,
             scheduledDate,
             scheduledTimeSlot,
-            amount: quote.total,
+            amount: Math.round(taxable * 100) / 100,
             status: "SCHEDULED",
             notes: `Converted from quotation ${quote.quoteNumber}`,
+            serviceAddress: quote.serviceAddress,
+            customerVisibility: normalizeVisibility(
+              settings.defaultCustomerVisibility,
+              DEFAULT_CUSTOMER_VISIBILITY
+            ),
           },
         });
+
+        // §3 The job carries the services that were quoted, unchanged.
+        if (quotedLines.length > 0) {
+          await writeJobServiceLines(
+            tx,
+            createdJob.id,
+            quotedLines.map((line) => ({ ...line, serviceId: line.serviceId ?? null }))
+          );
+        }
         const createdInvoice = await tx.invoice.create({
           data: {
             invoiceNumber: await nextInvoiceNumber(tx, isGst ? "GST" : "NON_GST"),
             invoiceType: isGst ? "GST" : "NON_GST",
-            gstRate: isGst && taxable > 0 ? Math.round((quote.tax * 10000) / taxable) / 100 : 0,
+            gstRate: isGst ? quote.gstRate || (taxable > 0 ? Math.round((quote.tax * 10000) / taxable) / 100 : 0) : 0,
             cgst,
             sgst: isGst ? Math.round((quote.tax - cgst) * 100) / 100 : 0,
             customerGstin: isGst ? customer?.gstin ?? null : null,
@@ -443,7 +485,10 @@ export async function POST(request: Request) {
           },
         });
         await tx.customer.update({ where: { id: quote.customerId }, data: { totalBookings: { increment: 1 } } });
-        await tx.quote.update({ where: { id: quote.id }, data: { status: "converted_to_job" } });
+        await tx.quote.update({
+          where: { id: quote.id },
+          data: { status: "converted_to_job", jobId: createdJob.id },
+        });
         return { job: createdJob, invoice: createdInvoice };
       });
 

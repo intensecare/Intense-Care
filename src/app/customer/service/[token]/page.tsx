@@ -50,14 +50,19 @@ interface CustomerPayload {
     id: string;
     status: string;
     serviceName: string;
-    scheduledDate: string;
-    scheduledTimeSlot: string;
+    /** Every service on this job, by name. */
+    services?: { name: string; description?: string; quantity: number }[];
+    /** Absent when the service date is hidden for this job (§6). */
+    scheduledDate?: string;
+    scheduledTimeSlot?: string;
     arrivedAt: string | null;
     completedAt: string | null;
     customerConfirmedAt: string | null;
     arrivalVerified: boolean;
   };
-  property: { title: string; address: string };
+  /** §1 Absent when the service location is hidden for this job. */
+  location: { address: string; lat?: number; lng?: number; navigationUrl: string | null } | null;
+  property?: { title: string; address: string };
   customer: { name: string; phoneMasked: string };
   team: string[];
   checklist: { id: string; area: string; task: string; completed: boolean }[];
@@ -65,11 +70,35 @@ interface CustomerPayload {
   qualityCheck: { passed: boolean } | null;
   /** Customer-facing QC result: checking → (improving) → passed. */
   qualityResult: "checking" | "improving" | "passed" | null;
+  /** The note written FOR the customer, when that switch is on. */
+  serviceNotes: string | null;
   invoice: CustomerInvoice | null;
+  quotation: CustomerQuotation | null;
+  payment: { status: string; amountPaid: number; balanceDue: number } | null;
   approval: { approvedAt: string; approvedBy: string; method: string } | null;
   feedback: { rating: number; feedbackAt: string | null; googleReviewClicked: boolean } | null;
   complaintCount: number;
+  /**
+   * §6 What this page may show. The server has ALREADY filtered the data —
+   * these flags only decide which sections are drawn, so a flag flipped in
+   * the browser reveals nothing that was not sent.
+   */
+  visibility: Record<string, boolean>;
   company: { name: string; googleReviewUrl: string };
+}
+
+interface CustomerQuotation {
+  quoteNumber: string;
+  invoiceType: "GST" | "NON_GST";
+  createdAt: string;
+  validUntil: string;
+  status: string;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  acceptedAt: string | null;
+  items: { name: string; description?: string; quantity: number; unitPrice: number; discount: number; amount: number }[];
 }
 
 interface CustomerInvoice {
@@ -88,11 +117,19 @@ interface CustomerInvoice {
   customerGstin?: string;
   companyGstin?: string;
   total: number;
-  amountPaid: number;
-  balanceDue: number;
-  status: string;
+  /** Present only when the payment position is visible for this job. */
+  amountPaid?: number;
+  balanceDue?: number;
+  status?: string;
+  lines?: { name: string; description?: string; quantity: number; unitPrice: number; discount: number; amount: number }[];
   companyName: string;
   companyAddress: string;
+  companyPhone?: string;
+  companyEmail?: string;
+  companyLogoUrl?: string;
+  paymentTerms?: string;
+  bankDetails?: string;
+  sacCode?: string;
 }
 
 const QC_TEXT: Record<NonNullable<CustomerPayload["qualityResult"]>, { text: string; tone: string }> = {
@@ -245,14 +282,21 @@ export default function CustomerServicePage() {
     );
   }
 
-  const { job, property, team, checklist, company } = data;
+  const { job, team, checklist, company } = data;
   const confirmed = !!job.customerConfirmedAt;
   const stage = stageOf(job.status, confirmed, !!data.approval);
   const doneCount = checklist.filter((c) => c.completed).length;
   const pct = checklist.length ? Math.round((doneCount / checklist.length) * 100) : 0;
   const areas = Array.from(new Set([...checklist.map((c) => c.area), ...data.photos.map((p) => p.area)]));
-  const when = formatWhen(job.scheduledDate, job.scheduledTimeSlot);
+  // §6 Hidden fields arrive absent, so the UI simply has nothing to draw.
+  const when = job.scheduledDate ? formatWhen(job.scheduledDate, job.scheduledTimeSlot ?? "") : null;
+  const where = data.location?.address || "";
+  const placeLabel = where || "your property";
   const status = STATUS_LINE[stage];
+  const serviceTitle =
+    job.services && job.services.length > 1
+      ? job.services.map((s) => s.name).join(" + ")
+      : job.serviceName;
 
   /* ------------------------------------------- the ONE primary action */
   const primary = (() => {
@@ -318,7 +362,20 @@ export default function CustomerServicePage() {
             <dl className="divide-y divide-zinc-100 text-sm">
               <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Job ID</dt><dd className="font-mono font-semibold text-zinc-900 text-right break-all">{job.id}</dd></div>
               <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Name</dt><dd className="font-medium text-zinc-900 text-right break-words">{data.customer.name}</dd></div>
-              <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Team</dt><dd className="font-medium text-zinc-900 text-right break-words">{team.length ? team.join(", ") : "Being assigned"}</dd></div>
+              {where && (
+                <div className="flex items-start justify-between gap-3 py-2">
+                  <dt className="text-zinc-500 shrink-0">Location</dt>
+                  <dd className="font-medium text-zinc-900 text-right break-words">{where}</dd>
+                </div>
+              )}
+              {data.visibility.teamName && (
+                <div className="flex items-start justify-between gap-3 py-2">
+                  <dt className="text-zinc-500 shrink-0">Team</dt>
+                  <dd className="font-medium text-zinc-900 text-right break-words">
+                    {team.length ? team.join(", ") : "Being assigned"}
+                  </dd>
+                </div>
+              )}
               {data.qualityResult && (
                 <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Quality check</dt><dd className={cn("font-semibold text-right", QC_TEXT[data.qualityResult].tone)}>{QC_TEXT[data.qualityResult].text}</dd></div>
               )}
@@ -332,6 +389,29 @@ export default function CustomerServicePage() {
                   </dd>
                 </div>
               )}
+              {data.payment && (
+                <div className="flex items-start justify-between gap-3 py-2">
+                  <dt className="text-zinc-500 shrink-0">Payment</dt>
+                  <dd
+                    className={cn(
+                      "font-semibold text-right",
+                      data.payment.balanceDue > 0 ? "text-amber-700" : "text-emerald-700"
+                    )}
+                  >
+                    {data.payment.balanceDue > 0 ? `${formatInr(data.payment.balanceDue)} due` : "Paid ✓"}
+                  </dd>
+                </div>
+              )}
+              {data.quotation && (
+                <div className="flex items-center justify-between gap-3 py-2">
+                  <dt className="text-zinc-500 shrink-0">Quotation</dt>
+                  <dd className="text-right">
+                    <button onClick={() => go("reports")} className="min-h-10 font-semibold text-rose-600 inline-flex items-center gap-1">
+                      {formatInr(data.quotation.total)} · View
+                    </button>
+                  </dd>
+                </div>
+              )}
             </dl>
 
             {stage === "scheduled" && <p className="text-base text-zinc-600">We&apos;ll update this page the moment your team arrives.</p>}
@@ -340,7 +420,12 @@ export default function CustomerServicePage() {
               <div className="text-center space-y-2 py-2">
                 <Badge tone="green" icon={<CheckCircle2 className="h-8 w-8" aria-hidden />} />
                 <p className="text-xl font-semibold text-zinc-950">Your team has arrived ✓</p>
-                <p className="text-base text-zinc-600">{team.length ? `${team.join(", ")} ${team.length === 1 ? "is" : "are"} at ${property.title}.` : `Your team is at ${property.title}.`} Tap Confirm &amp; Start to let them begin.</p>
+                <p className="text-base text-zinc-600">
+                  {team.length
+                    ? `${team.join(", ")} ${team.length === 1 ? "is" : "are"} at ${placeLabel}.`
+                    : `Your team is at ${placeLabel}.`}{" "}
+                  Tap Confirm &amp; Start to let them begin.
+                </p>
               </div>
             )}
 
@@ -409,11 +494,45 @@ export default function CustomerServicePage() {
       {tab === "service" && (
         <>
           <Panel title="My service">
-            <Detail icon={<Sparkles className="h-5 w-5" aria-hidden />} label="Service" value={job.serviceName} />
-            <Detail icon={<Calendar className="h-5 w-5" aria-hidden />} label="When" value={when} />
-            <Detail icon={<MapPin className="h-5 w-5" aria-hidden />} label="Where" value={`${property.title}${property.address ? ` — ${property.address}` : ""}`} />
-            <Detail icon={<Users className="h-5 w-5" aria-hidden />} label="Your team" value={team.length ? team.join(", ") : "Being assigned"} />
+            <Detail icon={<Sparkles className="h-5 w-5" aria-hidden />} label="Service" value={serviceTitle} />
+            {when && <Detail icon={<Calendar className="h-5 w-5" aria-hidden />} label="When" value={when} />}
+            {where && <Detail icon={<MapPin className="h-5 w-5" aria-hidden />} label="Where" value={where} />}
+            {team.length > 0 && (
+              <Detail icon={<Users className="h-5 w-5" aria-hidden />} label="Your team" value={team.join(", ")} />
+            )}
           </Panel>
+
+          {/* Every service on the job, when there is more than one. */}
+          {job.services && job.services.length > 1 && (
+            <Panel title={`Services · ${job.services.length}`}>
+              {job.services.map((s) => (
+                <div key={s.name} className="py-2.5">
+                  <div className="text-base font-medium text-zinc-900">
+                    {s.name}
+                    {s.quantity > 1 ? ` ×${s.quantity}` : ""}
+                  </div>
+                  {s.description && <div className="text-sm text-zinc-500 mt-0.5">{s.description}</div>}
+                </div>
+              ))}
+            </Panel>
+          )}
+
+          {/* §1 The service location, with one-tap navigation. */}
+          {data.location?.navigationUrl && (
+            <a
+              href={data.location.navigationUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="h-12 w-full rounded-2xl border border-zinc-300 bg-white text-base font-semibold text-zinc-900 inline-flex items-center justify-center gap-2"
+            >
+              <MapPin className="h-5 w-5 text-rose-600" aria-hidden /> OPEN IN MAPS
+            </a>
+          )}
+
+          {/* A note written for the customer, when that switch is on. */}
+          {data.serviceNotes && <Panel title="Notes for you">
+            <p className="py-2 text-base text-zinc-700 whitespace-pre-line break-words">{data.serviceNotes}</p>
+          </Panel>}
           <Panel title={`Progress · ${doneCount} of ${checklist.length}`}>
             {checklist.length === 0 ? (
               <p className="py-3 text-base text-zinc-500">Progress shows here once the service starts.</p>
@@ -443,7 +562,7 @@ export default function CustomerServicePage() {
             <div className="print:hidden">
             <Panel title="Service report">
               <Detail icon={<Sparkles className="h-5 w-5" aria-hidden />} label="Service" value={job.serviceName} />
-              <Detail icon={<Calendar className="h-5 w-5" aria-hidden />} label="Date" value={when} />
+              {when && <Detail icon={<Calendar className="h-5 w-5" aria-hidden />} label="Date" value={when} />}
               <Detail icon={<Users className="h-5 w-5" aria-hidden />} label="Team" value={team.join(", ") || "—"} />
               <Detail icon={<ShieldCheck className="h-5 w-5" aria-hidden />} label="Quality" value="Passed ✓" />
               {data.approval && <Detail icon={<CheckCircle2 className="h-5 w-5" aria-hidden />} label="Approved" value={new Date(data.approval.approvedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />}
@@ -451,12 +570,15 @@ export default function CustomerServicePage() {
             </Panel>
             </div>
           )}
-          <div className="print:hidden">
-            <Panel title="Before / After">
-              <BeforeAfter photos={data.photos} areas={areas} />
-            </Panel>
-          </div>
-          {data.invoice && <InvoicePanel invoice={data.invoice} customerName={data.customer.name} jobId={job.id} serviceName={job.serviceName} />}
+          {(data.visibility.beforePhotos || data.visibility.afterPhotos) && (
+            <div className="print:hidden">
+              <Panel title="Before / After">
+                <BeforeAfter photos={data.photos} areas={areas} />
+              </Panel>
+            </div>
+          )}
+          {data.quotation && <QuotationPanel quote={data.quotation} />}
+          {data.invoice && <InvoicePanel invoice={data.invoice} customerName={data.customer.name} jobId={job.id} serviceName={serviceTitle} />}
           {stage === "approve" && (
             <button onClick={() => go("home")} className="h-12 w-full rounded-2xl bg-emerald-600 text-white text-base font-semibold">Back to approve</button>
           )}
@@ -469,7 +591,7 @@ export default function CustomerServicePage() {
           <Panel title="Profile">
             <Detail icon={<User className="h-5 w-5" aria-hidden />} label="Name" value={data.customer.name} />
             <Detail icon={<ShieldCheck className="h-5 w-5" aria-hidden />} label="Phone" value={data.customer.phoneMasked} />
-            <Detail icon={<MapPin className="h-5 w-5" aria-hidden />} label="Property" value={property.title} />
+            {where && <Detail icon={<MapPin className="h-5 w-5" aria-hidden />} label="Service address" value={where} />}
           </Panel>
           {complaintSent && (
             <div role="status" className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-base">
@@ -635,10 +757,98 @@ function InvoicePanel({ invoice: inv, customerName, jobId, serviceName }: { invo
             <dd className={cn("tabular-nums", strong ? "text-lg font-semibold text-zinc-950" : "font-medium")}>{v}</dd>
           </div>
         ))}
-        <div className="flex justify-between gap-3 px-4 py-2.5"><dt className="text-zinc-600">{inv.balanceDue > 0 ? "Balance due" : "Payment"}</dt><dd className={cn("font-semibold", inv.balanceDue > 0 ? "text-amber-700" : "text-emerald-700")}>{inv.balanceDue > 0 ? formatInr(inv.balanceDue) : "Paid ✓"}</dd></div>
+        {inv.balanceDue !== undefined && (
+          <div className="flex justify-between gap-3 px-4 py-2.5">
+            <dt className="text-zinc-600">{inv.balanceDue > 0 ? "Balance due" : "Payment"}</dt>
+            <dd className={cn("font-semibold", inv.balanceDue > 0 ? "text-amber-700" : "text-emerald-700")}>
+              {inv.balanceDue > 0 ? formatInr(inv.balanceDue) : "Paid ✓"}
+            </dd>
+          </div>
+        )}
       </dl>
       <button onClick={() => window.print()} className="print:hidden h-12 w-full rounded-2xl border border-zinc-300 bg-white text-base font-semibold text-zinc-900 inline-flex items-center justify-center gap-2">
         <FileText className="h-5 w-5" aria-hidden /> Download / Print invoice
+      </button>
+    </section>
+  );
+}
+
+/**
+ * §4 The quotation, as the customer sees it: what was priced, what it adds up
+ * to, and whether it is still valid. No internal pricing, no margin.
+ */
+function QuotationPanel({ quote }: { quote: CustomerQuotation }) {
+  const gst = quote.invoiceType === "GST";
+  const expired = new Date(`${quote.validUntil}T23:59:59`).getTime() < Date.now();
+  return (
+    <section className="bg-white rounded-3xl border border-zinc-200 p-5 shadow-sm space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-zinc-950">Quotation</h2>
+          <p className="font-mono text-sm text-zinc-500 break-all">{quote.quoteNumber}</p>
+        </div>
+        <span
+          className={cn(
+            "rounded-full border px-2.5 py-1 text-xs font-semibold whitespace-nowrap shrink-0",
+            quote.acceptedAt
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : expired
+              ? "border-zinc-200 bg-zinc-100 text-zinc-600"
+              : "border-amber-200 bg-amber-50 text-amber-800"
+          )}
+        >
+          {quote.acceptedAt ? "Accepted" : expired ? "Expired" : "Awaiting your approval"}
+        </span>
+      </div>
+
+      <ul className="divide-y divide-zinc-100">
+        {quote.items.map((it, i) => (
+          <li key={`${it.name}-${i}`} className="py-2.5 flex items-start justify-between gap-3">
+            <span className="min-w-0">
+              <span className="block text-base text-zinc-900 break-words">
+                {it.name}
+                {it.quantity > 1 ? ` ×${it.quantity}` : ""}
+              </span>
+              {it.description && <span className="block text-sm text-zinc-500 break-words">{it.description}</span>}
+            </span>
+            <span className="tabular-nums font-medium text-zinc-900 shrink-0">{formatInr(it.amount)}</span>
+          </li>
+        ))}
+      </ul>
+
+      <dl className="rounded-2xl border border-zinc-200 divide-y divide-zinc-100 overflow-hidden">
+        <div className="flex justify-between gap-3 px-4 py-2.5">
+          <dt className="text-zinc-600">Subtotal</dt>
+          <dd className="tabular-nums font-medium">{formatInr(quote.subtotal)}</dd>
+        </div>
+        {quote.discount > 0 && (
+          <div className="flex justify-between gap-3 px-4 py-2.5">
+            <dt className="text-zinc-600">Discount</dt>
+            <dd className="tabular-nums font-medium">− {formatInr(quote.discount)}</dd>
+          </div>
+        )}
+        {gst && (
+          <div className="flex justify-between gap-3 px-4 py-2.5">
+            <dt className="text-zinc-600">GST</dt>
+            <dd className="tabular-nums font-medium">{formatInr(quote.tax)}</dd>
+          </div>
+        )}
+        <div className="flex justify-between gap-3 px-4 py-2.5 bg-zinc-50">
+          <dt className="font-semibold text-zinc-950">Total</dt>
+          <dd className="tabular-nums text-lg font-semibold text-zinc-950">{formatInr(quote.total)}</dd>
+        </div>
+      </dl>
+
+      <p className="text-sm text-zinc-500">
+        {quote.acceptedAt
+          ? `Accepted on ${new Date(quote.acceptedAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}.`
+          : `Valid until ${new Date(`${quote.validUntil}T00:00:00`).toLocaleDateString("en-IN", { dateStyle: "medium" })}.`}
+      </p>
+      <button
+        onClick={() => window.print()}
+        className="print:hidden h-12 w-full rounded-2xl border border-zinc-300 bg-white text-base font-semibold text-zinc-900 inline-flex items-center justify-center gap-2"
+      >
+        <FileText className="h-5 w-5" aria-hidden /> Download / Print quotation
       </button>
     </section>
   );

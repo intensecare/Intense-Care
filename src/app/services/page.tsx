@@ -7,6 +7,7 @@ import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { Service } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
+import { formatDuration } from "@/lib/documents";
 import {
   Sparkles,
   Clock,
@@ -22,6 +23,22 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
+
+/**
+ * §3 The services a deep-cleaning business usually sells, as one-tap starting
+ * points for the form. They are suggestions, not a built-in catalog: nothing
+ * exists until the company creates it, and every field stays editable.
+ */
+const SERVICE_SUGGESTIONS: { name: string; category: Service["category"]; custom?: boolean }[] = [
+  { name: "Deep Cleaning", category: "residential" },
+  { name: "Sofa Cleaning", category: "residential" },
+  { name: "Carpet Cleaning", category: "residential" },
+  { name: "Kitchen Cleaning", category: "residential" },
+  { name: "Bathroom Cleaning", category: "residential" },
+  { name: "Move-in Cleaning", category: "residential" },
+  { name: "Move-out Cleaning", category: "residential" },
+  { name: "Custom Service", category: "specialized", custom: true },
+];
 
 export default function ServicesPage() {
   const {
@@ -50,6 +67,11 @@ export default function ServicesPage() {
   const [description, setDescription] = useState("");
   const [basePrice, setBasePrice] = useState<number | "">(5000);
   const [estimatedDurationHours, setEstimatedDurationHours] = useState<number | "">(4);
+  // §3 Custom services: how the service is taxed, a desk-only note, and
+  // whether Admin authored it as a one-off rather than a standing package.
+  const [taxTreatment, setTaxTreatment] = useState<"GST" | "EXEMPT">("GST");
+  const [internalNotes, setInternalNotes] = useState("");
+  const [isCustom, setIsCustom] = useState(false);
 
   // New Checklist Item State
   const [area, setArea] = useState("Kitchen");
@@ -70,6 +92,9 @@ export default function ServicesPage() {
       description,
       basePrice: Number(basePrice) || 5000,
       estimatedDurationHours: Number(estimatedDurationHours) || 4,
+      taxTreatment,
+      internalNotes: internalNotes.trim() || undefined,
+      isCustom,
       // Checklist starts empty — the company authors every checklist item.
       checklistTemplate: [],
       active: true,
@@ -94,6 +119,8 @@ export default function ServicesPage() {
       description,
       basePrice: Number(basePrice) || 5000,
       estimatedDurationHours: Number(estimatedDurationHours) || 4,
+      taxTreatment,
+      internalNotes: internalNotes.trim(),
     });
     setIsEditOpen(false);
     setIsUpdating(false);
@@ -122,6 +149,8 @@ export default function ServicesPage() {
     setDescription(selectedService.description);
     setBasePrice(selectedService.basePrice);
     setEstimatedDurationHours(selectedService.estimatedDurationHours);
+    setTaxTreatment(selectedService.taxTreatment === "EXEMPT" ? "EXEMPT" : "GST");
+    setInternalNotes(selectedService.internalNotes ?? "");
     setIsEditOpen(true);
   };
 
@@ -138,6 +167,9 @@ export default function ServicesPage() {
                 setDescription("");
                 setBasePrice(5000);
                 setEstimatedDurationHours(4);
+                setTaxTreatment("GST");
+                setInternalNotes("");
+                setIsCustom(false);
                 setIsCreateOpen(true);
               }}
               size="sm"
@@ -193,10 +225,24 @@ export default function ServicesPage() {
                   <div className="text-xs pt-1 flex items-center justify-between border-t border-slate-100/20">
                     <span className="flex items-center gap-1">
                       <Clock className="h-3 w-3" />
-                      ~{srv.estimatedDurationHours} hours
+                      {formatDuration(srv.estimatedDurationHours)}
                     </span>
                     <span>{srv.checklistTemplate.length} checklist items</span>
                   </div>
+                  {(srv.isCustom || srv.taxTreatment === "EXEMPT") && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {srv.isCustom && (
+                        <span className={isSelected ? "text-xs font-semibold text-rose-300" : "text-xs font-semibold text-rose-600"}>
+                          Custom service
+                        </span>
+                      )}
+                      {srv.taxTreatment === "EXEMPT" && (
+                        <span className={isSelected ? "text-xs font-semibold text-amber-300" : "text-xs font-semibold text-amber-700"}>
+                          GST exempt
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -222,6 +268,9 @@ export default function ServicesPage() {
                     setDescription("");
                     setBasePrice(5000);
                     setEstimatedDurationHours(4);
+                    setTaxTreatment("GST");
+                    setInternalNotes("");
+                    setIsCustom(false);
                     setIsCreateOpen(true);
                   }}
                 >
@@ -243,6 +292,25 @@ export default function ServicesPage() {
                 <p className="text-xs text-slate-500 mt-0.5">
                   {selectedService.description}
                 </p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-600">
+                    {selectedService.taxTreatment === "EXEMPT" ? "GST exempt" : "Taxable (GST)"}
+                  </span>
+                  <span className="text-slate-400">·</span>
+                  <span className="text-slate-600">{formatDuration(selectedService.estimatedDurationHours)}</span>
+                  {selectedService.isCustom && (
+                    <>
+                      <span className="text-slate-400">·</span>
+                      <span className="font-semibold text-rose-600">Custom service</span>
+                    </>
+                  )}
+                </div>
+                {selectedService.internalNotes && (
+                  <p className="mt-2 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2">
+                    <span className="font-semibold">Internal: </span>
+                    {selectedService.internalNotes}
+                  </p>
+                )}
               </div>
 
               <div className="text-right space-y-2">
@@ -363,6 +431,30 @@ export default function ServicesPage() {
             </div>
 
             <form onSubmit={handleCreateService} className="space-y-3 text-xs">
+              <div className="space-y-1.5">
+                <span className="text-sm font-medium text-zinc-800">Start from</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {SERVICE_SUGGESTIONS.map((s) => (
+                    <button
+                      key={s.name}
+                      type="button"
+                      onClick={() => {
+                        setName(s.name);
+                        setCategory(s.category);
+                        setIsCustom(s.custom === true);
+                      }}
+                      className={
+                        name === s.name
+                          ? "min-h-9 rounded-lg border px-2.5 text-xs font-semibold border-rose-500 bg-rose-50 text-rose-700"
+                          : "min-h-9 rounded-lg border px-2.5 text-xs font-medium border-zinc-300 bg-white text-zinc-700"
+                      }
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="space-y-1">
                 <label className="text-sm font-medium text-zinc-800">Package Title</label>
                 <Input
@@ -417,9 +509,59 @@ export default function ServicesPage() {
                   onChange={(e) => setDescription(e.target.value)}
                   rows={2}
                   className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
-                  placeholder="Service package summary..."
+                  placeholder="e.g. Complete cleaning of newly constructed property"
                 />
               </div>
+
+              {/* §3 Tax treatment: an exempt service never carries GST, even
+                  on a GST invoice. */}
+              <fieldset className="space-y-1.5">
+                <legend className="text-sm font-medium text-zinc-800">Tax treatment</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["GST", "EXEMPT"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      aria-pressed={taxTreatment === t}
+                      onClick={() => setTaxTreatment(t)}
+                      className={
+                        taxTreatment === t
+                          ? "min-h-11 rounded-xl border px-3 text-sm font-medium border-zinc-900 bg-zinc-900 text-white"
+                          : "min-h-11 rounded-xl border px-3 text-sm font-medium border-zinc-300 bg-white text-zinc-700"
+                      }
+                    >
+                      {t === "GST" ? "Taxable (GST)" : "GST exempt"}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-zinc-800">Internal notes</label>
+                <textarea
+                  value={internalNotes}
+                  onChange={(e) => setInternalNotes(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
+                  placeholder="Desk-only. Equipment, staffing, anything the crew needs to prepare."
+                />
+                <p className="text-xs text-zinc-500">Never shown to a customer.</p>
+              </div>
+
+              <label className="flex items-start gap-2.5 text-sm text-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={isCustom}
+                  onChange={(e) => setIsCustom(e.target.checked)}
+                  className="mt-0.5 h-5 w-5 accent-rose-500"
+                />
+                <span>
+                  Mark as a custom service
+                  <span className="block text-xs text-zinc-500">
+                    A one-off scope rather than a standing package. It is bookable and reportable either way.
+                  </span>
+                </span>
+              </label>
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
@@ -502,6 +644,41 @@ export default function ServicesPage() {
                   onChange={(e) => setDescription(e.target.value)}
                   rows={2}
                   className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
+                />
+              </div>
+
+              <fieldset className="space-y-1.5">
+                <legend className="text-sm font-medium text-zinc-800">Tax treatment</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["GST", "EXEMPT"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      aria-pressed={taxTreatment === t}
+                      onClick={() => setTaxTreatment(t)}
+                      className={
+                        taxTreatment === t
+                          ? "min-h-11 rounded-xl border px-3 text-sm font-medium border-zinc-900 bg-zinc-900 text-white"
+                          : "min-h-11 rounded-xl border px-3 text-sm font-medium border-zinc-300 bg-white text-zinc-700"
+                      }
+                    >
+                      {t === "GST" ? "Taxable (GST)" : "GST exempt"}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-zinc-500">
+                  Applies to new bookings. Invoices already issued are never rewritten.
+                </p>
+              </fieldset>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-zinc-800">Internal notes</label>
+                <textarea
+                  value={internalNotes}
+                  onChange={(e) => setInternalNotes(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm"
+                  placeholder="Desk-only. Never shown to a customer."
                 />
               </div>
 
