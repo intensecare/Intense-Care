@@ -881,5 +881,10 @@ export async function runTool(p: AiPrincipal, name: string, args: Args): Promise
 }
 
 export function declarationsFor(p: AiPrincipal) {
-  return toolsFor(p).map((t) => ({ name: t.name, description: t.description, ...(t.parameters ? { parameters: t.parameters } : {}) }));
+  // The provider rejects an OBJECT schema with no properties — a tool without
+  // arguments is declared without `parameters`.
+  return toolsFor(p).map((t) => {
+    const props = (t.parameters as { properties?: Record<string, unknown> } | undefined)?.properties;
+    return { name: t.name, description: t.description, ...(t.parameters && props && Object.keys(props).length ? { parameters: t.parameters } : {}) };
+  });
 }

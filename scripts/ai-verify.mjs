@@ -76,6 +76,8 @@ ok((await (await fetch(BASE + "/api/ai/chat", { headers: { cookie: admin } })).j
 
 let r = await chat(admin, "Hello");
 ok(r.text.startsWith("Hello from the model") && r.events.at(-1).type === "done", "plain answer streams back and finishes");
+await fetch(BASE + "/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json", cookie: admin }, body: JSON.stringify({ messages: [{ role: "assistant", content: "Welcome" }, { role: "user", content: "first try" }, { role: "user", content: "Hello again" }] }) }).then((x) => x.text());
+ok(JSON.stringify(seen.at(-1).body.contents.map((c) => c.role)) === '["user"]' && seen.at(-1).body.contents[0].parts[0].text.includes("Hello again"), "history after a failed answer is merged into one user turn");
 ok(seen.at(-1).key === "test-key" && seen.at(-1).url.includes(":streamGenerateContent?alt=sse"), "server calls the provider with the server-side key (streaming)");
 ok(seen.at(-1).body.systemInstruction.parts[0].text.includes("You are INTENSE AI"), "assistant is instructed to be Intense AI");
 
@@ -137,6 +139,10 @@ const token = link.split("/").pop();
 r = await chat(null, "CALL get_my_service {}", { token });
 ok(r.result?.result?.jobId === sql(`select "jobSerial" from "Job" where id='${jobId}'`), "Customer (QR token): sees their own service");
 ok(JSON.stringify(declared()) === JSON.stringify(["get_my_service"]), "Customer is offered only their own service");
+// What the real provider rejects: OBJECT schemas without properties, conversations not starting with the user.
+ok(seen.every((x) => (x.body.tools?.[0]?.functionDeclarations ?? []).every((d) => !d.parameters || Object.keys(d.parameters.properties ?? {}).length > 0)), "no tool is declared with an empty parameter object");
+ok(seen.every((x) => x.body.contents[0].role === "user" && x.body.contents.every((c, i) => i === 0 || c.role !== x.body.contents[i - 1].role)), "every request starts with the user and alternates roles");
+ok(seen.every((x) => x.body.generationConfig?.thinkingConfig?.thinkingBudget > 0), "thinking is capped so answers are not cut off");
 r = await chat(null, 'CALL get_jobs {}', { token });
 ok(/Not permitted/.test(r.result?.result?.error ?? ""), "Customer: model asking for all jobs → Not permitted");
 r = await chat(null, 'CALL get_customers {}', { token });
