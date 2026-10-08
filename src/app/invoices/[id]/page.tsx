@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ChevronLeft, Printer, CreditCard, Lock } from "lucide-react";
+import { ChevronLeft, Printer, CreditCard, Lock, Download } from "lucide-react";
+import { ShareButtons } from "@/components/document/DocParts";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { Button } from "@/components/ui/button";
@@ -79,7 +80,15 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4" aria-hidden /> Print / Save PDF</Button>
+            <Button variant="outline" onClick={() => window.print()} title="Choose “Save as PDF” in the print window"><Download className="h-4 w-4" aria-hidden /> Download PDF</Button>
+            <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4" aria-hidden /> Print</Button>
+            {linkUrl && (
+              <ShareButtons
+                getUrl={async () => linkUrl}
+                phone={data.customer.phone}
+                message={(url) => `Hello ${data.customer.name}, your invoice ${inv.invoiceNumber} for ${formatMoney(inv.total)} from ${data.company.name || "Intense Care"}: ${url}`}
+              />
+            )}
             {inv.balanceDue > 0 && <Button onClick={() => setPaying(true)}><CreditCard className="h-4 w-4" aria-hidden /> Record payment</Button>}
           </div>
         </div>

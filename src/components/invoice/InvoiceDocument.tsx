@@ -4,15 +4,16 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Receipt, FileText } from "lucide-react";
 import { PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { QrImage } from "@/components/common/JobQr";
+import { DocHeader, DocFacts, DocParty, ItemsTable, TotalsTable, TotalsRow, DocTerms, DocSignature, type DocCompany } from "@/components/document/DocParts";
 import { cn, formatDate, formatMoney } from "@/lib/utils";
-import type { Invoice } from "@/lib/types";
+import type { Invoice, QuoteLine } from "@/lib/types";
 
 /** What GET /api/invoices/[id] returns. */
 export interface InvoiceDetail {
   invoice: Invoice;
   job: { id?: string; jobNumber: string; serviceName: string; serviceDate: string };
-  customer: { name: string; address: string; gstin?: string; phone?: string; email?: string };
-  company: { name: string; address: string; phone: string; email: string; gstin: string; sacCode: string };
+  customer: { name: string; address: string; serviceAddress?: string; gstin?: string; phone?: string; email?: string };
+  company: DocCompany;
 }
 
 export function useInvoiceDetail(id: string | undefined) {
@@ -51,97 +52,82 @@ export function InvoiceTypeBadge({ type, className }: { type: Invoice["invoiceTy
   );
 }
 
-const Row = ({ label, value, strong, muted }: { label: React.ReactNode; value: React.ReactNode; strong?: boolean; muted?: boolean }) => (
-  <div className={cn("flex items-baseline justify-between gap-4 px-4 py-2.5", strong && "bg-zinc-50")}>
-    <dt className={cn("text-sm", strong ? "font-semibold text-zinc-950" : muted ? "text-zinc-400" : "text-zinc-600")}>{label}</dt>
-    <dd className={cn("text-right tabular-nums", strong ? "text-lg font-semibold text-zinc-950" : "text-sm font-medium text-zinc-900")}>{value}</dd>
-  </div>
-);
-
 /**
- * The printable invoice. A GST invoice shows GSTINs and the CGST / SGST /
- * IGST breakdown; a Non-GST invoice shows NO GST fields at all — just the
- * amount and the grand total.
+ * The printable invoice: logo and company, Job ID, bill-to and service
+ * address, the service table, totals, payment status and terms, notes and
+ * the authorized signature. A GST invoice shows GSTINs and the CGST / SGST /
+ * IGST breakdown; a Non-GST invoice shows NO GST fields at all.
  */
 export function InvoiceDocument({ detail, qrUrl, showPayments = true }: { detail: InvoiceDetail; qrUrl?: string | null; showPayments?: boolean }) {
   const { invoice: inv, customer, company, job } = detail;
   const gst = inv.invoiceType === "GST";
-  const taxable = Math.round((inv.subtotal - inv.discount) * 100) / 100;
-  const half = inv.gstRate / 2;
+  const items: QuoteLine[] = inv.items?.length
+    ? inv.items
+    : [{ description: job.serviceName, quantity: 1, rate: inv.subtotal, amount: inv.subtotal, custom: false }];
 
   return (
     <article className="invoice-doc rounded-2xl border border-zinc-200 bg-white p-5 sm:p-8 shadow-sm space-y-6 print:shadow-none print:border-0 print:p-0">
-      <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-lg font-semibold text-zinc-950">{company.name || "Intense Care"}</div>
-          {company.address && <div className="text-sm text-zinc-600 whitespace-pre-line break-words">{company.address}</div>}
-          {(company.phone || company.email) && <div className="text-sm text-zinc-600 break-words">{[company.phone, company.email].filter(Boolean).join(" · ")}</div>}
-          {gst && company.gstin && <div className="text-sm text-zinc-900 mt-1"><span className="text-zinc-500">GSTIN:</span> <span className="font-mono font-semibold">{company.gstin}</span></div>}
-        </div>
-        <div className="sm:text-right shrink-0">
-          <div className="text-xl font-semibold tracking-tight text-zinc-950">{gst ? "TAX INVOICE" : "INVOICE"}</div>
-          <div className="mt-1 flex sm:justify-end gap-2 flex-wrap">
-            <InvoiceTypeBadge type={inv.invoiceType} />
-            <PaymentStatusBadge status={inv.status} />
-          </div>
-        </div>
-      </header>
+      <DocHeader
+        company={company}
+        showGstin={gst}
+        title={gst ? "TAX INVOICE" : "INVOICE"}
+        chips={<><InvoiceTypeBadge type={inv.invoiceType} /><PaymentStatusBadge status={inv.status} /></>}
+      />
 
-      <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-        <div className="rounded-xl bg-zinc-50 px-4 py-3"><dt className="text-zinc-500">Invoice number</dt><dd className="font-mono font-semibold text-zinc-950 break-all">{inv.invoiceNumber}</dd></div>
-        <div className="rounded-xl bg-zinc-50 px-4 py-3"><dt className="text-zinc-500">Invoice date</dt><dd className="font-semibold text-zinc-950">{formatDate(inv.issuedAt)}</dd></div>
-        <div className="rounded-xl bg-zinc-50 px-4 py-3"><dt className="text-zinc-500">Job ID</dt><dd className="font-mono font-semibold text-zinc-950 break-all">{job.jobNumber}</dd></div>
-      </dl>
+      <DocFacts
+        facts={[
+          { label: "Invoice number", value: inv.invoiceNumber, mono: true },
+          { label: "Invoice date", value: formatDate(inv.issuedAt) },
+          { label: "Job ID", value: job.jobNumber, mono: true },
+        ]}
+      />
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Bill to</h3>
-          <div className="mt-1 text-base font-semibold text-zinc-950 break-words">{customer.name}</div>
-          {customer.address && <div className="text-sm text-zinc-600 break-words">{customer.address}</div>}
-          {customer.phone && <div className="text-sm text-zinc-600">{customer.phone}</div>}
-          {gst && <div className="text-sm text-zinc-900 mt-1"><span className="text-zinc-500">GSTIN:</span> <span className="font-mono font-semibold">{customer.gstin || "Unregistered"}</span></div>}
-        </div>
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Service</h3>
-          <div className="mt-1 text-base font-semibold text-zinc-950 break-words">{job.serviceName}</div>
-          <div className="text-sm text-zinc-600">Service date: {formatDate(job.serviceDate)}</div>
-          {gst && company.sacCode && <div className="text-sm text-zinc-600">SAC: {company.sacCode}</div>}
-          {gst && <div className="text-sm text-zinc-600">Supply: {inv.interState ? "Inter-state (IGST)" : "Intra-state (CGST + SGST)"}</div>}
-        </div>
+        <DocParty heading="Bill to">
+          <div className="text-base font-semibold text-zinc-950">{customer.name}</div>
+          {customer.address && <div>{customer.address}</div>}
+          {customer.phone && <div>{customer.phone}</div>}
+          {gst && <div className="text-zinc-900"><span className="text-zinc-500">GSTIN:</span> <span className="font-mono font-semibold">{customer.gstin || "Unregistered"}</span></div>}
+        </DocParty>
+        <DocParty heading="Service address">
+          {customer.serviceAddress && <div className="text-zinc-900">{customer.serviceAddress}</div>}
+          <div>Service date: {formatDate(job.serviceDate)}</div>
+          {gst && company.sacCode && <div>SAC: {company.sacCode}</div>}
+          {gst && <div>Supply: {inv.interState ? "Inter-state (IGST)" : "Intra-state (CGST + SGST)"}</div>}
+        </DocParty>
       </section>
 
-      <dl className="rounded-xl border border-zinc-200 divide-y divide-zinc-100 overflow-hidden">
-        {gst ? (
-          <>
-            <Row label="Service amount" value={formatMoney(inv.subtotal)} />
-            {inv.discount > 0 && <Row label="Discount" value={`− ${formatMoney(inv.discount)}`} />}
-            <Row label="Taxable amount" value={formatMoney(taxable)} />
-            <Row label="GST %" value={`${inv.gstRate}%`} />
-            {inv.interState ? (
-              <Row label={`IGST @ ${inv.gstRate}%`} value={formatMoney(inv.igst)} />
-            ) : (
-              <>
-                <Row label={`CGST @ ${half}%`} value={formatMoney(inv.cgst)} />
-                <Row label={`SGST @ ${half}%`} value={formatMoney(inv.sgst)} />
-              </>
-            )}
-            <Row label="Total GST" value={formatMoney(inv.tax)} />
-            <Row label="Grand total" value={formatMoney(inv.total)} strong />
-          </>
-        ) : (
-          <>
-            <Row label="Amount" value={formatMoney(inv.subtotal)} />
-            {inv.discount > 0 && <Row label="Discount" value={`− ${formatMoney(inv.discount)}`} />}
-            <Row label="Grand total" value={formatMoney(inv.total)} strong />
-          </>
-        )}
-        {showPayments && (
-          <>
-            <Row label="Paid" value={formatMoney(inv.amountPaid)} />
-            <Row label="Balance due" value={formatMoney(inv.balanceDue)} />
-          </>
-        )}
-      </dl>
+      <ItemsTable items={items} />
+
+      <TotalsTable
+        gst={gst}
+        subtotal={inv.subtotal}
+        discount={inv.discount}
+        gstRate={inv.gstRate}
+        interState={inv.interState}
+        cgst={inv.cgst}
+        sgst={inv.sgst}
+        igst={inv.igst}
+        tax={inv.tax}
+        total={inv.total}
+        extra={
+          showPayments ? (
+            <>
+              <TotalsRow label="Paid" value={formatMoney(inv.amountPaid)} />
+              <TotalsRow label="Balance due" value={formatMoney(inv.balanceDue)} />
+            </>
+          ) : null
+        }
+      />
+
+      <DocTerms
+        blocks={[
+          { heading: "Payment terms", text: inv.paymentTerms },
+          { heading: "Notes", text: inv.notes },
+        ]}
+      />
+
+      <DocSignature company={company} />
 
       {qrUrl && (
         <section className="flex items-center gap-4 rounded-xl border border-zinc-200 p-4 break-inside-avoid">
