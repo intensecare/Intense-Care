@@ -19,15 +19,11 @@ const CreateSchema = z.object({
   category: z.enum(["residential", "commercial", "specialized"]).default("residential"),
   description: z.string().max(2000).default(""),
   basePrice: z.number().min(0).max(10000000),
-  // A custom service can run for days, not hours (post-construction cleans).
-  estimatedDurationHours: z.number().min(0.5).max(2000),
-  /** §3 GST = taxable at the configured rate; EXEMPT = never carries GST. */
-  taxTreatment: z.enum(["GST", "EXEMPT"]).default("GST"),
-  /** Desk-only note. Never reaches a customer surface. */
-  internalNotes: z.string().max(2000).optional(),
-  /** Marks a service the desk authored as a one-off Custom Service. */
-  isCustom: z.boolean().default(false),
+  estimatedDurationHours: z.number().min(0.5).max(72),
   checklistTemplate: z.array(ChecklistItemSchema).max(200).default([]),
+  isCustom: z.boolean().optional(),
+  gstTreatment: z.enum(["DEFAULT", "GST", "NON_GST"]).optional(),
+  notes: z.string().max(2000).nullable().optional(),
 });
 
 const UpdateSchema = z.object({
@@ -36,10 +32,11 @@ const UpdateSchema = z.object({
   category: z.enum(["residential", "commercial", "specialized"]).optional(),
   description: z.string().max(2000).optional(),
   basePrice: z.number().min(0).max(10000000).optional(),
-  estimatedDurationHours: z.number().min(0.5).max(2000).optional(),
-  taxTreatment: z.enum(["GST", "EXEMPT"]).optional(),
-  internalNotes: z.string().max(2000).optional(),
+  estimatedDurationHours: z.number().min(0.5).max(72).optional(),
   active: z.boolean().optional(),
+  isCustom: z.boolean().optional(),
+  gstTreatment: z.enum(["DEFAULT", "GST", "NON_GST"]).optional(),
+  notes: z.string().max(2000).nullable().optional(),
 });
 
 const AddItemSchema = z.object({
@@ -111,9 +108,9 @@ export async function POST(request: Request) {
         description: d.description,
         basePrice: d.basePrice,
         estimatedDurationHours: d.estimatedDurationHours,
-        taxTreatment: d.taxTreatment,
-        internalNotes: d.internalNotes?.trim() || null,
-        isCustom: d.isCustom,
+        isCustom: d.isCustom ?? false,
+        gstTreatment: d.gstTreatment ?? "DEFAULT",
+        notes: d.notes ?? null,
         checklistTemplate: {
           create: d.checklistTemplate.map((item, idx) => ({
             area: item.area,

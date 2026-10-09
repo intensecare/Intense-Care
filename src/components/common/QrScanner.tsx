@@ -1,268 +1,120 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, Image as ImageIcon, Loader2, QrCode, X } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { Camera, Loader2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input, Field } from "@/components/ui/input";
-import { Notice } from "@/components/ui/states";
-import { cn } from "@/lib/utils";
 
-/**
- * §2 QR VERIFICATION — scanning the job QR when GPS cannot be trusted.
- *
- * Dependency-free, with three routes in order of convenience, because a field
- * phone in a basement is exactly where a fragile scanner is least welcome:
- *
- *   1. Live camera scan via the browser BarcodeDetector (Android Chrome).
- *   2. A photo of the QR, decoded from the still image by the same detector.
- *   3. Pasting the link itself, which is what the QR contains anyway.
- *
- * What comes out is the raw token from the link. It is handed straight to the
- * server, which decides whether it belongs to this job — the scan alone
- * proves nothing until the backend says so.
- */
-
-type Detector = {
-  detect: (source: CanvasImageSource) => Promise<{ rawValue: string }[]>;
-};
-
-type DetectorCtor = new (options?: { formats?: string[] }) => Detector;
-
-function detectorCtor(): DetectorCtor | null {
-  if (typeof window === "undefined") return null;
-  const ctor = (window as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector;
-  return typeof ctor === "function" ? ctor : null;
+/** The secure token inside a scanned customer QR (…/customer/service/<token>). */
+export function tokenFromQr(text: string): string | null {
+  const t = text.trim();
+  const m = /\/customer\/(?:service|job)\/([A-Za-z0-9_-]{16,200})/.exec(t);
+  if (m) return m[1];
+  return /^[A-Za-z0-9_-]{32,200}$/.test(t) ? t : null;
 }
 
-/**
- * Pulls the token out of whatever the QR contained. The QR encodes the secure
- * link (`.../customer/service/<token>`), but a pasted bare token is accepted
- * too so a phone that cannot scan is never a dead end.
- */
-export function extractToken(scanned: string): string | null {
-  const text = scanned.trim();
-  if (!text) return null;
-  const fromPath = /\/customer\/(?:service|job)\/([A-Za-z0-9_-]{16,})/.exec(text);
-  if (fromPath) return fromPath[1];
-  // A bare token: URL-safe base64, no scheme, no spaces.
-  if (/^[A-Za-z0-9_-]{16,200}$/.test(text)) return text;
-  return null;
-}
+type Detector = { detect: (src: CanvasImageSource) => Promise<{ rawValue: string }[]> };
 
-export function QrScanner({
-  onToken,
-  onCancel,
-  busy,
-  title = "Scan the job QR",
-  description = "Ask the customer to show the QR for this service, or scan the QR on the property.",
-}: {
-  onToken: (token: string) => void;
-  onCancel?: () => void;
-  busy?: boolean;
-  title?: string;
-  description?: string;
-}) {
-  const [mode, setMode] = useState<"idle" | "camera" | "manual">("idle");
+/**
+ * Camera QR scanner in a sheet. Uses the phone's built-in barcode detector
+ * when available, otherwise decodes frames with jsQR. Calls `onToken` with
+ * the secure token only — the server decides whether it matches the job.
+ */
+export function QrScanner({ open, onClose, onToken, title = "Scan QR to Verify Location", description = "Point the camera at the customer's QR code." }: { open: boolean; onClose: () => void; onToken: (token: string) => void; title?: string; description?: string }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [decoding, setDecoding] = useState(false);
-  const [pasted, setPasted] = useState("");
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const loopRef = useRef<number | null>(null);
-  const supported = detectorCtor() !== null;
+  const [starting, setStarting] = useState(true);
 
-  const stop = useCallback(() => {
-    if (loopRef.current !== null) {
-      cancelAnimationFrame(loopRef.current);
-      loopRef.current = null;
-    }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-  }, []);
-
-  useEffect(() => stop, [stop]);
-
-  const accept = useCallback(
-    (raw: string) => {
-      const token = extractToken(raw);
-      if (!token) {
-        setError("That QR is not a service link for this system. Scan the QR on the customer link.");
-        return false;
-      }
-      stop();
-      setMode("idle");
-      setError(null);
-      onToken(token);
-      return true;
-    },
-    [onToken, stop]
-  );
-
-  const startCamera = async () => {
+  useEffect(() => {
+    if (!open) return;
+    let stream: MediaStream | null = null;
+    let raf = 0;
+    let stopped = false;
+    let last = 0;
     setError(null);
-    const Ctor = detectorCtor();
-    if (!Ctor) {
-      setMode("manual");
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-      });
-      streamRef.current = stream;
-      setMode("camera");
-      // The element mounts with the mode change, so wait a frame for the ref.
-      requestAnimationFrame(async () => {
-        const video = videoRef.current;
-        if (!video) return;
-        video.srcObject = stream;
-        await video.play().catch(() => {});
-        const detector = new Ctor({ formats: ["qr_code"] });
-        const tick = async () => {
-          if (!videoRef.current || !streamRef.current) return;
-          try {
-            const hits = await detector.detect(videoRef.current);
-            if (hits.length > 0 && hits[0].rawValue) {
-              if (accept(hits[0].rawValue)) return;
-            }
-          } catch {
-            /* a single failed frame is normal — keep looking */
-          }
-          loopRef.current = requestAnimationFrame(() => void tick());
-        };
-        void tick();
-      });
-    } catch {
-      setError("We could not open the camera. Take a photo of the QR instead, or paste the link.");
-      setMode("manual");
-    }
-  };
+    setStarting(true);
 
-  const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    const Ctor = detectorCtor();
-    if (!Ctor) {
-      setError("This phone cannot read QR images. Paste the service link instead.");
-      setMode("manual");
-      return;
-    }
-    setDecoding(true);
-    setError(null);
-    try {
-      const bitmap = await createImageBitmap(file);
-      const hits = await new Ctor({ formats: ["qr_code"] }).detect(bitmap);
-      bitmap.close?.();
-      if (hits.length === 0 || !hits[0].rawValue) {
-        setError("No QR found in that photo. Hold the phone steady and fill the frame with the QR.");
-      } else {
-        accept(hits[0].rawValue);
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      } catch {
+        setStarting(false);
+        setError("Camera not available. Allow camera access in your browser settings, then try again.");
+        return;
       }
-    } catch {
-      setError("We could not read that photo. Paste the service link instead.");
-    } finally {
-      setDecoding(false);
-    }
-  };
+      if (stopped || !video.current) return;
+      video.current.srcObject = stream;
+      await video.current.play().catch(() => {});
+      setStarting(false);
+
+      const BD = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => Detector }).BarcodeDetector;
+      const detector: Detector | null = BD ? new BD({ formats: ["qr_code"] }) : null;
+      const jsQR = detector ? null : (await import("jsqr")).default;
+
+      const tick = async (now: number) => {
+        if (stopped) return;
+        raf = requestAnimationFrame(tick);
+        if (now - last < 200 || !video.current || video.current.readyState < 2) return;
+        last = now;
+        let text: string | null = null;
+        if (detector) {
+          const found = await detector.detect(video.current).catch(() => []);
+          text = found[0]?.rawValue ?? null;
+        } else if (jsQR && canvas.current) {
+          const v = video.current;
+          const c = canvas.current;
+          c.width = v.videoWidth;
+          c.height = v.videoHeight;
+          const ctx = c.getContext("2d", { willReadFrequently: true });
+          if (!ctx) return;
+          ctx.drawImage(v, 0, 0, c.width, c.height);
+          const img = ctx.getImageData(0, 0, c.width, c.height);
+          text = jsQR(img.data, img.width, img.height)?.data ?? null;
+        }
+        if (text) {
+          const token = tokenFromQr(text);
+          if (token) {
+            stopped = true;
+            onToken(token);
+          } else setError("That QR isn't an Intense Care service QR. Scan the customer's QR for this job.");
+        }
+      };
+      raf = requestAnimationFrame(tick);
+    })();
+
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      stream?.getTracks().forEach((t) => t.stop());
+    };
+    // onToken is stable for the life of one open sheet
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-4 space-y-3">
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={onFilePicked}
-        aria-hidden
-        tabIndex={-1}
-      />
-
-      <div className="flex items-start gap-3">
-        <QrCode className="h-5 w-5 text-zinc-700 mt-0.5 shrink-0" aria-hidden />
-        <div className="min-w-0">
-          <h3 className="text-base font-semibold text-zinc-950">{title}</h3>
-          <p className="text-sm text-zinc-600">{description}</p>
-        </div>
-      </div>
-
-      {error && <Notice tone="error">{error}</Notice>}
-
-      {mode === "camera" && (
-        <div className="relative rounded-xl overflow-hidden bg-black">
-          <video ref={videoRef} className="w-full h-64 object-cover" muted playsInline aria-label="Camera preview" />
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="h-40 w-40 rounded-2xl border-4 border-white/80" />
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              stop();
-              setMode("idle");
-            }}
-            className="absolute right-2 top-2 h-9 w-9 rounded-lg bg-black/60 text-white flex items-center justify-center"
-            aria-label="Stop scanning"
-          >
-            <X className="h-4 w-4" aria-hidden />
-          </button>
-          <p className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-xs px-3 py-2 text-center">
-            Point the camera at the QR
-          </p>
-        </div>
-      )}
-
-      {mode !== "camera" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {supported && (
-            <Button type="button" onClick={() => void startCamera()} disabled={busy}>
-              <Camera className="h-4 w-4" aria-hidden /> SCAN WITH CAMERA
-            </Button>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <div className="relative aspect-square w-full max-w-sm mx-auto rounded-2xl overflow-hidden bg-zinc-900">
+          <video ref={video} className="h-full w-full object-cover" playsInline muted aria-label="Camera view" />
+          <div aria-hidden className="absolute inset-[18%] rounded-2xl border-4 border-white/80" />
+          {starting && !error && (
+            <div className="absolute inset-0 flex items-center justify-center text-white text-sm gap-2"><Loader2 className="h-5 w-5 animate-spin" /> Starting camera…</div>
           )}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => fileRef.current?.click()}
-            disabled={busy || decoding}
-            className={cn(!supported && "sm:col-span-2")}
-          >
-            {decoding ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <ImageIcon className="h-4 w-4" aria-hidden />}
-            PHOTO OF THE QR
-          </Button>
+          {error && !starting && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-white text-sm gap-2 p-6 text-center"><Camera className="h-8 w-8" aria-hidden />{error}</div>
+          )}
         </div>
-      )}
-
-      {mode === "manual" || !supported ? (
-        <div className="space-y-2 pt-1">
-          <Field label="Or paste the service link" hint="The link behind the QR works just as well.">
-            <Input
-              value={pasted}
-              onChange={(e) => setPasted(e.target.value)}
-              placeholder="https://…/customer/service/…"
-              autoComplete="off"
-              inputMode="url"
-            />
-          </Field>
-          <Button type="button" variant="secondary" onClick={() => accept(pasted)} disabled={busy || !pasted.trim()}>
-            USE THIS LINK
-          </Button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setMode("manual")}
-          className="text-sm font-medium text-rose-600 underline-offset-4 hover:underline"
-        >
-          Paste the link instead
-        </button>
-      )}
-
-      {onCancel && (
-        <Button type="button" variant="ghost" className="w-full" onClick={onCancel} disabled={busy}>
-          Cancel
-        </Button>
-      )}
-    </section>
+        {error && !starting && <p role="alert" className="text-sm text-red-700 text-center">{error}</p>}
+        <canvas ref={canvas} className="hidden" />
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -22,6 +22,7 @@ import {
   ClipboardList,
   User,
   Check,
+  Navigation,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/states";
@@ -46,23 +47,22 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
  */
 
 interface CustomerPayload {
+  /** What this customer may see — anything off is not sent at all. */
+  visibility: Record<string, boolean>;
   job: {
-    id: string;
+    id: string | null;
     status: string;
-    serviceName: string;
-    /** Every service on this job, by name. */
-    services?: { name: string; description?: string; quantity: number }[];
-    /** Absent when the service date is hidden for this job (§6). */
-    scheduledDate?: string;
-    scheduledTimeSlot?: string;
+    showStatus: boolean;
+    serviceName: string | null;
+    scheduledDate: string | null;
+    scheduledTimeSlot: string | null;
     arrivedAt: string | null;
     completedAt: string | null;
     customerConfirmedAt: string | null;
     arrivalVerified: boolean;
   };
-  /** §1 Absent when the service location is hidden for this job. */
-  location: { address: string; lat?: number; lng?: number; navigationUrl: string | null } | null;
-  property?: { title: string; address: string };
+  property: { title: string; address: string } | null;
+  location: { lat: number; lng: number } | null;
   customer: { name: string; phoneMasked: string };
   team: string[];
   checklist: { id: string; area: string; task: string; completed: boolean }[];
@@ -70,35 +70,14 @@ interface CustomerPayload {
   qualityCheck: { passed: boolean } | null;
   /** Customer-facing QC result: checking → (improving) → passed. */
   qualityResult: "checking" | "improving" | "passed" | null;
-  /** The note written FOR the customer, when that switch is on. */
-  serviceNotes: string | null;
   invoice: CustomerInvoice | null;
-  quotation: CustomerQuotation | null;
-  payment: { status: string; amountPaid: number; balanceDue: number } | null;
+  serviceNotes: string | null;
+  quotation: { quoteNumber: string; total: number; validUntil: string; status: string; url: string | null } | null;
+  paymentStatus: string | null;
   approval: { approvedAt: string; approvedBy: string; method: string } | null;
-  feedback: { rating: number; feedbackAt: string | null; googleReviewClicked: boolean } | null;
+  feedback: { rating: number; comment: string | null; feedbackAt: string | null; googleReviewClicked: boolean } | null;
   complaintCount: number;
-  /**
-   * §6 What this page may show. The server has ALREADY filtered the data —
-   * these flags only decide which sections are drawn, so a flag flipped in
-   * the browser reveals nothing that was not sent.
-   */
-  visibility: Record<string, boolean>;
   company: { name: string; googleReviewUrl: string };
-}
-
-interface CustomerQuotation {
-  quoteNumber: string;
-  invoiceType: "GST" | "NON_GST";
-  createdAt: string;
-  validUntil: string;
-  status: string;
-  subtotal: number;
-  discount: number;
-  tax: number;
-  total: number;
-  acceptedAt: string | null;
-  items: { name: string; description?: string; quantity: number; unitPrice: number; discount: number; amount: number }[];
 }
 
 interface CustomerInvoice {
@@ -117,20 +96,24 @@ interface CustomerInvoice {
   customerGstin?: string;
   companyGstin?: string;
   total: number;
-  /** Present only when the payment position is visible for this job. */
+  items?: { description: string; quantity: number; rate: number; amount: number }[];
   amountPaid?: number;
   balanceDue?: number;
   status?: string;
-  lines?: { name: string; description?: string; quantity: number; unitPrice: number; discount: number; amount: number }[];
+  paymentTerms?: string;
   companyName: string;
   companyAddress: string;
-  companyPhone?: string;
-  companyEmail?: string;
-  companyLogoUrl?: string;
-  paymentTerms?: string;
-  bankDetails?: string;
-  sacCode?: string;
 }
+
+const PAYMENT_TEXT: Record<string, { text: string; tone: string }> = {
+  PAID: { text: "Paid ✓", tone: "text-emerald-700" },
+  PARTIAL: { text: "Partly paid", tone: "text-amber-700" },
+  PENDING: { text: "Payment pending", tone: "text-amber-700" },
+  UNPAID: { text: "Payment pending", tone: "text-amber-700" },
+  OVERDUE: { text: "Payment overdue", tone: "text-red-700" },
+};
+const navigateHref = (loc: { lat: number; lng: number } | null, address?: string) =>
+  `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(loc ? `${loc.lat},${loc.lng}` : address ?? "")}`;
 
 const QC_TEXT: Record<NonNullable<CustomerPayload["qualityResult"]>, { text: string; tone: string }> = {
   checking: { text: "Being checked", tone: "text-amber-700" },
@@ -195,6 +178,8 @@ export default function CustomerServicePage() {
   const [complaintText, setComplaintText] = useState("");
   const [complaintSent, setComplaintSent] = useState(false);
   const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [commentSent, setCommentSent] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
 
@@ -206,6 +191,7 @@ export default function CustomerServicePage() {
         setData(json.data);
         setError(null);
         if (json.data.feedback?.rating) setRating(json.data.feedback.rating);
+        if (json.data.feedback?.comment) setCommentSent(true);
       } else {
         setKind(json?.kind || "not_found");
         setError(json?.error || "This link is invalid or has expired.");
@@ -282,21 +268,18 @@ export default function CustomerServicePage() {
     );
   }
 
-  const { job, team, checklist, company } = data;
+  const { job, property, team, checklist, company } = data;
   const confirmed = !!job.customerConfirmedAt;
   const stage = stageOf(job.status, confirmed, !!data.approval);
   const doneCount = checklist.filter((c) => c.completed).length;
   const pct = checklist.length ? Math.round((doneCount / checklist.length) * 100) : 0;
   const areas = Array.from(new Set([...checklist.map((c) => c.area), ...data.photos.map((p) => p.area)]));
-  // §6 Hidden fields arrive absent, so the UI simply has nothing to draw.
-  const when = job.scheduledDate ? formatWhen(job.scheduledDate, job.scheduledTimeSlot ?? "") : null;
-  const where = data.location?.address || "";
-  const placeLabel = where || "your property";
+  const when = job.scheduledDate ? formatWhen(job.scheduledDate, job.scheduledTimeSlot ?? "") : "";
+  const vis = data.visibility ?? {};
+  const serviceTitle = job.serviceName ?? "Your service";
+  const where = property ? `${property.title}${property.address ? ` — ${property.address}` : ""}` : null;
+  const payment = data.paymentStatus ? PAYMENT_TEXT[data.paymentStatus] ?? { text: data.paymentStatus, tone: "text-zinc-800" } : null;
   const status = STATUS_LINE[stage];
-  const serviceTitle =
-    job.services && job.services.length > 1
-      ? job.services.map((s) => s.name).join(" + ")
-      : job.serviceName;
 
   /* ------------------------------------------- the ONE primary action */
   const primary = (() => {
@@ -352,32 +335,41 @@ export default function CustomerServicePage() {
           <section className="bg-white rounded-3xl border border-zinc-200 p-6 shadow-sm space-y-5 animate-in fade-in">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Your service</div>
-              <h1 className="text-2xl font-semibold text-zinc-950 mt-1">{job.serviceName}</h1>
-              <p className="text-base text-zinc-600 mt-1 flex items-center gap-1.5"><Calendar className="h-4 w-4 shrink-0" aria-hidden /> {when}</p>
+              <h1 className="text-2xl font-semibold text-zinc-950 mt-1">{serviceTitle}</h1>
+              {when && <p className="text-base text-zinc-600 mt-1 flex items-center gap-1.5"><Calendar className="h-4 w-4 shrink-0" aria-hidden /> {when}</p>}
             </div>
-            <div className="flex items-center justify-between gap-3 rounded-2xl bg-zinc-50 px-4 py-3">
-              <span className="text-sm text-zinc-500">Status</span>
-              <span className={cn("text-base font-semibold text-right", status.tone === "success" ? "text-emerald-700" : status.tone === "warning" ? "text-amber-700" : status.tone === "info" ? "text-info-700" : status.tone === "error" ? "text-red-700" : "text-zinc-800")}>{status.text}</span>
-            </div>
+            {job.showStatus && (
+              <div className="flex items-center justify-between gap-3 rounded-2xl bg-zinc-50 px-4 py-3">
+                <span className="text-sm text-zinc-500">Status</span>
+                <span className={cn("text-base font-semibold text-right", status.tone === "success" ? "text-emerald-700" : status.tone === "warning" ? "text-amber-700" : status.tone === "info" ? "text-info-700" : status.tone === "error" ? "text-red-700" : "text-zinc-800")}>{status.text}</span>
+              </div>
+            )}
             <dl className="divide-y divide-zinc-100 text-sm">
-              <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Job ID</dt><dd className="font-mono font-semibold text-zinc-900 text-right break-all">{job.id}</dd></div>
+              {job.id && <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Job ID</dt><dd className="font-mono font-semibold text-zinc-900 text-right break-all">{job.id}</dd></div>}
               <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Name</dt><dd className="font-medium text-zinc-900 text-right break-words">{data.customer.name}</dd></div>
               {where && (
                 <div className="flex items-start justify-between gap-3 py-2">
                   <dt className="text-zinc-500 shrink-0">Location</dt>
-                  <dd className="font-medium text-zinc-900 text-right break-words">{where}</dd>
-                </div>
-              )}
-              {data.visibility.teamName && (
-                <div className="flex items-start justify-between gap-3 py-2">
-                  <dt className="text-zinc-500 shrink-0">Team</dt>
-                  <dd className="font-medium text-zinc-900 text-right break-words">
-                    {team.length ? team.join(", ") : "Being assigned"}
+                  <dd className="text-right min-w-0">
+                    <span className="block font-medium text-zinc-900 break-words">{where}</span>
+                    <a href={navigateHref(data.location, property?.address)} target="_blank" rel="noreferrer" className="min-h-10 inline-flex items-center gap-1 font-semibold text-rose-600"><Navigation className="h-4 w-4" aria-hidden /> Navigate</a>
                   </dd>
                 </div>
               )}
+              {vis.team !== false && <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Team</dt><dd className="font-medium text-zinc-900 text-right break-words">{team.length ? team.join(", ") : "Being assigned"}</dd></div>}
               {data.qualityResult && (
                 <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Quality check</dt><dd className={cn("font-semibold text-right", QC_TEXT[data.qualityResult].tone)}>{QC_TEXT[data.qualityResult].text}</dd></div>
+              )}
+              {data.quotation?.url && (
+                <div className="flex items-center justify-between gap-3 py-2">
+                  <dt className="text-zinc-500 shrink-0">Quotation</dt>
+                  <dd className="text-right">
+                    <a href={data.quotation.url} className="min-h-10 font-semibold text-rose-600 inline-flex items-center gap-1">{formatInr(data.quotation.total)} · View</a>
+                  </dd>
+                </div>
+              )}
+              {payment && (
+                <div className="flex items-start justify-between gap-3 py-2"><dt className="text-zinc-500 shrink-0">Payment</dt><dd className={cn("font-semibold text-right", payment.tone)}>{payment.text}</dd></div>
               )}
               {data.invoice && (
                 <div className="flex items-center justify-between gap-3 py-2">
@@ -389,30 +381,9 @@ export default function CustomerServicePage() {
                   </dd>
                 </div>
               )}
-              {data.payment && (
-                <div className="flex items-start justify-between gap-3 py-2">
-                  <dt className="text-zinc-500 shrink-0">Payment</dt>
-                  <dd
-                    className={cn(
-                      "font-semibold text-right",
-                      data.payment.balanceDue > 0 ? "text-amber-700" : "text-emerald-700"
-                    )}
-                  >
-                    {data.payment.balanceDue > 0 ? `${formatInr(data.payment.balanceDue)} due` : "Paid ✓"}
-                  </dd>
-                </div>
-              )}
-              {data.quotation && (
-                <div className="flex items-center justify-between gap-3 py-2">
-                  <dt className="text-zinc-500 shrink-0">Quotation</dt>
-                  <dd className="text-right">
-                    <button onClick={() => go("reports")} className="min-h-10 font-semibold text-rose-600 inline-flex items-center gap-1">
-                      {formatInr(data.quotation.total)} · View
-                    </button>
-                  </dd>
-                </div>
-              )}
             </dl>
+
+            {data.serviceNotes && <p className="rounded-2xl bg-zinc-50 px-4 py-3 text-sm text-zinc-700 break-words"><span className="font-semibold">Note from us:</span> {data.serviceNotes}</p>}
 
             {stage === "scheduled" && <p className="text-base text-zinc-600">We&apos;ll update this page the moment your team arrives.</p>}
 
@@ -420,12 +391,7 @@ export default function CustomerServicePage() {
               <div className="text-center space-y-2 py-2">
                 <Badge tone="green" icon={<CheckCircle2 className="h-8 w-8" aria-hidden />} />
                 <p className="text-xl font-semibold text-zinc-950">Your team has arrived ✓</p>
-                <p className="text-base text-zinc-600">
-                  {team.length
-                    ? `${team.join(", ")} ${team.length === 1 ? "is" : "are"} at ${placeLabel}.`
-                    : `Your team is at ${placeLabel}.`}{" "}
-                  Tap Confirm &amp; Start to let them begin.
-                </p>
+                <p className="text-base text-zinc-600">{team.length ? `${team.join(", ")} ${team.length === 1 ? "is" : "are"} at ${property?.title ?? "your property"}.` : `Your team is at ${property?.title ?? "your property"}.`} Tap Confirm &amp; Start to let them begin.</p>
               </div>
             )}
 
@@ -469,8 +435,28 @@ export default function CustomerServicePage() {
               <div className="text-center space-y-3 py-1">
                 <Badge tone="green" icon={<CheckCircle2 className="h-8 w-8" aria-hidden />} />
                 <p className="text-xl font-semibold text-zinc-950">Thank you ✓</p>
-                <p className="text-base text-zinc-600">{rating ? `You rated us ${rating}/5.` : "How did we do?"}</p>
-                <Stars rating={rating} onRate={(n) => { setRating(n); void act({ action: "feedback", rating: n, googleReviewClicked: !!data.feedback?.googleReviewClicked }, "Thanks for your rating!"); }} />
+                {vis.feedback !== false && (
+                  <>
+                    <p className="text-base text-zinc-600">{rating ? `You rated us ${rating}/5.` : "How did we do?"}</p>
+                    <Stars rating={rating} onRate={(n) => { setRating(n); void act({ action: "feedback", rating: n, googleReviewClicked: !!data.feedback?.googleReviewClicked }, "Thanks for your rating!"); }} />
+                    {rating > 0 && !commentSent && (
+                      <div className="space-y-2 text-left">
+                        <label htmlFor="fb-comment" className="block text-sm font-medium text-zinc-800">Anything you&apos;d like to tell us? <span className="text-zinc-500">(private)</span></label>
+                        <textarea id="fb-comment" value={comment} onChange={(e) => setComment(e.target.value)} rows={3} maxLength={2000} className="w-full p-3 rounded-xl border border-zinc-300 text-base" placeholder="What went well, what we can do better…" />
+                        <button
+                          disabled={comment.trim().length < 2 || busy}
+                          onClick={async () => {
+                            if (await act({ action: "feedback", rating, comment: comment.trim(), googleReviewClicked: !!data.feedback?.googleReviewClicked }, "Thanks for your feedback!")) setCommentSent(true);
+                          }}
+                          className="h-12 w-full rounded-2xl border border-zinc-300 bg-white text-base font-semibold text-zinc-900 disabled:opacity-50"
+                        >
+                          Send feedback
+                        </button>
+                      </div>
+                    )}
+                    {commentSent && data.feedback?.comment && <p className="text-sm text-zinc-500 break-words">Your feedback: “{data.feedback.comment}”</p>}
+                  </>
+                )}
                 {company.googleReviewUrl && (
                   <a href={company.googleReviewUrl} target="_blank" rel="noreferrer" onClick={() => void post({ action: "feedback", rating: rating || 5, googleReviewClicked: true })} className="h-12 w-full rounded-2xl bg-zinc-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2">
                     <ExternalLink className="h-5 w-5" aria-hidden /> LEAVE GOOGLE REVIEW
@@ -494,46 +480,18 @@ export default function CustomerServicePage() {
       {tab === "service" && (
         <>
           <Panel title="My service">
-            <Detail icon={<Sparkles className="h-5 w-5" aria-hidden />} label="Service" value={serviceTitle} />
+            {job.serviceName && <Detail icon={<Sparkles className="h-5 w-5" aria-hidden />} label="Service" value={job.serviceName} />}
             {when && <Detail icon={<Calendar className="h-5 w-5" aria-hidden />} label="When" value={when} />}
             {where && <Detail icon={<MapPin className="h-5 w-5" aria-hidden />} label="Where" value={where} />}
-            {team.length > 0 && (
-              <Detail icon={<Users className="h-5 w-5" aria-hidden />} label="Your team" value={team.join(", ")} />
-            )}
+            {vis.team !== false && <Detail icon={<Users className="h-5 w-5" aria-hidden />} label="Your team" value={team.length ? team.join(", ") : "Being assigned"} />}
+            {data.serviceNotes && <Detail icon={<FileText className="h-5 w-5" aria-hidden />} label="Notes" value={data.serviceNotes} />}
           </Panel>
-
-          {/* Every service on the job, when there is more than one. */}
-          {job.services && job.services.length > 1 && (
-            <Panel title={`Services · ${job.services.length}`}>
-              {job.services.map((s) => (
-                <div key={s.name} className="py-2.5">
-                  <div className="text-base font-medium text-zinc-900">
-                    {s.name}
-                    {s.quantity > 1 ? ` ×${s.quantity}` : ""}
-                  </div>
-                  {s.description && <div className="text-sm text-zinc-500 mt-0.5">{s.description}</div>}
-                </div>
-              ))}
-            </Panel>
-          )}
-
-          {/* §1 The service location, with one-tap navigation. */}
-          {data.location?.navigationUrl && (
-            <a
-              href={data.location.navigationUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="h-12 w-full rounded-2xl border border-zinc-300 bg-white text-base font-semibold text-zinc-900 inline-flex items-center justify-center gap-2"
-            >
-              <MapPin className="h-5 w-5 text-rose-600" aria-hidden /> OPEN IN MAPS
+          {where && (
+            <a href={navigateHref(data.location, property?.address)} target="_blank" rel="noreferrer" className="h-12 w-full rounded-2xl border border-zinc-300 bg-white text-base font-semibold text-zinc-900 inline-flex items-center justify-center gap-2">
+              <Navigation className="h-5 w-5 text-rose-500" aria-hidden /> Navigate to location
             </a>
           )}
-
-          {/* A note written for the customer, when that switch is on. */}
-          {data.serviceNotes && <Panel title="Notes for you">
-            <p className="py-2 text-base text-zinc-700 whitespace-pre-line break-words">{data.serviceNotes}</p>
-          </Panel>}
-          <Panel title={`Progress · ${doneCount} of ${checklist.length}`}>
+          {job.showStatus && <Panel title={`Progress · ${doneCount} of ${checklist.length}`}>
             {checklist.length === 0 ? (
               <p className="py-3 text-base text-zinc-500">Progress shows here once the service starts.</p>
             ) : (
@@ -551,7 +509,7 @@ export default function CustomerServicePage() {
                 </div>
               ))
             )}
-          </Panel>
+          </Panel>}
         </>
       )}
 
@@ -561,24 +519,32 @@ export default function CustomerServicePage() {
           {stage === "completed" && (
             <div className="print:hidden">
             <Panel title="Service report">
-              <Detail icon={<Sparkles className="h-5 w-5" aria-hidden />} label="Service" value={job.serviceName} />
+              {job.serviceName && <Detail icon={<Sparkles className="h-5 w-5" aria-hidden />} label="Service" value={job.serviceName} />}
               {when && <Detail icon={<Calendar className="h-5 w-5" aria-hidden />} label="Date" value={when} />}
-              <Detail icon={<Users className="h-5 w-5" aria-hidden />} label="Team" value={team.join(", ") || "—"} />
-              <Detail icon={<ShieldCheck className="h-5 w-5" aria-hidden />} label="Quality" value="Passed ✓" />
+              {vis.team !== false && <Detail icon={<Users className="h-5 w-5" aria-hidden />} label="Team" value={team.join(", ") || "—"} />}
+              {data.qualityResult && <Detail icon={<ShieldCheck className="h-5 w-5" aria-hidden />} label="Quality" value="Passed ✓" />}
               {data.approval && <Detail icon={<CheckCircle2 className="h-5 w-5" aria-hidden />} label="Approved" value={new Date(data.approval.approvedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} />}
-              <Detail icon={<ClipboardList className="h-5 w-5" aria-hidden />} label="Tasks" value={`${doneCount} of ${checklist.length} done`} />
+              {checklist.length > 0 && <Detail icon={<ClipboardList className="h-5 w-5" aria-hidden />} label="Tasks" value={`${doneCount} of ${checklist.length} done`} />}
             </Panel>
             </div>
           )}
-          {(data.visibility.beforePhotos || data.visibility.afterPhotos) && (
+          {(vis.beforePhotos !== false || vis.afterPhotos !== false) && (
             <div className="print:hidden">
-              <Panel title="Before / After">
+              <Panel title={vis.beforePhotos === false ? "After photos" : vis.afterPhotos === false ? "Before photos" : "Before / After"}>
                 <BeforeAfter photos={data.photos} areas={areas} />
               </Panel>
             </div>
           )}
-          {data.quotation && <QuotationPanel quote={data.quotation} />}
-          {data.invoice && <InvoicePanel invoice={data.invoice} customerName={data.customer.name} jobId={job.id} serviceName={serviceTitle} />}
+          {data.quotation?.url && (
+            <a href={data.quotation.url} className="print:hidden flex items-center justify-between gap-3 bg-white rounded-3xl border border-zinc-200 p-5 shadow-sm">
+              <span className="min-w-0">
+                <span className="block text-lg font-semibold text-zinc-950">Quotation</span>
+                <span className="block text-sm text-zinc-500 font-mono break-all">{data.quotation.quoteNumber} · {formatInr(data.quotation.total)}</span>
+              </span>
+              <ExternalLink className="h-5 w-5 text-zinc-400 shrink-0" aria-hidden />
+            </a>
+          )}
+          {data.invoice && <InvoicePanel invoice={data.invoice} customerName={data.customer.name} jobId={job.id} serviceName={job.serviceName} />}
           {stage === "approve" && (
             <button onClick={() => go("home")} className="h-12 w-full rounded-2xl bg-emerald-600 text-white text-base font-semibold">Back to approve</button>
           )}
@@ -591,7 +557,7 @@ export default function CustomerServicePage() {
           <Panel title="Profile">
             <Detail icon={<User className="h-5 w-5" aria-hidden />} label="Name" value={data.customer.name} />
             <Detail icon={<ShieldCheck className="h-5 w-5" aria-hidden />} label="Phone" value={data.customer.phoneMasked} />
-            {where && <Detail icon={<MapPin className="h-5 w-5" aria-hidden />} label="Service address" value={where} />}
+            {property && <Detail icon={<MapPin className="h-5 w-5" aria-hidden />} label="Property" value={property.title} />}
           </Panel>
           {complaintSent && (
             <div role="status" className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-base">
@@ -610,7 +576,7 @@ export default function CustomerServicePage() {
       <Dialog open={aiOpen} onOpenChange={setAiOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogTitle className="sr-only">Intense AI</DialogTitle>
-          {aiOpen && <IntenseAIChat role="customer" userName={data.customer.name} token={token} storageKey={`intense-ai:customer:${job.id}`} compact />}
+          {aiOpen && <IntenseAIChat role="customer" userName={data.customer.name} token={token} storageKey={`intense-ai:customer:${job.id ?? token.slice(0, 12)}`} compact />}
         </DialogContent>
       </Dialog>
 
@@ -718,7 +684,7 @@ function Shell({ jobId, action, tab, onTab, onAskAi, children }: { jobId?: strin
 const formatInr = (n: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
 
 /** The customer's own invoice. GST fields appear only on a GST invoice. */
-function InvoicePanel({ invoice: inv, customerName, jobId, serviceName }: { invoice: CustomerInvoice; customerName: string; jobId: string; serviceName: string }) {
+function InvoicePanel({ invoice: inv, customerName, jobId, serviceName }: { invoice: CustomerInvoice; customerName: string; jobId: string | null; serviceName: string | null }) {
   const gst = inv.invoiceType === "GST";
   const half = (inv.gstRate ?? 0) / 2;
   const rows: [string, string, boolean?][] = gst
@@ -747,9 +713,22 @@ function InvoicePanel({ invoice: inv, customerName, jobId, serviceName }: { invo
         <div className="flex justify-between gap-3"><dt className="text-zinc-500">Bill to</dt><dd className="text-right font-medium break-words">{customerName}</dd></div>
         {gst && inv.customerGstin && <div className="flex justify-between gap-3"><dt className="text-zinc-500">Your GSTIN</dt><dd className="font-mono">{inv.customerGstin}</dd></div>}
         <div className="flex justify-between gap-3"><dt className="text-zinc-500">Date</dt><dd>{new Date(inv.issuedAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}</dd></div>
-        <div className="flex justify-between gap-3"><dt className="text-zinc-500">Job ID</dt><dd className="font-mono text-right break-all">{jobId}</dd></div>
-        <div className="flex justify-between gap-3"><dt className="text-zinc-500">Service</dt><dd className="text-right break-words">{serviceName}</dd></div>
+        {jobId && <div className="flex justify-between gap-3"><dt className="text-zinc-500">Job ID</dt><dd className="font-mono text-right break-all">{jobId}</dd></div>}
+        {serviceName && !inv.items?.length && <div className="flex justify-between gap-3"><dt className="text-zinc-500">Service</dt><dd className="text-right break-words">{serviceName}</dd></div>}
       </dl>
+      {inv.items && inv.items.length > 0 && (
+        <ul className="rounded-2xl border border-zinc-200 divide-y divide-zinc-100">
+          {inv.items.map((l, i) => (
+            <li key={i} className="px-4 py-2.5 flex items-start justify-between gap-3 text-sm">
+              <span className="min-w-0">
+                <span className="block font-medium text-zinc-900 break-words">{l.description}</span>
+                <span className="block text-xs text-zinc-500 tabular-nums">{l.quantity} × {formatInr(l.rate)}</span>
+              </span>
+              <span className="font-semibold tabular-nums shrink-0">{formatInr(l.amount)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <dl className="rounded-2xl border border-zinc-200 divide-y divide-zinc-100 overflow-hidden">
         {rows.map(([k, v, strong]) => (
           <div key={k} className={cn("flex justify-between gap-3 px-4 py-2.5", strong && "bg-zinc-50")}>
@@ -757,98 +736,13 @@ function InvoicePanel({ invoice: inv, customerName, jobId, serviceName }: { invo
             <dd className={cn("tabular-nums", strong ? "text-lg font-semibold text-zinc-950" : "font-medium")}>{v}</dd>
           </div>
         ))}
-        {inv.balanceDue !== undefined && (
-          <div className="flex justify-between gap-3 px-4 py-2.5">
-            <dt className="text-zinc-600">{inv.balanceDue > 0 ? "Balance due" : "Payment"}</dt>
-            <dd className={cn("font-semibold", inv.balanceDue > 0 ? "text-amber-700" : "text-emerald-700")}>
-              {inv.balanceDue > 0 ? formatInr(inv.balanceDue) : "Paid ✓"}
-            </dd>
-          </div>
+        {typeof inv.balanceDue === "number" && (
+          <div className="flex justify-between gap-3 px-4 py-2.5"><dt className="text-zinc-600">{inv.balanceDue > 0 ? "Balance due" : "Payment"}</dt><dd className={cn("font-semibold", inv.balanceDue > 0 ? "text-amber-700" : "text-emerald-700")}>{inv.balanceDue > 0 ? formatInr(inv.balanceDue) : "Paid ✓"}</dd></div>
         )}
       </dl>
+      {inv.paymentTerms && <p className="text-sm text-zinc-600 break-words"><span className="font-semibold">Payment terms:</span> {inv.paymentTerms}</p>}
       <button onClick={() => window.print()} className="print:hidden h-12 w-full rounded-2xl border border-zinc-300 bg-white text-base font-semibold text-zinc-900 inline-flex items-center justify-center gap-2">
         <FileText className="h-5 w-5" aria-hidden /> Download / Print invoice
-      </button>
-    </section>
-  );
-}
-
-/**
- * §4 The quotation, as the customer sees it: what was priced, what it adds up
- * to, and whether it is still valid. No internal pricing, no margin.
- */
-function QuotationPanel({ quote }: { quote: CustomerQuotation }) {
-  const gst = quote.invoiceType === "GST";
-  const expired = new Date(`${quote.validUntil}T23:59:59`).getTime() < Date.now();
-  return (
-    <section className="bg-white rounded-3xl border border-zinc-200 p-5 shadow-sm space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold text-zinc-950">Quotation</h2>
-          <p className="font-mono text-sm text-zinc-500 break-all">{quote.quoteNumber}</p>
-        </div>
-        <span
-          className={cn(
-            "rounded-full border px-2.5 py-1 text-xs font-semibold whitespace-nowrap shrink-0",
-            quote.acceptedAt
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : expired
-              ? "border-zinc-200 bg-zinc-100 text-zinc-600"
-              : "border-amber-200 bg-amber-50 text-amber-800"
-          )}
-        >
-          {quote.acceptedAt ? "Accepted" : expired ? "Expired" : "Awaiting your approval"}
-        </span>
-      </div>
-
-      <ul className="divide-y divide-zinc-100">
-        {quote.items.map((it, i) => (
-          <li key={`${it.name}-${i}`} className="py-2.5 flex items-start justify-between gap-3">
-            <span className="min-w-0">
-              <span className="block text-base text-zinc-900 break-words">
-                {it.name}
-                {it.quantity > 1 ? ` ×${it.quantity}` : ""}
-              </span>
-              {it.description && <span className="block text-sm text-zinc-500 break-words">{it.description}</span>}
-            </span>
-            <span className="tabular-nums font-medium text-zinc-900 shrink-0">{formatInr(it.amount)}</span>
-          </li>
-        ))}
-      </ul>
-
-      <dl className="rounded-2xl border border-zinc-200 divide-y divide-zinc-100 overflow-hidden">
-        <div className="flex justify-between gap-3 px-4 py-2.5">
-          <dt className="text-zinc-600">Subtotal</dt>
-          <dd className="tabular-nums font-medium">{formatInr(quote.subtotal)}</dd>
-        </div>
-        {quote.discount > 0 && (
-          <div className="flex justify-between gap-3 px-4 py-2.5">
-            <dt className="text-zinc-600">Discount</dt>
-            <dd className="tabular-nums font-medium">− {formatInr(quote.discount)}</dd>
-          </div>
-        )}
-        {gst && (
-          <div className="flex justify-between gap-3 px-4 py-2.5">
-            <dt className="text-zinc-600">GST</dt>
-            <dd className="tabular-nums font-medium">{formatInr(quote.tax)}</dd>
-          </div>
-        )}
-        <div className="flex justify-between gap-3 px-4 py-2.5 bg-zinc-50">
-          <dt className="font-semibold text-zinc-950">Total</dt>
-          <dd className="tabular-nums text-lg font-semibold text-zinc-950">{formatInr(quote.total)}</dd>
-        </div>
-      </dl>
-
-      <p className="text-sm text-zinc-500">
-        {quote.acceptedAt
-          ? `Accepted on ${new Date(quote.acceptedAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}.`
-          : `Valid until ${new Date(`${quote.validUntil}T00:00:00`).toLocaleDateString("en-IN", { dateStyle: "medium" })}.`}
-      </p>
-      <button
-        onClick={() => window.print()}
-        className="print:hidden h-12 w-full rounded-2xl border border-zinc-300 bg-white text-base font-semibold text-zinc-900 inline-flex items-center justify-center gap-2"
-      >
-        <FileText className="h-5 w-5" aria-hidden /> Download / Print quotation
       </button>
     </section>
   );

@@ -12,8 +12,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { LocationPicker } from "@/components/common/LocationPicker";
 import type { Customer, Property } from "@/lib/types";
+import { LocationPicker, type LocationValue } from "./LocationPicker";
 
 export interface PropertyFormPayload {
   customerId: string;
@@ -21,9 +21,6 @@ export interface PropertyFormPayload {
   propertyType: Property["propertyType"];
   address: string;
   city: string;
-  /** §1 The property pin. Jobs here start from it and are GPS-verified against it. */
-  lat?: number;
-  lng?: number;
   bedrooms: number;
   bathrooms: number;
   carpetAreaSqFt: number;
@@ -31,6 +28,9 @@ export interface PropertyFormPayload {
   parkingInstructions: string;
   recurringService: boolean;
   recurringFrequency?: "weekly" | "biweekly" | "monthly" | "quarterly";
+  /** Map location (optional). */
+  lat: number | null;
+  lng: number | null;
 }
 
 interface PropertyFormDialogProps {
@@ -65,9 +65,6 @@ export function PropertyFormDialog({
   const [title, setTitle] = useState("");
   const [propertyType, setPropertyType] = useState<PropertyFormPayload["propertyType"]>("apartment");
   const [address, setAddress] = useState("");
-  // §1 The map pin for this property.
-  const [lat, setLat] = useState<number | undefined>(undefined);
-  const [lng, setLng] = useState<number | undefined>(undefined);
   const [city, setCity] = useState("Bengaluru");
   const [postalCode, setPostalCode] = useState("");
   const [bedrooms, setBedrooms] = useState(3);
@@ -79,6 +76,7 @@ export function PropertyFormDialog({
   const [recurring, setRecurring] = useState(false);
   const [recurringFrequency, setRecurringFrequency] =
     useState<PropertyFormPayload["recurringFrequency"]>("monthly");
+  const [loc, setLoc] = useState<LocationValue>({ lat: null, lng: null, address: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -90,8 +88,6 @@ export function PropertyFormDialog({
     setTitle(editing?.title ?? "");
     setPropertyType(editing?.propertyType || "apartment");
     setAddress(editing?.address ?? "");
-    setLat(editing?.lat);
-    setLng(editing?.lng);
     setCity(editing?.city || "Bengaluru");
     setPostalCode(editing?.postalCode ?? "");
     setBedrooms(editing?.bedrooms ?? 3);
@@ -102,6 +98,7 @@ export function PropertyFormDialog({
     setPreferredTime(editing?.preferredTime ?? "");
     setRecurring(editing?.recurringService ?? false);
     setRecurringFrequency(editing?.recurringFrequency ?? "monthly");
+    setLoc({ lat: editing?.lat ?? null, lng: editing?.lng ?? null, address: "" });
   }, [open, editing, defaultCustomerId, customers]);
 
   const customerOptions = customers.map((c) => ({
@@ -121,8 +118,6 @@ export function PropertyFormDialog({
       propertyType,
       address,
       city,
-      lat,
-      lng,
       bedrooms,
       bathrooms,
       carpetAreaSqFt: sqFt,
@@ -130,6 +125,8 @@ export function PropertyFormDialog({
       parkingInstructions: parking,
       recurringService: recurring,
       recurringFrequency: recurring ? recurringFrequency : undefined,
+      lat: loc.lat,
+      lng: loc.lng,
     });
 
     setIsSubmitting(false);
@@ -166,18 +163,6 @@ export function PropertyFormDialog({
             <Input id="pf-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Flat, tower, community, locality" required autoComplete="street-address" />
           </Field>
 
-          {/* §1 The pin. Set it once here and every job at this property can
-              be GPS-verified from the start. */}
-          <LocationPicker
-            addressLabel="Confirm the address on the map"
-            value={{ address, lat, lng }}
-            onChange={(next) => {
-              setAddress(next.address);
-              setLat(next.lat);
-              setLng(next.lng);
-            }}
-          />
-
           <div className="grid grid-cols-2 gap-3">
             <Field label="City" htmlFor="pf-city">
               <Input id="pf-city" value={city} onChange={(e) => setCity(e.target.value)} autoComplete="address-level2" />
@@ -186,6 +171,11 @@ export function PropertyFormDialog({
               <Input id="pf-pin" inputMode="numeric" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} placeholder="560102" autoComplete="postal-code" />
             </Field>
           </div>
+
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-semibold text-zinc-950">Location on the map <span className="font-normal text-zinc-500">(for navigation and arrival check)</span></legend>
+            {open && <LocationPicker key={editing?.id ?? "new"} idPrefix="pf-loc" value={{ ...loc, address: loc.address || address }} onChange={(v) => { setLoc(v); if (!address && v.address) setAddress(v.address); }} height={220} />}
+          </fieldset>
 
           <fieldset className="space-y-3">
             <legend className="text-sm font-semibold text-zinc-950">Size</legend>

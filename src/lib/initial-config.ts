@@ -1,5 +1,4 @@
 import type { SystemSettings } from "./types";
-import { DEFAULT_CUSTOMER_VISIBILITY } from "./visibility";
 
 /**
  * Structural defaults for system settings ONLY.
@@ -25,11 +24,18 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   resendCooldownSeconds: 60,
   refundApprovalLimit: 5000,
   discountApprovalLimitPercent: 10,
-  companyLogoUrl: "",
-  paymentTerms: "Payment due on completion of the service.",
-  serviceTerms:
-    "Prices are valid for the quoted scope only. Any additional work is quoted separately before it starts.",
-  bankDetails: "",
+  logoDataUrl: "",
+  signatureDataUrl: "",
+  signatoryName: "Authorised Signatory",
+  invoicePaymentTerms: "Payment due on completion of service.",
+  invoiceNotes: "Thank you for choosing us.",
+  quotationTerms: "Prices are valid until the date shown. Work is scheduled after acceptance. Any extra work is quoted separately.",
+  quotationPaymentTerms: "Full payment on completion of service.",
   quotationValidityDays: 15,
-  defaultCustomerVisibility: { ...DEFAULT_CUSTOMER_VISIBILITY },
+  customerVisibility: {
+    jobId: true, service: true, serviceDate: true, location: true, team: true, status: true,
+    beforePhotos: true, afterPhotos: true, qcResult: true, quotation: true, invoice: true,
+    paymentStatus: true, serviceNotes: true, feedback: true,
+  },
+  notifications: { customerArrived: true, customerCompleted: true, fieldManagerAssigned: true, reworkAssigned: true, qcReady: true },
 };

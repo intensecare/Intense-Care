@@ -155,24 +155,6 @@ html.font-scale-xl {
   @page { margin: 14mm; }
   html, body { background: #fff !important; }
   .invoice-doc { break-inside: avoid; }
-
-  /* A document page prints ONLY its document: the sidebar, bottom bar,
-     filters and action buttons are app chrome, not part of the paper. */
-  body:has(.doc-print-area) .print-hide,
-  body:has(.doc-print-area) nav,
-  body:has(.doc-print-area) header.app-chrome { display: none !important; }
-  .doc-print-area { margin: 0 !important; padding: 0 !important; }
-  .doc-print-area .doc-sheet {
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    max-width: none !important;
-  }
-  /* Keep a table row and a totals block from splitting across pages. */
-  .doc-sheet table { break-inside: auto; }
-  .doc-sheet thead { display: table-header-group; }
-  .doc-sheet tr, .doc-sheet .doc-keep { break-inside: avoid; }
   body:has(.qr-print-area) > *:not(:has(.qr-print-area)) { display: none !important; }
   body:has(.qr-print-area) [role="dialog"] { position: static !important; transform: none !important; box-shadow: none !important; max-height: none !important; }
   body:has(.qr-print-area) [role="dialog"] > *:not(.qr-print-area):not(:has(.qr-print-area)) { display: none !important; }

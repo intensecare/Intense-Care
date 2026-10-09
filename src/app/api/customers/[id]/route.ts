@@ -197,7 +197,7 @@ export async function GET(
         jobs: visibleJobs.map(finalizeJob),
         invoices: invoices.map(serializeInvoice),
         payments: payments.map(serializePayment),
-        quotes: quotes.map(serializeQuote),
+        quotes: quotes.map((q) => serializeQuote(q)),
         complaints: complaints.map(serializeComplaint),
         partner: partnerSummary,
         amcContracts: amcContracts.map(serializeAmcContractSummary),

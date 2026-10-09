@@ -22,11 +22,10 @@ const CreateSchema = z.object({
   accessNotes: z.string().max(1000).optional(),
   parkingInstructions: z.string().max(1000).optional(),
   preferredTime: z.string().max(80).optional(),
-  /** §1 The property pin, used for the arrival geofence. */
-  lat: z.number().min(-90).max(90).optional(),
-  lng: z.number().min(-180).max(180).optional(),
   recurringService: z.boolean().optional().default(false),
   recurringFrequency: z.enum(["weekly", "biweekly", "monthly", "quarterly"]).optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
 });
 
 const UpdateSchema = z.object({
@@ -43,10 +42,10 @@ const UpdateSchema = z.object({
   accessNotes: z.string().max(1000).nullable().optional(),
   parkingInstructions: z.string().max(1000).nullable().optional(),
   preferredTime: z.string().max(80).nullable().optional(),
-  lat: z.number().min(-90).max(90).nullable().optional(),
-  lng: z.number().min(-180).max(180).nullable().optional(),
   recurringService: z.boolean().optional(),
   recurringFrequency: z.enum(["weekly", "biweekly", "monthly", "quarterly"]).nullable().optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
 });
 
 /** GET /api/properties — all properties (managers/admins). */
@@ -99,10 +98,10 @@ export async function POST(request: Request) {
         accessNotes: d.accessNotes,
         parkingInstructions: d.parkingInstructions,
         preferredTime: d.preferredTime,
-        lat: d.lat ?? null,
-        lng: d.lng ?? null,
         recurringService: d.recurringService,
         recurringFrequency: d.recurringService ? d.recurringFrequency : undefined,
+        lat: d.lat ?? null,
+        lng: d.lng ?? null,
       },
     });
     void recordAudit({ actor: user, action: "PROPERTY_CREATED", entityType: "property", entityId: created.id, request });

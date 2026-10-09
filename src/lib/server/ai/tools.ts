@@ -2,10 +2,9 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { jobWhereFor, authorizeJob, HttpError } from "@/lib/server/authz";
 import { invoiceWhereFor, istDayStart } from "@/lib/server/invoices";
+import { getSystemSettings, resolveVisibility } from "@/lib/server/settings";
 import type { SessionUser } from "@/lib/server/session";
 import { can, scopeOf, type Permission } from "@/lib/rbac";
-import { getSystemSettings } from "@/lib/server/settings";
-import { effectiveVisibility } from "@/lib/visibility";
 
 /**
  * INTENSE AI — the ONLY way the assistant can read business data.
@@ -802,7 +801,7 @@ const TOOLS: AiTool[] = [
     name: "get_my_service",
     status: "Checking your service",
     permission: "customer",
-    description: "The customer's own service: Job ID, service, date and time, team names, status, checklist progress, quality-check result, invoice and approval/feedback state. Only the fields the business has made visible to this customer are returned.",
+    description: "The customer's own service: Job ID, service, date and time, team names, status, checklist progress, quality-check result, invoice and approval/feedback state. Only the items the company shares with this customer are returned — anything missing is not available to them.",
     parameters: { type: "OBJECT", properties: {} },
     run: async (p) => {
       if (p.kind !== "customer") throw new HttpError(403, "Not permitted.");
@@ -810,38 +809,33 @@ const TOOLS: AiTool[] = [
         where: { id: p.jobId },
         select: {
           jobSerial: true, status: true, scheduledDate: true, scheduledTimeSlot: true, assignedStaffIds: true, assignedManagerId: true,
-          approvedAt: true, customerFeedbackRating: true, customerVisibility: true,
-          serviceAddress: true, customerNotes: true,
+          approvedAt: true, customerFeedbackRating: true, customerVisibility: true, customerNotes: true, locationAddress: true,
           service: { select: { name: true } },
-          serviceLines: { select: { name: true, quantity: true }, orderBy: { position: "asc" } },
+          property: { select: { title: true } },
           checklistItems: { select: { status: true } },
           qualityChecks: { select: { decision: true }, orderBy: { createdAt: "desc" }, take: 1 },
           invoices: { where: { status: { not: "CANCELLED" } }, select: { invoiceNumber: true, invoiceType: true, subtotal: true, discount: true, tax: true, total: true, balanceDue: true, status: true }, take: 1 },
         },
       });
       if (!j) return { error: "Service not found." };
-      // §6/§8 The assistant is not a side channel: it answers from the SAME
-      // visibility configuration the customer portal is filtered by, so a
-      // field switched off cannot be asked out of the model either.
-      const settings = await getSystemSettings();
-      const vis = effectiveVisibility(j.customerVisibility, settings.defaultCustomerVisibility);
-      const team = vis.teamName ? await names([j.assignedManagerId, ...j.assignedStaffIds]) : new Map<string, string>();
+      // The same visibility the customer page uses — hidden items are never given to the model.
+      const vis = resolveVisibility((await getSystemSettings()).customerVisibility, j.customerVisibility);
+      const team = await names([j.assignedManagerId, ...j.assignedStaffIds]);
       const inv = j.invoices[0];
       const done = j.checklistItems.filter((c) => c.status === "completed" || c.status === "skipped").length;
-      const qcText = DONE.includes(j.status) || ["PASS", "CUSTOMER_APPROVAL"].includes(j.status) ? "passed" : REWORK.includes(j.status) ? "finishing touches" : QC_WAIT.includes(j.status) ? "being checked" : "not yet";
       return {
-        jobId: j.jobSerial,
-        service: j.service.name,
-        services: j.serviceLines.map((l) => (l.quantity > 1 ? `${l.name} x${l.quantity}` : l.name)),
-        status: j.status,
-        progress: `${done} of ${j.checklistItems.length} tasks done`,
-        approved: !!j.approvedAt,
+        ...(vis.jobId ? { jobId: j.jobSerial } : {}),
+        ...(vis.service ? { service: j.service.name } : {}),
+        ...(vis.location ? { property: j.property.title, address: j.locationAddress ?? undefined } : {}),
         ...(vis.serviceDate ? { date: j.scheduledDate, timeWindow: j.scheduledTimeSlot } : {}),
-        ...(vis.serviceLocation && j.serviceAddress ? { location: j.serviceAddress } : {}),
-        ...(vis.teamName ? { team: Array.from(team.values()) } : {}),
-        ...(vis.qcResult ? { qualityCheck: qcText } : {}),
-        ...(vis.serviceNotes && j.customerNotes ? { notesForYou: j.customerNotes } : {}),
-        ...(vis.customerFeedback ? { rating: j.customerFeedbackRating ?? null } : {}),
+        ...(vis.team ? { team: Array.from(team.values()) } : {}),
+        ...(vis.status ? { status: j.status, progress: `${done} of ${j.checklistItems.length} tasks done` } : {}),
+        ...(vis.qcResult
+          ? { qualityCheck: DONE.includes(j.status) || ["PASS", "CUSTOMER_APPROVAL"].includes(j.status) ? "passed" : REWORK.includes(j.status) ? "finishing touches" : QC_WAIT.includes(j.status) ? "being checked" : "not yet" }
+          : {}),
+        ...(vis.serviceNotes && j.customerNotes ? { notes: j.customerNotes } : {}),
+        approved: !!j.approvedAt,
+        ...(vis.feedback ? { rating: j.customerFeedbackRating ?? null } : {}),
         invoice:
           vis.invoice && inv
             ? {
@@ -887,5 +881,10 @@ export async function runTool(p: AiPrincipal, name: string, args: Args): Promise
 }
 
 export function declarationsFor(p: AiPrincipal) {
-  return toolsFor(p).map((t) => ({ name: t.name, description: t.description, ...(t.parameters ? { parameters: t.parameters } : {}) }));
+  // The provider rejects an OBJECT schema with no properties — a tool without
+  // arguments is declared without `parameters`.
+  return toolsFor(p).map((t) => {
+    const props = (t.parameters as { properties?: Record<string, unknown> } | undefined)?.properties;
+    return { name: t.name, description: t.description, ...(t.parameters && props && Object.keys(props).length ? { parameters: t.parameters } : {}) };
+  });
 }

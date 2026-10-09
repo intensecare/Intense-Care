@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useMemo, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import React, { useState, useMemo, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -11,18 +11,27 @@ import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { ASSIGNABLE_ROLES } from "@/lib/rbac";
 import { formatDate, formatTimeSlot } from "@/lib/utils";
-import { JobStatus } from "@/lib/types";
-import { Search, Plus, Briefcase, X, ChevronRight } from "lucide-react";
+import {
+  Search,
+  Plus,
+  Briefcase,
+  X,
+  ChevronRight,
+} from "lucide-react";
 import Link from "next/link";
 import { JobQrButton } from "@/components/common/JobQr";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 
-import { NewJobWizard } from "@/components/job/NewJobWizard";
-
 function JobsPageInner() {
-  const { jobs, customers, properties, services, users, loading } = useApp();
+  const {
+    jobs,
+    customers,
+    properties,
+    services,
+    users,
+    loading,
+  } = useApp();
   const { can } = useAuth();
   const canQr = can("links.manage");
 
@@ -32,10 +41,14 @@ function JobsPageInner() {
 
   const allJobs = jobs;
 
-  // Deep-link support: /jobs?q=... (navbar global search) and /jobs?create=true
+  // Deep-link support: /jobs?q=... (navbar global search) and /jobs/new
   // ("New Booking" shortcut) now actually drive the page state.
   const initialSearch = searchParams.get("q") || "";
-  const createParam = searchParams.get("create");
+  const router = useRouter();
+  // Old "/jobs/new" links open the New job page.
+  useEffect(() => {
+    if (searchParams.get("create") === "true") router.replace("/jobs/new");
+  }, [searchParams, router]);
 
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") || "ALL");
@@ -63,10 +76,6 @@ function JobsPageInner() {
     ...fieldWorkers.map((w) => ({ value: w.id, label: w.name })),
   ], [fieldWorkers]);
 
-  // /jobs?create=true (the "New Booking" shortcut) opens the wizard.
-  const [isCreateOpen, setIsCreateOpen] = useState(createParam === "true");
-
-  // Filtered Jobs
   const filteredJobs = useMemo(() => {
     return allJobs.filter((job) => {
       const customer = customers.find((c) => c.id === job.customerId);
@@ -96,7 +105,6 @@ function JobsPageInner() {
     });
   }, [allJobs, can, customers, properties, services, searchQuery, statusFilter, paymentFilter, workerFilter]);
 
-  const openCreate = () => setIsCreateOpen(true);
   const managerName = (job: (typeof filteredJobs)[number]) =>
     (job.assignedStaffNames ?? (job.assignedStaffIds || []).map((id) => users.find((u) => u.id === id)?.name).filter(Boolean))[0] ??
     users.find((u) => u.id === job.assignedManagerId)?.name;
@@ -109,9 +117,9 @@ function JobsPageInner() {
         description={`${allJobs.length} job${allJobs.length === 1 ? "" : "s"} · every job keeps one Job ID from booking to feedback`}
         actions={
           can("jobs.create") ? (
-            <Button onClick={openCreate}>
+            <Link href="/jobs/new" className="h-11 px-4 rounded-xl bg-rose-500 text-white text-sm font-semibold inline-flex items-center gap-2 hover:bg-rose-600">
               <Plus className="h-5 w-5" aria-hidden /> New Job
-            </Button>
+            </Link>
           ) : undefined
         }
       />
@@ -150,7 +158,7 @@ function JobsPageInner() {
       {loading && allJobs.length === 0 ? (
         <SkeletonList rows={4} />
       ) : allJobs.length === 0 ? (
-        <EmptyState icon={Briefcase} title="No jobs yet" description="Create the first job to start the workflow." actionLabel={can("jobs.create") ? "Create job" : undefined} onAction={openCreate} />
+        <EmptyState icon={Briefcase} title="No jobs yet" description="Create the first job to start the workflow." actionLabel={can("jobs.create") ? "Create job" : undefined} onAction={() => router.push("/jobs/new")} />
       ) : filteredJobs.length === 0 ? (
         <EmptyState icon={Search} title="No matching jobs" description="Try a different search or clear the filters." />
       ) : (
@@ -238,9 +246,6 @@ function JobsPageInner() {
           </ul>
         </>
       )}
-
-      {/* §10 New job — eight short steps (customer, services, location, time, crew, notes, visibility, create). */}
-      <NewJobWizard open={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
 
     </AdminLayout>
   );

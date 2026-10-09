@@ -76,6 +76,8 @@ ok((await (await fetch(BASE + "/api/ai/chat", { headers: { cookie: admin } })).j
 
 let r = await chat(admin, "Hello");
 ok(r.text.startsWith("Hello from the model") && r.events.at(-1).type === "done", "plain answer streams back and finishes");
+await fetch(BASE + "/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json", cookie: admin }, body: JSON.stringify({ messages: [{ role: "assistant", content: "Welcome" }, { role: "user", content: "first try" }, { role: "user", content: "Hello again" }] }) }).then((x) => x.text());
+ok(JSON.stringify(seen.at(-1).body.contents.map((c) => c.role)) === '["user"]' && seen.at(-1).body.contents[0].parts[0].text.includes("Hello again"), "history after a failed answer is merged into one user turn");
 ok(seen.at(-1).key === "test-key" && seen.at(-1).url.includes(":streamGenerateContent?alt=sse"), "server calls the provider with the server-side key (streaming)");
 ok(seen.at(-1).body.systemInstruction.parts[0].text.includes("You are INTENSE AI"), "assistant is instructed to be Intense AI");
 
@@ -89,46 +91,13 @@ r = await chat(admin, 'CALL get_business_metrics {"period":"all_time"}');
 const bm = r.result?.result;
 ok(bm?.jobs?.booked >= 1 && "revenue" in bm && "firstTimePassRatePercent" in bm.quality, "admin business metrics include jobs, quality and revenue");
 
-// Tax Officer — GST only, whatever the model asks for
-await chat(tax, "Hello");
-ok(JSON.stringify(declared()) === JSON.stringify(["get_gst_summary", "get_invoices"]), `Tax Officer is offered only GST tools (${declared().join(", ")})`);
-r = await chat(tax, 'CALL get_revenue_summary {}');
-ok(/Not permitted/.test(r.result?.result?.error ?? ""), "Tax Officer: model asking for revenue → Not permitted");
-r = await chat(tax, 'CALL get_jobs {}');
-ok(/Not permitted/.test(r.result?.result?.error ?? ""), "Tax Officer: model asking for jobs → Not permitted");
-r = await chat(tax, 'CALL get_invoices {"type":"NON_GST","period":"all_time"}');
-ok(/Not permitted/.test(r.result?.result?.error ?? ""), "Tax Officer: model asking for Non-GST invoices → Not permitted");
-r = await chat(tax, 'CALL get_invoices {"type":"ALL","period":"all_time","limit":50}');
-const taxInv = r.result?.result?.invoices ?? [];
-const gstCount = Number(sql(`select count(*) from "Invoice" where "invoiceType"='GST'`));
-ok(taxInv.length > 0 && taxInv.every((i) => i.type === "GST") && r.result.result.count === gstCount && taxInv.every((i) => !("paid" in i)), `Tax Officer: type=ALL still returns GST invoices only (${taxInv.length}/${gstCount}), no payment details`);
-r = await chat(tax, 'CALL get_gst_summary {"period":"all_time"}');
-ok(r.result?.result?.totals?.invoices === gstCount, "Tax Officer: GST summary counts GST invoices only");
-
-// Field Manager — assigned jobs only, no money
-const fmJobs = (await (await fetch(BASE + "/api/jobs", { headers: { cookie: fm } })).json()).data;
-r = await chat(fm, 'CALL get_jobs {"period":"all_time","limit":50}');
-const fmAi = r.result?.result;
-ok(fmAi?.total === fmJobs.length && fmAi.jobs.every((j) => fmJobs.some((x) => x.jobNumber === j.jobId)), `Field Manager: jobs tool = exactly their assigned jobs (${fmAi?.total})`);
-ok(fmAi.jobs.every((j) => !("amount" in j)), "Field Manager: no job amounts");
-ok(!declared().includes("get_revenue_summary") && !declared().includes("get_business_metrics") && declared().includes("get_my_work_summary"), "Field Manager is not offered revenue / business tools");
-const otherJob = sql(`select "jobSerial" from "Job" where coalesce("assignedManagerId",'') <> (select id from "User" where email='fm1@test.local') and not ((select id from "User" where email='fm1@test.local') = any("assignedStaffIds")) limit 1`);
-r = await chat(fm, `CALL get_job_details {"job_id":"${otherJob}"}`);
-ok(/Not permitted/.test(r.result?.result?.error ?? ""), `Field Manager: another team's job ${otherJob} → Not permitted`);
-r = await chat(fm, 'CALL get_revenue_summary {}');
-ok(/Not permitted/.test(r.result?.result?.error ?? ""), "Field Manager: model asking for revenue → Not permitted");
-r = await chat(fm, 'CALL get_customers {"segment":"all"}');
-const fmCustomers = (await (await fetch(BASE + "/api/customers", { headers: { cookie: fm } })).json()).data;
-ok(r.result?.result?.totalCustomers === fmCustomers.length && r.result.result.customers.every((c) => !("phone" in c) && !("totalBookedValue" in c)), "Field Manager: customers limited to their jobs, no phone or money");
-
-// QC — quality data, no money
-r = await chat(qc, 'CALL get_qc_report {"period":"all_time"}');
-ok(r.result?.result?.inspections >= 1 && "firstTimePassRatePercent" in r.result.result, "QC: QC report works");
-ok(JSON.stringify(declared()) === JSON.stringify(["get_job_details", "get_jobs", "get_qc_report", "get_rework_report"]), `QC is offered quality tools only (${declared().join(", ")})`);
-r = await chat(qc, 'CALL get_invoices {}');
-ok(/Not permitted/.test(r.result?.result?.error ?? ""), "QC: model asking for invoices → Not permitted");
-r = await chat(qc, 'CALL get_jobs {"period":"all_time"}');
-ok(r.result?.result?.jobs?.every((j) => !("amount" in j)), "QC: jobs carry no amounts");
+// Intense AI is for Admin (and customers through their QR) only.
+for (const [who, c] of [["Tax Officer", tax], ["Field Manager", fm], ["QC", qc]]) {
+  const before = seen.length;
+  ok((await chat(c, "Hello")).status === 403, `${who}: Intense AI refused (403)`);
+  ok(seen.length === before, `${who}: nothing is sent to the AI provider`);
+  ok((await fetch(BASE + "/api/ai/chat", { headers: { cookie: c } })).status === 403, `${who}: AI status check refused`);
+}
 
 // Customer — their own job only, via the QR token
 const jobId = sql(`select id from "Job" where status='COMPLETED' limit 1`);
@@ -137,6 +106,10 @@ const token = link.split("/").pop();
 r = await chat(null, "CALL get_my_service {}", { token });
 ok(r.result?.result?.jobId === sql(`select "jobSerial" from "Job" where id='${jobId}'`), "Customer (QR token): sees their own service");
 ok(JSON.stringify(declared()) === JSON.stringify(["get_my_service"]), "Customer is offered only their own service");
+// What the real provider rejects: OBJECT schemas without properties, conversations not starting with the user.
+ok(seen.every((x) => (x.body.tools?.[0]?.functionDeclarations ?? []).every((d) => !d.parameters || Object.keys(d.parameters.properties ?? {}).length > 0)), "no tool is declared with an empty parameter object");
+ok(seen.every((x) => x.body.contents[0].role === "user" && x.body.contents.every((c, i) => i === 0 || c.role !== x.body.contents[i - 1].role)), "every request starts with the user and alternates roles");
+ok(seen.every((x) => x.body.generationConfig?.thinkingConfig?.thinkingBudget > 0), "thinking is capped so answers are not cut off");
 r = await chat(null, 'CALL get_jobs {}', { token });
 ok(/Not permitted/.test(r.result?.result?.error ?? ""), "Customer: model asking for all jobs → Not permitted");
 r = await chat(null, 'CALL get_customers {}', { token });

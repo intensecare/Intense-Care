@@ -26,16 +26,12 @@ export async function GET(_request: Request, { params }: { params: { id: string 
             id: true,
             jobSerial: true,
             scheduledDate: true,
-            scheduledTimeSlot: true,
-            serviceAddress: true,
             service: { select: { name: true } },
             property: { select: { address: true, city: true, postalCode: true } },
             customer: { select: { name: true, phone: true, email: true, address: true, gstin: true } },
-            // §3/§5 Every priced service becomes a line on the invoice.
-            serviceLines: { orderBy: { position: "asc" } },
+            locationAddress: true,
           },
         },
-        payments: { orderBy: { paidAt: "asc" } },
       },
     });
     if (!row) {
@@ -46,9 +42,6 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     const settings = await getSystemSettings();
     const full = can(user, "finance.view");
     const c = row.job.customer;
-    const propertyAddress = [row.job.property.address, row.job.property.city, row.job.property.postalCode]
-      .filter(Boolean)
-      .join(", ");
     return ok({
       invoice: serializeInvoice(row),
       job: {
@@ -56,34 +49,11 @@ export async function GET(_request: Request, { params }: { params: { id: string 
         jobNumber: row.job.jobSerial,
         serviceName: row.job.service.name,
         serviceDate: row.job.scheduledDate,
-        serviceTimeSlot: row.job.scheduledTimeSlot,
-        // §5 Where the service was carried out, as a separate block from the
-        // billing address.
-        serviceAddress: row.job.serviceAddress || propertyAddress,
       },
-      // §5 The item table. One line per service that was sold.
-      lines: row.job.serviceLines.map((l) => ({
-        name: l.name,
-        description: l.description || undefined,
-        quantity: l.quantity,
-        unitPrice: l.unitPrice,
-        discount: l.discount,
-        taxable: l.taxable,
-        amount: Math.round((l.quantity * l.unitPrice - l.discount) * 100) / 100,
-      })),
-      // Payment history is Admin-only; a Tax Officer reads the GST document.
-      payments: full
-        ? row.payments.map((p) => ({
-            id: p.id,
-            amount: p.amount,
-            paymentMethod: p.paymentMethod,
-            transactionReference: p.transactionReference,
-            paidAt: p.paidAt.toISOString(),
-          }))
-        : [],
       customer: {
         name: c.name,
-        address: c.address || propertyAddress,
+        address: row.billingAddress || c.address || [row.job.property.address, row.job.property.city, row.job.property.postalCode].filter(Boolean).join(", "),
+        serviceAddress: row.serviceAddress || row.job.locationAddress || [row.job.property.address, row.job.property.city].filter(Boolean).join(", "),
         gstin: row.customerGstin ?? undefined,
         // Contact details are for Admin only — a Tax Officer sees what a GST invoice needs.
         phone: full ? c.phone : undefined,
@@ -91,17 +61,15 @@ export async function GET(_request: Request, { params }: { params: { id: string 
       },
       company: {
         name: settings.companyName,
-        tagline: settings.companyTagline || "",
         address: settings.companyAddress,
         phone: settings.companyPhone,
         email: settings.companyEmail,
         gstin: row.invoiceType === "GST" ? row.supplierGstin || settings.gstin || "" : "",
         sacCode: row.invoiceType === "GST" ? settings.sacCode || "" : "",
-        logoUrl: settings.companyLogoUrl || "",
-        paymentTerms: settings.paymentTerms || "",
-        // Bank details belong on the invoice only while money is owed, and
-        // only for the Admin desk that issues it.
-        bankDetails: full ? settings.bankDetails || "" : "",
+        tagline: settings.companyTagline,
+        logo: settings.logoDataUrl,
+        signature: settings.signatureDataUrl,
+        signatoryName: settings.signatoryName,
       },
     });
   } catch (err) {

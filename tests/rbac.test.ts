@@ -119,6 +119,10 @@ test("workspaces: five separate experiences, each with its own home", () => {
     navFor("admin").filter((n) => !n.secondary).map((n) => n.label),
     ["Dashboard", "Intense AI", "Jobs", "Customers", "Quotations", "Invoices", "QC", "Reports", "Users"]
   );
+  assert.deepEqual(
+    navFor("admin").filter((n) => n.secondary).map((n) => n.label),
+    ["Schedule", "Properties", "Services", "GST", "Reviews & Feedback", "Settings"]
+  );
   assert.equal(homePathFor("admin"), "/");
   assert.equal(homePathFor("field_manager"), "/my-jobs");
   assert.equal(homePathFor("qc_inspector"), "/quality-queue");
@@ -127,14 +131,14 @@ test("workspaces: five separate experiences, each with its own home", () => {
   assert.equal(navFor("customer").length, 0);
   assert.ok(navFor("admin").some((n) => n.href === "/users"));
   // §4 Quotations are an Admin surface only — no other role holds quotes.manage.
-  assert.ok(navFor("admin").some((n) => n.href === "/quotes"));
+  assert.ok(navFor("admin").some((n) => n.href === "/quotations"));
   for (const role of ["field_manager", "qc_inspector", "tax_officer", "customer"] as const) {
-    assert.equal(routeAllowed(role, "/quotes"), false, role + " must not reach quotations");
+    assert.equal(routeAllowed(role, "/quotations"), false, role + " must not reach quotations");
   }
 });
 
 test("routing: Field Manager and QC can't open the Operations desk; customer pages are public", () => {
-  for (const path of ["/", "/jobs", "/jobs/JOB-1", "/customers", "/finance", "/reports", "/users", "/settings"]) {
+  for (const path of ["/", "/jobs", "/jobs/JOB-1", "/jobs/new", "/quotations", "/reviews", "/customers", "/finance", "/reports", "/users", "/settings"]) {
     assert.equal(routeAllowed("field_manager", path), false, `FM ${path}`);
     assert.equal(routeAllowed("qc_inspector", path), false, `QC ${path}`);
   }
@@ -142,6 +146,7 @@ test("routing: Field Manager and QC can't open the Operations desk; customer pag
   assert.equal(routeAllowed("qc_inspector", "/quality-queue/JOB-1"), true);
   assert.equal(routeAllowed("admin", "/my-jobs"), false, "Admin manages jobs from the job page");
   assert.equal(isPublicPath("/customer/service/abc"), true);
+  assert.equal(isPublicPath("/customer/quote/abc"), true);
   assert.equal(isPublicPath("/partner-portal/x"), false, "referral portal removed");
 });
 

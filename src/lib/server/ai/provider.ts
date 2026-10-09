@@ -22,7 +22,7 @@ export interface Content {
 }
 
 export class AiUnavailableError extends Error {
-  constructor(public reason: "not_configured" | "provider_error" | "blocked" | "rate_limited", message: string) {
+  constructor(public reason: "not_configured" | "provider_error" | "blocked" | "rate_limited" | "setup", message: string) {
     super(message);
   }
 }
@@ -60,7 +60,17 @@ export async function* streamTurn(
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => "");
     logger.error("ai.provider.http_error", { status: res.status, detail: detail.slice(0, 500) });
-    if (res.status === 429) throw new AiUnavailableError("rate_limited", "Intense AI is busy right now. Please try again in a minute.");
+    if (res.status === 429) throw new AiUnavailableError("rate_limited", "Intense AI is busy or the AI plan's limit was reached. Please try again in a minute.");
+    // Set-up problems an administrator can fix — say which one (never the provider's name).
+    if (/API_KEY_INVALID|API key not valid|API_KEY_SERVICE_BLOCKED|SERVICE_DISABLED|PERMISSION_DENIED/i.test(detail) || res.status === 401 || res.status === 403) {
+      throw new AiUnavailableError("setup", "Intense AI's key was not accepted. The administrator should check the AI key in the server's environment settings and that the AI API is enabled for that key.");
+    }
+    if (res.status === 404 || /is not found for API version|not supported for generateContent/i.test(detail)) {
+      throw new AiUnavailableError("setup", "Intense AI's model setting is not available. The administrator should clear the AI model setting on the server (or set a current model).");
+    }
+    if (/location is not supported|FAILED_PRECONDITION/i.test(detail)) {
+      throw new AiUnavailableError("setup", "Intense AI isn't available from this server's region. The administrator should host the app in a supported region.");
+    }
     throw new AiUnavailableError("provider_error", "Intense AI couldn't answer right now. Please try again.");
   }
 

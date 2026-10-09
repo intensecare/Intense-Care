@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { JobQrButton } from "@/components/common/JobQr";
 import { useParams, useRouter } from "next/navigation";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -18,7 +19,7 @@ import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { formatCurrency, formatDate, formatTimeSlot } from "@/lib/utils";
 import type { CustomerDetailSnapshot, Property } from "@/lib/types";
-import { Building2, Briefcase, Edit2, Mail, MapPin, Phone, Plus, Trash2, AlertTriangle, FileText } from "lucide-react";
+import { Building2, Briefcase, Edit2, Mail, MapPin, Phone, Plus, Trash2, AlertTriangle, FileText, FileSignature } from "lucide-react";
 
 /** One customer: contact, properties, jobs, payments, issues — no tabs. */
 export default function CustomerDetailPage() {
@@ -95,8 +96,13 @@ export default function CustomerDetailPage() {
         actions={
           <>
             {can("jobs.create") && (
-              <Link href="/jobs?create=true" className="inline-flex h-11 items-center gap-2 rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white hover:bg-rose-600">
+              <Link href={`/jobs/new?customerId=${encodeURIComponent(customerId)}`} className="inline-flex h-11 items-center gap-2 rounded-xl bg-rose-500 px-4 text-sm font-semibold text-white hover:bg-rose-600">
                 <Plus className="h-5 w-5" aria-hidden /> New Job
+              </Link>
+            )}
+            {can("quotes.manage") && (
+              <Link href={`/quotations/new?customerId=${encodeURIComponent(customerId)}`} className="inline-flex h-11 items-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-800 hover:bg-zinc-50">
+                <FileSignature className="h-4 w-4" aria-hidden /> New Quotation
               </Link>
             )}
             {showMoney && <Button variant="outline" onClick={() => setStatementOpen(true)}><FileText className="h-4 w-4" aria-hidden /> Statement</Button>}
@@ -147,7 +153,10 @@ export default function CustomerDetailPage() {
               <p className="text-sm text-zinc-500">No properties yet.</p>
             ) : (
               <ul className="space-y-2">
-                {properties.map((p) => (
+                {properties.map((p) => {
+                  // The property's QR is the secure link of its latest open job.
+                  const latest = [...jobs].filter((j) => j.propertyId === p.id && !["CANCELLED"].includes(j.status)).sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate))[0];
+                  return (
                   <li key={p.id} className="rounded-xl border border-zinc-200 p-3">
                     <div className="flex items-start gap-3">
                       <Building2 className="h-5 w-5 text-zinc-400 shrink-0 mt-0.5" aria-hidden />
@@ -156,14 +165,16 @@ export default function CustomerDetailPage() {
                         <div className="text-sm text-zinc-500 break-words">{p.address}</div>
                       </div>
                     </div>
-                    {(can("properties.update") || can("properties.delete")) && (
-                      <div className="mt-2 flex gap-2">
+                    {(latest || can("properties.update") || can("properties.delete")) && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {latest && <JobQrButton jobId={latest.id} jobNumber={latest.jobNumber} customerName={customer.name} compact />}
                         {can("properties.update") && <Button variant="ghost" size="sm" onClick={() => setPropertyDialog({ open: true, editing: p })}><Edit2 className="h-4 w-4" aria-hidden /> Edit</Button>}
                         {can("properties.delete") && <Button variant="ghost" size="sm" className="text-red-700" onClick={() => setDeleteProp(p)}><Trash2 className="h-4 w-4" aria-hidden /> Delete</Button>}
                       </div>
                     )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </section>
@@ -179,7 +190,7 @@ export default function CustomerDetailPage() {
           <section className="space-y-3">
             <h2 className="text-lg font-semibold text-zinc-950">Jobs</h2>
             {jobs.length === 0 ? (
-              <EmptyState icon={Briefcase} title="No jobs yet" description="Book the first job for this customer." actionLabel={can("jobs.create") ? "New job" : undefined} onAction={() => router.push("/jobs?create=true")} />
+              <EmptyState icon={Briefcase} title="No jobs yet" description="Book the first job for this customer." actionLabel={can("jobs.create") ? "New job" : undefined} onAction={() => router.push("/jobs/new")} />
             ) : (
               <DataTable
                 caption="Jobs"

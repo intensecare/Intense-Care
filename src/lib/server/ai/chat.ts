@@ -68,7 +68,18 @@ function truncate(value: unknown): Record<string, unknown> {
  * back until the model answers in text.
  */
 export async function runChat(p: AiPrincipal, history: ChatMessage[], send: (e: ChatEvent) => void, signal?: AbortSignal) {
-  const contents: Content[] = history.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+  // The provider needs the conversation to start with the user and alternate
+  // roles: drop leading answers and merge back-to-back turns (e.g. after a failed answer).
+  const contents: Content[] = [];
+  for (const m of history) {
+    const role = m.role === "assistant" ? "model" : "user";
+    if (!contents.length && role === "model") continue;
+    const prev = contents[contents.length - 1];
+    if (prev && prev.role === role) prev.parts[0].text = `${prev.parts[0].text}\n\n${m.content}`;
+    else contents.push({ role, parts: [{ text: m.content }] });
+  }
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  let answered = false;
   const declarations = declarationsFor(p);
   const used: string[] = [];
 
@@ -80,17 +91,31 @@ export async function runChat(p: AiPrincipal, history: ChatMessage[], send: (e: 
         systemInstruction: { parts: [{ text: systemPrompt(p) }] },
         contents,
         ...(declarations.length ? { tools: [{ functionDeclarations: declarations }], toolConfig: { functionCallingConfig: { mode: last ? "NONE" : "AUTO" } } } : {}),
-        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 8192,
+          // 2.5 models think by default and the thinking counts against the output budget;
+          // cap it so long reports still get their answer.
+          ...(/2\.5/.test(model) ? { thinkingConfig: { thinkingBudget: 1024 } } : {}),
+        },
       },
       signal
     )) {
       for (const part of parts) {
         collected.push(part);
-        if (part.text && !part.thought) send({ type: "delta", text: part.text });
+        if (part.text && !part.thought) {
+          answered = true;
+          send({ type: "delta", text: part.text });
+        }
       }
     }
     const calls = collected.filter((x) => x.functionCall);
     if (!calls.length) {
+      if (!answered) {
+        logger.warn("ai.chat.empty_answer", { round });
+        send({ type: "error", message: "Intense AI didn't return an answer. Please try asking again, a little more specifically." });
+        return;
+      }
       logger.info("ai.chat.answered", { who: p.kind === "user" ? p.user.id : `customer:${p.jobId}`, role: p.kind === "user" ? p.user.role : "customer", tools: used });
       send({ type: "done" });
       return;

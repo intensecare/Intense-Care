@@ -24,15 +24,15 @@ import {
   ListChecks,
   Sparkles,
   User,
-  QrCode,
+  ScanLine,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { MobileLayout, ProfilePanel } from "@/components/common/MobileLayout";
 import { StatusBadge } from "@/components/common/JobStatusBadge";
 import { PromptModal } from "@/components/common/PromptModal";
-import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { QrScanner } from "@/components/common/QrScanner";
-import { LocationCard } from "@/components/common/LocationPicker";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Notice, SkeletonList, Skeleton } from "@/components/ui/states";
@@ -46,22 +46,9 @@ type FieldJob = Job & { customerName?: string; customerPhone?: string; propertyT
 
 const DONE = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
 const startTime = (slot: string) => formatTimeSlot(slot).split(" - ")[0];
-
-/**
- * §1 Where the crew is going: the service location Admin pinned when the job
- * was booked, falling back to the property address for older jobs.
- */
-const addressOf = (j: FieldJob) =>
-  j.serviceAddress || (j.propertyTitle ?? "").split(" - ").slice(1).join(" - ") || j.propertyTitle || "";
-
-/** Navigation goes to the pin when there is one — it is exact. */
-const mapsUrl = (j: FieldJob) => {
-  const destination =
-    typeof j.serviceLat === "number" && typeof j.serviceLng === "number"
-      ? `${j.serviceLat},${j.serviceLng}`
-      : encodeURIComponent(addressOf(j));
-  return `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
-};
+const addressOf = (j: FieldJob) => (j.propertyTitle ?? "").split(" - ").slice(1).join(" - ") || j.propertyTitle || "";
+const mapsUrl = (j: FieldJob) =>
+  `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(typeof j.locationLat === "number" && typeof j.locationLng === "number" ? `${j.locationLat},${j.locationLng}` : addressOf(j))}`;
 
 /* ========================================================================= */
 /* Field Manager job steps                                                    */
@@ -114,10 +101,8 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
   const [toast, setToast] = useState<string | null>(null);
   const [gps, setGps] = useState<"ready" | "searching" | "unavailable" | "verified">("ready");
   const [bypassOpen, setBypassOpen] = useState(false);
-  // §2 When GPS cannot verify, the crew gets a second route rather than a
-  // dead end: scan the job QR. The third is an audited reason.
   const [verifyOpen, setVerifyOpen] = useState(false);
-  const [verifyHint, setVerifyHint] = useState<string | null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
   const [screen, setScreen] = useState<"checklist" | "photos">("checklist");
   const [openArea, setOpenArea] = useState<string | null>(null);
   const [target, setTarget] = useState<{ area: string; type: JobPhoto["photoType"] } | null>(null);
@@ -173,13 +158,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
     const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
     if (!res) return { ok: false, status: 0, error: "You're offline. Try again when the connection returns." };
     const json = await res.json().catch(() => null);
-    return {
-      ok: res.ok && json?.success,
-      status: res.status,
-      error: json?.error as string | undefined,
-      // The server tags the one 409 that means "try another way to verify".
-      kind: json?.kind as string | undefined,
-    };
+    return { ok: res.ok && json?.success, status: res.status, error: json?.error as string | undefined };
   };
 
   const locate = (): Promise<{ lat: number; lng: number; accuracy: number } | null> =>
@@ -204,46 +183,27 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
     });
 
   /**
-   * §2 Arrival in three routes, tried in order: GPS, then the on-site QR
-   * scan, then a reason. The crew is never blocked from starting the job —
-   * but whichever route was used is recorded on the job (§12).
+   * Arrival: GPS first. If GPS can't confirm it, the Field Manager scans the
+   * customer's secure QR; if that's impossible too, they continue with a
+   * reason. The method (GPS / QR / reason) is saved in the job's activity log.
    */
-  const arrive = async (opts: { qrToken?: string; bypassReason?: string } = {}) => {
+  const arrive = async (opts: { bypassReason?: string; qrToken?: string } = {}) => {
     setBusy(true);
     setError(null);
-    const manual = Boolean(opts.bypassReason);
-    // A QR scan still sends coordinates when the device has them: the server
-    // prefers GPS and falls back to the scan.
-    const coords = manual ? null : await locate();
-    const r = await patch({
-      status: "ARRIVED",
-      arrival: {
-        ...(coords ?? {}),
-        ...(opts.qrToken ? { qrToken: opts.qrToken } : {}),
-        ...(opts.bypassReason ? { bypassReason: opts.bypassReason } : {}),
-      },
-    });
+    const coords = opts.bypassReason || opts.qrToken ? null : await locate();
+    const r = await patch({ status: "ARRIVED", arrival: { ...(coords ?? {}), ...(opts.bypassReason ? { bypassReason: opts.bypassReason } : {}), ...(opts.qrToken ? { qrToken: opts.qrToken } : {}) } });
     setBusy(false);
     if (!r.ok) {
-      // The server asks for a second route instead of refusing outright.
-      // Any OTHER 409 (someone else moved the job) is a plain error.
-      if (r.kind === "verification_required" && !manual) {
-        setVerifyHint(r.error ?? "We could not confirm your location.");
+      if (r.status === 409 && !opts.bypassReason) {
+        setError(r.error ?? "We couldn't confirm your location.");
         setVerifyOpen(true);
-        setError(null);
         return;
       }
       setError(r.error ?? "Could not record your arrival.");
       return;
     }
-    setVerifyOpen(false);
-    setVerifyHint(null);
     setGps(coords || opts.qrToken ? "verified" : "ready");
-    flash(
-      opts.qrToken
-        ? "Location verified by QR ✓ The customer has been sent the link."
-        : "Arrival recorded ✓ The customer has been sent the link."
-    );
+    flash(opts.qrToken ? "Location verified by QR ✓ Arrival recorded." : "Arrival recorded ✓ The customer has been sent the link.");
     await refreshJobs();
   };
 
@@ -343,19 +303,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
   /* ------------------------------------------------ the ONE sticky action */
   const cta = (() => {
     if (job.status === "SCHEDULED" || job.status === "ASSIGNED") {
-      // Once GPS has failed, the one action is the QR scan above.
-      if (verifyOpen) {
-        return (
-          <Button size="lg" variant="secondary" className="w-full" onClick={() => document.getElementById("verify")?.scrollIntoView({ behavior: "smooth" })}>
-            <QrCode className="h-5 w-5" aria-hidden /> VERIFY LOCATION WITH QR
-          </Button>
-        );
-      }
-      return (
-        <Button size="lg" className="w-full" loading={busy} onClick={() => void arrive()}>
-          <MapPin className="h-5 w-5" aria-hidden /> I&apos;M HERE
-        </Button>
-      );
+      return <Button size="lg" className="w-full" loading={busy} onClick={() => void arrive()}><MapPin className="h-5 w-5" aria-hidden /> I&apos;M HERE</Button>;
     }
     if (job.status === "ARRIVED" && !job.customerConfirmedAt) {
       return <Button size="lg" variant="secondary" className="w-full" disabled><Clock className="h-5 w-5 animate-pulse" aria-hidden /> WAITING FOR CUSTOMER</Button>;
@@ -394,18 +342,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
     if (job.status === "SCHEDULED" || job.status === "ASSIGNED")
       return { tone: "neutral", icon: <Navigation className="h-6 w-6" aria-hidden />, title: "Go to the property", body: "Tap Navigate. When you arrive, tap I'M HERE — we check your GPS location." };
     if (job.status === "ARRIVED" && !job.customerConfirmedAt)
-      return {
-        tone: "waiting",
-        icon: <Clock className="h-6 w-6 animate-pulse" aria-hidden />,
-        title: "Customer confirmation",
-        body: `${
-          job.arrivalVerification === "qr"
-            ? "QR verified ✓"
-            : job.arrivalVerification === "manual"
-            ? "Arrival recorded ✓"
-            : "GPS verified ✓"
-        } Waiting for the customer to confirm on their phone…`,
-      };
+      return { tone: "waiting", icon: <Clock className="h-6 w-6 animate-pulse" aria-hidden />, title: "Customer confirmation", body: "GPS verified ✓ Waiting for the customer to confirm on their phone…" };
     if (confirmed) return { tone: "success", icon: <ShieldCheck className="h-6 w-6" aria-hidden />, title: "Customer confirmed ✓", body: "You can start the service now." };
     if (["WORK_COMPLETED", "QUALITY_CHECK"].includes(job.status)) return { tone: "success", icon: <CheckCircle2 className="h-6 w-6" aria-hidden />, title: "Work completed ✓", body: "Waiting for QC. You'll be notified if anything needs fixing." };
     if (["REWORK_COMPLETED", "REINSPECTION"].includes(job.status) || (REWORK_STATUSES.includes(job.status) && openRework.length === 0))
@@ -449,57 +386,9 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
             ) : (
               <span className="h-12 rounded-xl bg-zinc-50 border border-zinc-200 text-zinc-400 text-sm inline-flex items-center justify-center">No phone</span>
             )}
-            {/* §2 The QR route is always one tap away, not a last resort you
-                have to fail into. */}
-            {(job.status === "SCHEDULED" || job.status === "ASSIGNED") && !verifyOpen && (
-              <button
-                type="button"
-                onClick={() => {
-                  setVerifyHint(null);
-                  setVerifyOpen(true);
-                }}
-                className="col-span-2 h-12 rounded-xl border border-zinc-300 bg-white text-zinc-900 text-sm font-semibold inline-flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
-              >
-                <QrCode className="h-5 w-5" aria-hidden /> VERIFY LOCATION WITH QR
-              </button>
-            )}
           </div>
         )}
       </section>
-
-      {!DONE.includes(job.status) && job.status !== "CANCELLED" && (
-        <LocationCard
-          address={addressOf(job)}
-          lat={job.serviceLat}
-          lng={job.serviceLng}
-          notes={job.locationNotes}
-        />
-      )}
-
-      {/* §2 Verify location: GPS first, the job QR when GPS cannot be had. */}
-      {verifyOpen && (job.status === "SCHEDULED" || job.status === "ASSIGNED") && (
-        <div id="verify" className="space-y-3">
-          {verifyHint && <Notice tone="warning">{verifyHint}</Notice>}
-          <QrScanner
-            busy={busy}
-            onToken={(token) => void arrive({ qrToken: token })}
-            onCancel={() => {
-              setVerifyOpen(false);
-              setVerifyHint(null);
-            }}
-            title="Verify location with QR"
-            description="Scan the QR on the customer link or on the property. Being able to scan it proves you are on site."
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <Button variant="outline" loading={busy} onClick={() => void arrive()}>
-              <MapPin className="h-4 w-4" aria-hidden /> TRY GPS AGAIN
-            </Button>
-            <Button variant="ghost" onClick={() => setBypassOpen(true)} disabled={busy}>
-              No QR — give a reason
-            </Button>
-          </div>
-        </div>
-      )}
 
       {job.status !== "CANCELLED" && (
         <section className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -646,11 +535,39 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
         </section>
       )}
 
+      <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Verify your location</DialogTitle>
+            <DialogDescription>{error ?? "GPS couldn't confirm you're at the property."}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Button size="lg" className="w-full" onClick={() => { setVerifyOpen(false); setScanOpen(true); }}>
+              <ScanLine className="h-5 w-5" aria-hidden /> Scan QR to Verify Location
+            </Button>
+            <Button size="lg" variant="outline" className="w-full" loading={busy} onClick={() => { setVerifyOpen(false); void arrive(); }}>
+              <MapPin className="h-5 w-5" aria-hidden /> Try GPS again
+            </Button>
+            <button type="button" onClick={() => { setVerifyOpen(false); setBypassOpen(true); }} className="w-full min-h-11 text-sm font-semibold text-zinc-600 underline underline-offset-4">
+              Can&apos;t scan? Continue with a reason
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <QrScanner
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        description="Ask the customer to show their service QR (on their phone or the printed card), then point the camera at it."
+        onToken={(token) => {
+          setScanOpen(false);
+          void arrive({ qrToken: token });
+        }}
+      />
       <PromptModal
         isOpen={bypassOpen}
         onClose={() => setBypassOpen(false)}
-        title="Record arrival without GPS or QR"
-        description="Tell the office why GPS did not work (for example: basement parking, no signal). This is saved on the job and visible to the desk."
+        title="We couldn't confirm your location"
+        description="Move closer to the property and try again — or tell the office why (for example: basement parking, no signal). This is saved on the job."
         placeholder="Reason (at least 5 characters)"
         confirmText="Record arrival"
         onSubmit={(reason) => {

@@ -1,353 +1,254 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Crosshair, Loader2, MapPin, Move, Minus, Plus } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import "leaflet/dist/leaflet.css";
+import type * as Leaflet from "leaflet";
+import { Search, LocateFixed, Navigation, MapPin } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Input, Field } from "@/components/ui/input";
-import { Notice } from "@/components/ui/states";
 import { cn } from "@/lib/utils";
 
-/**
- * §1 LOCATION SELECTION — pick the exact service location on a map.
- *
- * Deliberately dependency-free: no map SDK, no API key, no npm package. It
- * draws OpenStreetMap tiles with the standard slippy-map maths, and the pin
- * is the CENTRE of the viewport — so dragging the map IS adjusting the pin,
- * which is the one gesture that works the same with a thumb and a mouse.
- *
- * Admin never types coordinates: they tap "Use my location", drag the map, or
- * leave it alone and keep the address only. Latitude and longitude are
- * reported upward whenever they change.
- */
-
 export interface LocationValue {
+  lat: number | null;
+  lng: number | null;
   address: string;
-  lat?: number;
-  lng?: number;
-  accuracy?: number;
-  notes?: string;
 }
 
-const TILE = 256;
-/** Mangalore — a sensible first view before anything is chosen. */
-const FALLBACK = { lat: 12.9141, lng: 74.856 };
+/** Map tiles — OpenStreetMap by default; set NEXT_PUBLIC_MAP_TILE_URL to use another provider. */
+const TILE_URL = process.env.NEXT_PUBLIC_MAP_TILE_URL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const TILE_ATTRIBUTION = process.env.NEXT_PUBLIC_MAP_TILE_ATTRIBUTION || "&copy; OpenStreetMap contributors";
+/** Address search (geocoding) — OpenStreetMap Nominatim by default. */
+const GEOCODE_URL = process.env.NEXT_PUBLIC_GEOCODE_URL || "https://nominatim.openstreetmap.org";
+const DEFAULT_CENTER: [number, number] = [12.9716, 77.5946]; // Bengaluru
 
-const lngToX = (lng: number, z: number) => ((lng + 180) / 360) * Math.pow(2, z);
-const latToY = (lat: number, z: number) => {
-  const s = Math.sin((lat * Math.PI) / 180);
-  return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * Math.pow(2, z);
-};
-const xToLng = (x: number, z: number) => (x / Math.pow(2, z)) * 360 - 180;
-const yToLat = (y: number, z: number) => {
-  const n = Math.PI - (2 * Math.PI * y) / Math.pow(2, z);
-  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
-};
+export function navigateUrl(v: { lat?: number | null; lng?: number | null; address?: string | null }): string {
+  const dest = typeof v.lat === "number" && typeof v.lng === "number" ? `${v.lat},${v.lng}` : v.address ?? "";
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
+}
 
+const pinIcon = (L: typeof Leaflet) =>
+  L.divIcon({
+    className: "",
+    html: '<div style="width:28px;height:28px;border-radius:50% 50% 50% 0;background:#ea506c;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)"></div>',
+    iconSize: [28, 28],
+    iconAnchor: [14, 28],
+  });
+
+/**
+ * Map location: search an address, use the current location, drop / drag the
+ * pin, or type latitude and longitude. `readOnly` shows the pin + Navigate.
+ */
 export function LocationPicker({
   value,
   onChange,
-  addressLabel = "Service address",
-  disabled,
-  className,
+  readOnly = false,
+  height = 260,
+  idPrefix = "loc",
 }: {
   value: LocationValue;
-  onChange: (next: LocationValue) => void;
-  addressLabel?: string;
-  disabled?: boolean;
-  className?: string;
+  onChange?: (v: LocationValue) => void;
+  readOnly?: boolean;
+  height?: number;
+  idPrefix?: string;
 }) {
-  const [zoom, setZoom] = useState(value.lat !== undefined ? 17 : 13);
-  const [locating, setLocating] = useState(false);
-  const [geoError, setGeoError] = useState<string | null>(null);
-  const [size, setSize] = useState({ w: 320, h: 240 });
-  const boxRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ x: number; y: number; cx: number; cy: number } | null>(null);
-
-  // The map centre IS the pin. Until one is chosen we centre on the fallback
-  // but report nothing upward, so "no pin yet" stays an honest state.
-  const centre = useMemo(
-    () => ({ lat: value.lat ?? FALLBACK.lat, lng: value.lng ?? FALLBACK.lng }),
-    [value.lat, value.lng]
-  );
-
+  const box = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<Leaflet.Map | null>(null);
+  const markerRef = useRef<Leaflet.Marker | null>(null);
+  const LRef = useRef<typeof Leaflet | null>(null);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<{ display_name: string; lat: string; lon: string }[]>([]);
+  const [busy, setBusy] = useState<"search" | "gps" | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  // Typed coordinates stay as text while editing (e.g. "-", "12.").
+  const [latText, setLatText] = useState(value.lat?.toString() ?? "");
+  const [lngText, setLngText] = useState(value.lng?.toString() ?? "");
   useEffect(() => {
-    const el = boxRef.current;
-    if (!el) return;
-    const measure = () => setSize({ w: el.clientWidth, h: el.clientHeight });
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    if (parseCoord(latText, 90) !== value.lat) setLatText(value.lat?.toString() ?? "");
+    if (parseCoord(lngText, 180) !== value.lng) setLngText(value.lng?.toString() ?? "");
+    // Only react to outside changes (pin, search, GPS).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value.lat, value.lng]);
 
-  const setPin = useCallback(
-    (lat: number, lng: number, accuracy?: number) => {
-      onChange({
-        ...value,
-        lat: Math.round(lat * 1e6) / 1e6,
-        lng: Math.round(lng * 1e6) / 1e6,
-        accuracy,
+  const set = (patch: Partial<LocationValue>) => onChange?.({ ...valueRef.current, ...patch });
+
+  const placePin = (lat: number, lng: number, pan = true) => {
+    const L = LRef.current;
+    const map = mapRef.current;
+    if (!L || !map) return;
+    if (!markerRef.current) {
+      markerRef.current = L.marker([lat, lng], { icon: pinIcon(L), draggable: !readOnly, keyboard: !readOnly }).addTo(map);
+      markerRef.current.on("dragend", () => {
+        const p = markerRef.current!.getLatLng();
+        set({ lat: round(p.lat), lng: round(p.lng) });
       });
-    },
-    [onChange, value]
-  );
+    } else markerRef.current.setLatLng([lat, lng]);
+    if (pan) map.setView([lat, lng], Math.max(map.getZoom(), 16));
+  };
 
-  /* ------------------------------------------------------------ tiles */
-  const tiles = useMemo(() => {
-    const cx = lngToX(centre.lng, zoom);
-    const cy = latToY(centre.lat, zoom);
-    const halfW = size.w / 2 / TILE;
-    const halfH = size.h / 2 / TILE;
-    const max = Math.pow(2, zoom);
-    const out: { key: string; src: string; left: number; top: number }[] = [];
-    for (let tx = Math.floor(cx - halfW); tx <= Math.floor(cx + halfW); tx++) {
-      for (let ty = Math.floor(cy - halfH); ty <= Math.floor(cy + halfH); ty++) {
-        if (ty < 0 || ty >= max) continue;
-        const wrapped = ((tx % max) + max) % max;
-        out.push({
-          key: `${zoom}/${tx}/${ty}`,
-          src: `https://tile.openstreetmap.org/${zoom}/${wrapped}/${ty}.png`,
-          left: (tx - cx) * TILE + size.w / 2,
-          top: (ty - cy) * TILE + size.h / 2,
+  // Create the map once (browser only).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const L = (await import("leaflet")).default;
+      if (cancelled || !box.current || mapRef.current) return;
+      LRef.current = L;
+      const has = typeof value.lat === "number" && typeof value.lng === "number";
+      const map = L.map(box.current, { scrollWheelZoom: false, attributionControl: true }).setView(has ? [value.lat!, value.lng!] : DEFAULT_CENTER, has ? 16 : 11);
+      L.tileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(map);
+      mapRef.current = map;
+      if (has) placePin(value.lat!, value.lng!, false);
+      if (!readOnly) {
+        map.on("click", (e: Leaflet.LeafletMouseEvent) => {
+          placePin(e.latlng.lat, e.latlng.lng, false);
+          set({ lat: round(e.latlng.lat), lng: round(e.latlng.lng) });
         });
       }
-    }
-    return out;
-  }, [centre.lat, centre.lng, zoom, size.w, size.h]);
-
-  /* ------------------------------------------------------- dragging */
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (disabled) return;
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-    drag.current = {
-      x: e.clientX,
-      y: e.clientY,
-      cx: lngToX(centre.lng, zoom),
-      cy: latToY(centre.lat, zoom),
+      setTimeout(() => map.invalidateSize(), 150);
+    })();
+    return () => {
+      cancelled = true;
+      mapRef.current?.remove();
+      mapRef.current = null;
+      markerRef.current = null;
     };
-  };
+    // The map is created once; later value changes move the pin below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const onPointerMove = (e: React.PointerEvent) => {
-    const d = drag.current;
-    if (!d || disabled) return;
-    const nx = d.cx - (e.clientX - d.x) / TILE;
-    const ny = d.cy - (e.clientY - d.y) / TILE;
-    const max = Math.pow(2, zoom);
-    setPin(yToLat(Math.min(max - 0.0001, Math.max(0.0001, ny)), zoom), xToLng(nx, zoom));
-  };
-
-  const onPointerUp = () => {
-    drag.current = null;
-  };
-
-  /* ------------------------------------------------- current location */
-  const useMyLocation = () => {
-    setGeoError(null);
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setGeoError("This device cannot share its location. Drag the map to set the pin instead.");
-      return;
+  // Keep the pin in step with typed coordinates.
+  useEffect(() => {
+    if (typeof value.lat === "number" && typeof value.lng === "number" && mapRef.current) {
+      const cur = markerRef.current?.getLatLng();
+      if (!cur || Math.abs(cur.lat - value.lat) > 1e-6 || Math.abs(cur.lng - value.lng) > 1e-6) placePin(value.lat, value.lng);
     }
-    setLocating(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value.lat, value.lng]);
+
+  const search = async () => {
+    const q = query.trim() || value.address.trim();
+    if (!q) return;
+    setBusy("search");
+    setNote(null);
+    try {
+      const res = await fetch(`${GEOCODE_URL}/search?format=json&limit=5&q=${encodeURIComponent(q)}`, { headers: { Accept: "application/json" } });
+      const list = (await res.json()) as { display_name: string; lat: string; lon: string }[];
+      setResults(list);
+      if (!list.length) setNote("No match found. Try a nearby landmark, or drop the pin on the map.");
+    } catch {
+      setNote("Address search isn't available right now. Drop the pin on the map or type the coordinates.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const pick = (r: { display_name: string; lat: string; lon: string }) => {
+    const lat = round(Number(r.lat));
+    const lng = round(Number(r.lon));
+    setResults([]);
+    setQuery("");
+    placePin(lat, lng);
+    set({ lat, lng, address: valueRef.current.address || r.display_name });
+  };
+
+  const useMyLocation = () => {
+    if (!navigator.geolocation) return setNote("This device can't share its location.");
+    setBusy("gps");
+    setNote(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setLocating(false);
-        setZoom(18);
-        setPin(pos.coords.latitude, pos.coords.longitude, Math.round(pos.coords.accuracy));
+        setBusy(null);
+        const lat = round(pos.coords.latitude);
+        const lng = round(pos.coords.longitude);
+        placePin(lat, lng);
+        set({ lat, lng });
       },
-      (err) => {
-        setLocating(false);
-        setGeoError(
-          err.code === err.PERMISSION_DENIED
-            ? "Location permission was refused. Drag the map to set the pin instead."
-            : "We could not get a location fix. Drag the map to set the pin instead."
-        );
+      () => {
+        setBusy(null);
+        setNote("Couldn't get your location. Allow location access, or drop the pin on the map.");
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
-  const hasPin = value.lat !== undefined && value.lng !== undefined;
+  const coordsSet = typeof value.lat === "number" && typeof value.lng === "number";
 
   return (
-    <div className={cn("space-y-3", className)}>
-      <Field label={addressLabel} required hint="The address the crew and the invoice will show.">
-        <Input
-          value={value.address}
-          onChange={(e) => onChange({ ...value, address: e.target.value })}
-          placeholder="Flat / building, street, area, city"
-          disabled={disabled}
-          autoComplete="off"
-        />
-      </Field>
-
-      <div className="rounded-xl border border-zinc-200 overflow-hidden bg-zinc-100">
-        <div
-          ref={boxRef}
-          className={cn(
-            "relative h-56 sm:h-64 touch-none select-none",
-            disabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-          )}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          role="application"
-          aria-label="Map — drag to move the service location pin"
-        >
-          {tiles.map((t) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={t.key}
-              src={t.src}
-              alt=""
-              width={TILE}
-              height={TILE}
-              draggable={false}
-              className="absolute pointer-events-none"
-              style={{ left: t.left, top: t.top }}
+    <div className="space-y-3">
+      {!readOnly && (
+        <div className="flex gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" aria-hidden />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void search();
+                }
+              }}
+              placeholder="Search address or landmark"
+              aria-label="Search address"
+              className="pl-10"
             />
+          </div>
+          <Button type="button" variant="outline" onClick={() => void search()} loading={busy === "search"} className="shrink-0">
+            Search
+          </Button>
+        </div>
+      )}
+      {results.length > 0 && (
+        <ul className="rounded-xl border border-zinc-200 bg-white divide-y divide-zinc-100 max-h-52 overflow-y-auto">
+          {results.map((r) => (
+            <li key={`${r.lat},${r.lon}`}>
+              <button type="button" onClick={() => pick(r)} className="w-full min-h-11 px-3 py-2 text-left text-sm hover:bg-zinc-50 flex items-start gap-2">
+                <MapPin className="h-4 w-4 mt-0.5 text-rose-500 shrink-0" aria-hidden /> <span className="break-words">{r.display_name}</span>
+              </button>
+            </li>
           ))}
+        </ul>
+      )}
 
-          {/* The pin sits at the centre of the viewport. */}
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full pointer-events-none">
-            <MapPin
-              className={cn("h-9 w-9 drop-shadow", hasPin ? "text-rose-600" : "text-zinc-500")}
-              strokeWidth={2.5}
-              aria-hidden
-            />
-          </div>
-          {!hasPin && (
-            <div className="absolute inset-x-0 bottom-0 bg-zinc-900/75 text-white text-xs px-3 py-2 pointer-events-none">
-              Drag the map or tap <strong>Use my location</strong> to drop the pin.
-            </div>
-          )}
+      <div ref={box} style={{ height }} className="w-full rounded-xl border border-zinc-200 bg-zinc-100 overflow-hidden z-0" role="application" aria-label={readOnly ? "Location map" : "Map — tap to drop the pin, drag it to adjust"} />
 
-          {/* Zoom. Separate buttons so this works without a wheel or pinch. */}
-          <div className="absolute right-2 top-2 flex flex-col gap-1">
-            <button
-              type="button"
-              onClick={() => setZoom((z) => Math.min(19, z + 1))}
-              disabled={disabled}
-              className="h-9 w-9 rounded-lg bg-white/95 border border-zinc-300 text-zinc-800 flex items-center justify-center shadow-sm"
-              aria-label="Zoom in"
-            >
-              <Plus className="h-4 w-4" aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={() => setZoom((z) => Math.max(3, z - 1))}
-              disabled={disabled}
-              className="h-9 w-9 rounded-lg bg-white/95 border border-zinc-300 text-zinc-800 flex items-center justify-center shadow-sm"
-              aria-label="Zoom out"
-            >
-              <Minus className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-white border-t border-zinc-200">
-          <span className="text-[11px] text-zinc-500 truncate">
-            <Move className="inline h-3 w-3 mr-1 -mt-0.5" aria-hidden />
-            Map data © OpenStreetMap contributors
-          </span>
-          <span className="text-[11px] tabular-nums text-zinc-600 shrink-0">z{zoom}</span>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" onClick={useMyLocation} disabled={disabled || locating}>
-          {locating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Crosshair className="h-4 w-4" aria-hidden />}
-          Use my location
-        </Button>
-        {hasPin && (
-          <>
-            <span className="text-xs font-mono tabular-nums text-zinc-700 rounded-lg bg-zinc-100 px-2.5 py-1.5">
-              {value.lat!.toFixed(5)}, {value.lng!.toFixed(5)}
-            </span>
-            {value.accuracy !== undefined && (
-              <span className="text-xs text-zinc-500">±{Math.round(value.accuracy)} m</span>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => onChange({ ...value, lat: undefined, lng: undefined, accuracy: undefined })}
-              disabled={disabled}
-            >
-              Clear pin
+      {!readOnly && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={useMyLocation} loading={busy === "gps"}>
+              <LocateFixed className="h-4 w-4" aria-hidden /> Use current location
             </Button>
-          </>
-        )}
-      </div>
-
-      {geoError && <Notice tone="warning">{geoError}</Notice>}
-
-      <Field label="Location notes" hint="Gate code, landmark, parking, which floor. Shown to the crew.">
-        <Input
-          value={value.notes ?? ""}
-          onChange={(e) => onChange({ ...value, notes: e.target.value })}
-          placeholder="e.g. Blue gate next to the temple, 3rd floor, lift on the left"
-          disabled={disabled}
-        />
-      </Field>
-
-      {!hasPin && (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Without a pin the crew cannot be GPS-verified on arrival — they will have to scan the job QR or give a reason.
-        </p>
+            <span className="text-xs text-zinc-500 self-center">Tap the map to drop the pin · drag it to adjust</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-zinc-800">Latitude</span>
+              <Input id={`${idPrefix}-lat`} inputMode="decimal" value={latText} onChange={(e) => { setLatText(e.target.value); set({ lat: parseCoord(e.target.value, 90) }); }} placeholder="12.9716" />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-zinc-800">Longitude</span>
+              <Input id={`${idPrefix}-lng`} inputMode="decimal" value={lngText} onChange={(e) => { setLngText(e.target.value); set({ lng: parseCoord(e.target.value, 180) }); }} placeholder="77.5946" />
+            </label>
+          </div>
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-zinc-800">Address</span>
+            <textarea value={value.address} onChange={(e) => set({ address: e.target.value })} rows={2} className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm" placeholder="Flat, building, street, area, city" />
+          </label>
+        </>
+      )}
+      {note && <p role="status" className="text-sm text-amber-800">{note}</p>}
+      {(coordsSet || value.address) && (
+        <a href={navigateUrl(value)} target="_blank" rel="noreferrer" className={cn("inline-flex items-center gap-2 h-11 px-4 rounded-xl border border-zinc-300 bg-white text-sm font-semibold text-zinc-800 hover:bg-zinc-50", readOnly && "w-full justify-center sm:w-auto")}>
+          <Navigation className="h-4 w-4 text-rose-500" aria-hidden /> Navigate
+        </a>
       )}
     </div>
   );
 }
 
-/** Read-only location card with a one-tap navigation button. */
-export function LocationCard({
-  address,
-  lat,
-  lng,
-  notes,
-  showNotes = true,
-  className,
-}: {
-  address?: string | null;
-  lat?: number | null;
-  lng?: number | null;
-  notes?: string | null;
-  /** Location notes are internal — never pass true on a customer surface. */
-  showNotes?: boolean;
-  className?: string;
-}) {
-  const hasPin = typeof lat === "number" && typeof lng === "number";
-  const destination = hasPin ? `${lat},${lng}` : address ? encodeURIComponent(address) : "";
-  const navUrl = destination ? `https://www.google.com/maps/dir/?api=1&destination=${destination}` : null;
-
-  return (
-    <section className={cn("rounded-2xl border border-zinc-200 bg-white p-4 space-y-3", className)}>
-      <div className="flex items-start gap-3">
-        <MapPin className="h-5 w-5 text-rose-600 mt-0.5 shrink-0" aria-hidden />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Service location</h3>
-          <p className="text-sm font-medium text-zinc-950 break-words">{address || "No address on file"}</p>
-          {hasPin ? (
-            <p className="text-xs font-mono tabular-nums text-zinc-500 mt-0.5">
-              {lat!.toFixed(5)}, {lng!.toFixed(5)}
-            </p>
-          ) : (
-            <p className="text-xs text-amber-700 mt-0.5">No map pin — arrival needs a QR scan or a reason.</p>
-          )}
-          {showNotes && notes && <p className="text-sm text-zinc-600 mt-1.5 break-words">{notes}</p>}
-        </div>
-      </div>
-      {navUrl && (
-        <a
-          href={navUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="h-11 w-full rounded-xl bg-zinc-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
-        >
-          <MapPin className="h-4 w-4" aria-hidden /> OPEN NAVIGATION
-        </a>
-      )}
-    </section>
-  );
+const round = (n: number) => Math.round(n * 1e6) / 1e6;
+function parseCoord(raw: string, max: number): number | null {
+  const n = Number(raw);
+  return raw.trim() !== "" && Number.isFinite(n) && Math.abs(n) <= max ? n : null;
 }

@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { resolveQrToken, clientIp, rateLimit } from "@/lib/server/qr-service";
-import { getSystemSettings } from "@/lib/server/settings";
-import { effectiveVisibility, isVisible } from "@/lib/visibility";
 import { logger } from "@/lib/server/logger";
+import { getSystemSettings, resolveVisibility } from "@/lib/server/settings";
 
 /**
  * §36 — private evidence delivery. Photos are served through this proxy only
@@ -32,16 +31,13 @@ export async function GET(request: Request, { params }: { params: { id: string }
       // QC / rework evidence is internal — never served on the customer link.
       return new NextResponse("Not found", { status: 404 });
     }
-
-    // §8 Customer visibility is enforced on the BYTES too, not only on the
-    // list: with "Before photos" switched off for this job, guessing a photo
-    // id with a valid token still returns nothing.
-    const [jobRow, settings] = await Promise.all([
-      prisma.job.findUnique({ where: { id: jobId }, select: { customerVisibility: true } }),
+    // Customer visibility: before/after photos the admin hid are not served either.
+    const [settings, jobVis] = await Promise.all([
       getSystemSettings(),
+      prisma.job.findUnique({ where: { id: jobId }, select: { customerVisibility: true } }),
     ]);
-    const visibility = effectiveVisibility(jobRow?.customerVisibility, settings.defaultCustomerVisibility);
-    if (!isVisible(visibility, photo.photoType === "before" ? "beforePhotos" : "afterPhotos")) {
+    const vis = resolveVisibility(settings.customerVisibility, jobVis?.customerVisibility);
+    if ((photo.photoType === "before" && !vis.beforePhotos) || (photo.photoType === "after" && !vis.afterPhotos)) {
       return new NextResponse("Not found", { status: 404 });
     }
 

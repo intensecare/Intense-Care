@@ -76,19 +76,70 @@ export interface SystemSettings {
   refundApprovalLimit: number;
   /** §17 approval authority: discounts above this percentage need elevated approval. */
   discountApprovalLimitPercent: number;
-  /** §4/§5 Company logo printed on quotations and invoices (https URL). */
-  companyLogoUrl: string;
-  /** Payment terms printed on quotations and invoices. */
-  paymentTerms: string;
-  /** Service terms printed on quotations. */
-  serviceTerms: string;
-  /** Bank / UPI details printed on invoices. Blank = the block is omitted. */
-  bankDetails: string;
-  /** How long a new quotation stays valid, in days. */
+  /** Company logo / signature printed on quotations and invoices (small data: URL, PNG/JPEG/WebP). */
+  logoDataUrl: string;
+  signatureDataUrl: string;
+  /** Name under the signature, e.g. "For Intense Care — Authorised Signatory". */
+  signatoryName: string;
+  /** Invoice defaults. */
+  invoicePaymentTerms: string;
+  invoiceNotes: string;
+  /** Quotation defaults. */
+  quotationTerms: string;
+  quotationPaymentTerms: string;
   quotationValidityDays: number;
-  /** §6 Company-wide default for what a customer may see on their portal.
-   *  Per-job overrides live on Job.customerVisibility. */
-  defaultCustomerVisibility: Record<string, boolean>;
+  /** Company default for what customers see on their QR page (each job can override). */
+  customerVisibility: CustomerVisibility;
+  /** Which automatic messages are sent. */
+  notifications: NotificationSettings;
+}
+
+/** What a customer may see on their QR page. Internal data is never included. */
+export interface CustomerVisibility {
+  jobId: boolean;
+  service: boolean;
+  serviceDate: boolean;
+  location: boolean;
+  team: boolean;
+  status: boolean;
+  beforePhotos: boolean;
+  afterPhotos: boolean;
+  qcResult: boolean;
+  quotation: boolean;
+  invoice: boolean;
+  paymentStatus: boolean;
+  serviceNotes: boolean;
+  feedback: boolean;
+}
+
+export const CUSTOMER_VISIBILITY_KEYS: (keyof CustomerVisibility)[] = [
+  "jobId", "service", "serviceDate", "location", "team", "status", "beforePhotos", "afterPhotos",
+  "qcResult", "quotation", "invoice", "paymentStatus", "serviceNotes", "feedback",
+];
+
+export const CUSTOMER_VISIBILITY_LABELS: Record<keyof CustomerVisibility, string> = {
+  jobId: "Job ID",
+  service: "Service",
+  serviceDate: "Service date",
+  location: "Location",
+  team: "Assigned team",
+  status: "Job status",
+  beforePhotos: "Before photos",
+  afterPhotos: "After photos",
+  qcResult: "QC result",
+  quotation: "Quotation",
+  invoice: "Invoice",
+  paymentStatus: "Payment status",
+  serviceNotes: "Service notes",
+  feedback: "Feedback",
+};
+
+export interface NotificationSettings {
+  customerArrived: boolean;
+  customerCompleted: boolean;
+  fieldManagerAssigned: boolean;
+  reworkAssigned: boolean;
+  qcReady: boolean;
 }
 
 export interface Refund {
@@ -230,10 +281,13 @@ export interface Property {
   carpetAreaSqFt?: number;
   bedrooms?: number;
   bathrooms?: number;
-  /** §1 The property pin. Undefined until someone sets a location, which is
-   *  why arrival at such a property needs a QR scan or a reason. */
-  lat?: number;
-  lng?: number;
+  /** Map location (unset until picked on the map). */
+  lat?: number | null;
+  lng?: number | null;
+  gpsCoordinates: {
+    lat: number;
+    lng: number;
+  };
   accessNotes?: string;
   parkingInstructions?: string;
   preferredTime?: string;
@@ -257,29 +311,13 @@ export interface Service {
   description: string;
   basePrice: number;
   estimatedDurationHours: number;
-  /** §3 GST = taxable at the configured rate; EXEMPT = never carries GST. */
-  taxTreatment: "GST" | "EXEMPT";
-  /** Desk-only note. Never leaves the admin surfaces. */
-  internalNotes?: string;
-  /** Authored through Services → Custom Service. */
-  isCustom: boolean;
+  /** Custom (bespoke) service vs the standard catalogue. */
+  isCustom?: boolean;
+  /** DEFAULT follows the company setting; GST / NON_GST force the invoice type. */
+  gstTreatment?: "DEFAULT" | "GST" | "NON_GST";
+  notes?: string;
   checklistTemplate: ServiceChecklistTemplateItem[];
   active: boolean;
-}
-
-/** §3 One priced service on a job — a job can carry several. */
-export interface JobServiceLine {
-  id: string;
-  jobId: string;
-  serviceId?: string;
-  name: string;
-  description: string;
-  quantity: number;
-  unitPrice: number;
-  discount: number;
-  taxable: boolean;
-  durationHours: number;
-  position: number;
 }
 
 export interface JobChecklistItem {
@@ -606,10 +644,7 @@ export interface Job {
   amount?: number;
   paymentStatus?: PaymentStatus;
   status: JobStatus;
-  /** Internal work notes — never customer-facing. */
   notes?: string;
-  /** A note written FOR the customer, subject to visibility. */
-  customerNotes?: string;
   accessCode?: string;
   /** Set when the customer confirms team arrival via the secure link
    *  (POST /api/customer/job/[token] action=confirm). Gates IN_PROGRESS. */
@@ -622,6 +657,18 @@ export interface Job {
   customerFeedbackRating?: number;
   customerFeedbackAt?: string;
   googleReviewClicked?: boolean;
+  customerFeedbackComment?: string;
+  /** Service location for this job (map pin). */
+  locationLat?: number;
+  locationLng?: number;
+  locationAddress?: string;
+  /** Notes for the customer (internal notes are `notes`). */
+  customerNotes?: string;
+  /** Per-job overrides of what the customer sees (unset = company default). */
+  customerVisibility?: Partial<CustomerVisibility>;
+  quoteId?: string;
+  /** gps | qr | manual | admin_override */
+  arrivalVerification?: string;
   qualityCheckId?: string;
   customerApprovalId?: string;
   feedbackId?: string;
@@ -633,63 +680,54 @@ export interface Job {
   arrivedAt?: string;
   startedAt?: string;
   completedAt?: string;
-  /** §1 The official service location picked on the map when booking. */
-  serviceAddress?: string;
-  serviceLat?: number;
-  serviceLng?: number;
-  serviceLocationAccuracy?: number;
-  locationNotes?: string;
-  /** §2/§12 How arrival was verified: "gps" | "qr" | "manual". */
-  arrivalVerification?: "gps" | "qr" | "manual";
-  arrivalDistanceM?: number;
-  arrivalBypassReason?: string;
-  /** §6 Per-job customer-visibility override (null = company default). */
-  customerVisibility?: Record<string, boolean>;
-  /** §3 The priced services on this job. */
-  serviceLines?: JobServiceLine[];
   createdAt: string;
   updatedAt: string;
 }
+
+/** One line on a quotation / invoice. `serviceId` set = from the Services catalogue. */
+export interface QuoteLine {
+  serviceId?: string | null;
+  description: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  /** A one-off line typed on the quotation (not from the catalogue). */
+  custom: boolean;
+}
+
+export type QuoteStatus = "draft" | "sent" | "accepted" | "declined" | "converted_to_job" | "expired";
 
 export interface Quote {
   id: string;
   quoteNumber: string;
   customerId: string;
-  propertyId: string;
-  serviceId: string;
-  items: {
-    serviceId?: string | null;
-    name: string;
-    description: string;
-    quantity: number;
-    unitPrice: number;
-    discount: number;
-    taxable: boolean;
-    durationHours: number;
-    amount: number;
-  }[];
-  subtotal: number;
-  tax: number;
-  discount: number;
-  total: number;
-  validUntil: string;
-  status: "draft" | "sent" | "accepted" | "declined" | "converted_to_job";
-  /** §4 GST or Non-GST quotation; the converted invoice inherits it. */
-  invoiceType: "GST" | "NON_GST";
+  customerName?: string;
+  propertyId?: string;
+  propertyTitle?: string;
+  items: QuoteLine[];
+  quoteType: "GST" | "NON_GST";
   gstRate: number;
   cgst: number;
   sgst: number;
   igst: number;
   interState: boolean;
-  serviceAddress?: string;
+  customerGstin?: string;
+  subtotal: number;
+  discount: number;
+  taxable: number;
+  tax: number;
+  total: number;
+  validUntil: string;
+  terms?: string;
   paymentTerms?: string;
-  serviceTerms?: string;
   notes?: string;
+  status: QuoteStatus;
   acceptedAt?: string;
   acceptedBy?: string;
   jobId?: string;
+  hasShareLink: boolean;
   createdAt: string;
-  updatedAt?: string;
+  updatedAt: string;
 }
 
 export interface Invoice {
@@ -708,6 +746,13 @@ export interface Invoice {
   issuedAt: string;
   finalizedAt?: string;
   refundedAmount?: number;
+  /** Line items (empty = one line for the job's service). */
+  items: QuoteLine[];
+  notes?: string;
+  paymentTerms?: string;
+  billingAddress?: string;
+  serviceAddress?: string;
+  quoteId?: string;
   /** GST | NON_GST — Non-GST invoices never carry GST data. */
   invoiceType: "GST" | "NON_GST";
   gstRate: number;

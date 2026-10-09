@@ -28,6 +28,7 @@ export interface WorkspaceAttentionItem {
   reason: string;
   href: string;
   tone: "alert" | "warning";
+  kind?: "issue" | "qc" | "payment" | "rework" | "unassigned" | "upcoming" | "other";
 }
 
 export interface WorkspacePayload {
@@ -44,7 +45,8 @@ export interface WorkspacePayload {
   };
   attention: WorkspaceAttentionItem[];
   queue: WorkspaceQueueItem[];
-  finance?: { outstanding: number; overdueCount: number; collectedMonth: number };
+  finance?: { outstanding: number; overdueCount: number; collectedMonth: number; revenueMonth: number; pendingInvoices: number };
+  feedback?: { average: number | null; count: number; low: number };
 }
 
 export function useWorkspace(pollMs = 15000) {

@@ -87,7 +87,8 @@ export async function POST(request: Request) {
         if (request.signal.aborted) {
           // The user pressed Stop or left — nothing to report.
         } else if (err instanceof AiUnavailableError) {
-          send({ type: "error", message: err.message });
+          // Set-up details are for staff; customers get a plain message.
+          send({ type: "error", message: err.reason === "setup" && principal.kind === "customer" ? "Intense AI isn't available right now. Please try again later." : err.message });
         } else {
           logger.error("ai.chat.stream_error", { error: err instanceof Error ? err.message : String(err) });
           send({ type: "error", message: "Something went wrong while answering. Please try again." });
