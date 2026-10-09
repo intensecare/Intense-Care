@@ -112,12 +112,21 @@ export async function PATCH(request: Request) {
       if (typeof r.enabled === "boolean") next.enabled = r.enabled;
       if (r.bonusType === "FIXED" || r.bonusType === "PERCENT") next.bonusType = r.bonusType;
       if (typeof r.requirePaid === "boolean") next.requirePaid = r.requirePaid;
-      const num = (v: unknown, min: number, max: number) => (typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? v : undefined);
-      next.bonusValue = num(r.bonusValue, 0, next.bonusType === "PERCENT" ? 100 : 1_000_000) ?? next.bonusValue;
-      next.minJobValue = num(r.minJobValue, 0, 100_000_000) ?? next.minJobValue;
-      next.eligibilityDays = num(r.eligibilityDays, 1, 3650) ?? next.eligibilityDays;
-      next.maxBonus = num(r.maxBonus, 0, 1_000_000) ?? next.maxBonus;
-      if (next.bonusType === "PERCENT" && next.bonusValue > 100) return NextResponse.json({ success: false, error: "A percentage bonus can't be more than 100%." }, { status: 400 });
+      const bad = (label: string) => NextResponse.json({ success: false, error: `${label} is out of range.` }, { status: 400 });
+      // A value that is present must be valid — never silently ignored.
+      const num = (v: unknown, min: number, max: number): number | undefined | "bad" => (v === undefined ? undefined : typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? v : "bad");
+      const maxValue = next.bonusType === "PERCENT" ? 100 : 1_000_000;
+      const fields: [keyof typeof next, string, number | undefined | "bad"][] = [
+        ["bonusValue", next.bonusType === "PERCENT" ? "The bonus percentage (0–100)" : "The bonus amount", num(r.bonusValue, 0, maxValue)],
+        ["minJobValue", "The minimum job value", num(r.minJobValue, 0, 100_000_000)],
+        ["eligibilityDays", "The eligibility window (1–3650 days)", num(r.eligibilityDays, 1, 3650)],
+        ["maxBonus", "The maximum bonus", num(r.maxBonus, 0, 1_000_000)],
+      ];
+      for (const [key, label, v] of fields) {
+        if (v === "bad") return bad(label);
+        if (v !== undefined) (next as Record<string, unknown>)[key] = v;
+      }
+      if (next.bonusType === "PERCENT" && next.bonusValue > 100) return bad("The bonus percentage (0–100)");
       patch.referralRules = next;
     }
 

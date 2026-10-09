@@ -49,10 +49,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
       if (!r.bonusAmount || r.bonusAmount <= 0) return fail("This referral has no bonus amount to pay.", 409);
       try {
         await prisma.$transaction(async (tx) => {
-          const claimed = await tx.referral.updateMany({ where: { id: r.id, status: "APPROVED", approvalStatus: "APPROVED", paymentStatus: "UNPAID" }, data: { paymentStatus: "PAID", status: "PAID", paidAt: new Date(), paidBy: by, paymentMethod: a.paymentMethod, paymentReference: a.paymentReference || null } });
-          if (claimed.count === 0) throw Object.assign(new Error("not payable"), { code: "NOT_PAYABLE" });
           const e = await createSourceExpense(tx, { sourceType: "REFERRAL", sourceId: r.id, category: "REFERRAL_BONUSES", amount: r.bonusAmount!, date: a.paidOn ?? istToday(), description: `Referral bonus ${r.referralNumber} — ${r.referrerName}`, paymentMethod: a.paymentMethod, reference: a.paymentReference ?? null, jobId: r.qualifyingJobId, paidBy: user.name, createdBy: user.id });
-          await tx.referral.update({ where: { id: r.id }, data: { expenseId: e.id } });
+          // The expense goes in first: the database refuses a PAID record without one, and its unique source key stops a second payment.
+          const claimed = await tx.referral.updateMany({ where: { id: r.id, status: "APPROVED", approvalStatus: "APPROVED", paymentStatus: "UNPAID" }, data: { paymentStatus: "PAID", status: "PAID", paidAt: new Date(), paidBy: by, paymentMethod: a.paymentMethod, paymentReference: a.paymentReference || null, expenseId: e.id } });
+          if (claimed.count === 0) throw Object.assign(new Error("not payable"), { code: "NOT_PAYABLE" });
         });
       } catch (e) {
         if ((e as { code?: string }).code === "NOT_PAYABLE" || (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) return fail("This bonus has already been paid, or isn't approved yet.", 409);

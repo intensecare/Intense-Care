@@ -60,10 +60,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
       if (p.amount <= 0) return fail("There is nothing to pay.", 409);
       try {
         await prisma.$transaction(async (tx) => {
-          const c = await tx.freelancePayment.updateMany({ where: { id: p.id, status: "APPROVED" }, data: { status: "PAID", paidBy: by, paidAt: new Date(), paymentMethod: a.paymentMethod, paymentReference: a.paymentReference || null } });
-          if (c.count === 0) throw Object.assign(new Error("not payable"), { code: "NOT_PAYABLE" });
           const e = await createSourceExpense(tx, { sourceType: "FREELANCE", sourceId: p.id, category: "FREELANCE_PAYMENTS", amount: p.amount, date: a.paidOn ?? istToday(), description: `Freelance payment ${p.paymentNumber} — ${p.employee.fullName} (${p.job.jobSerial})`, paymentMethod: a.paymentMethod, reference: a.paymentReference ?? null, employeeId: p.employeeId, jobId: p.jobId, paidBy: user.name, createdBy: user.id });
-          await tx.freelancePayment.update({ where: { id: p.id }, data: { expenseId: e.id } });
+          // The expense goes in first: the database refuses a PAID record without one, and its unique source key stops a second payment.
+          const c = await tx.freelancePayment.updateMany({ where: { id: p.id, status: "APPROVED" }, data: { status: "PAID", paidBy: by, paidAt: new Date(), paymentMethod: a.paymentMethod, paymentReference: a.paymentReference || null, expenseId: e.id } });
+          if (c.count === 0) throw Object.assign(new Error("not payable"), { code: "NOT_PAYABLE" });
         });
       } catch (e) {
         if ((e as { code?: string }).code === "NOT_PAYABLE" || (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) return fail("This payment has already been recorded, or isn't approved yet.", 409);
