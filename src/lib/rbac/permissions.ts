@@ -78,6 +78,9 @@ export const PERMISSIONS = [
   "payment.make",
   "refund.create",
   "refund.approve",
+  "expenses.view",
+  /** Field Manager: submit an expense for a job they are assigned to (needs Admin approval). */
+  "expenses.submit",
   "expenses.manage",
   "quotes.manage",
 
@@ -97,6 +100,8 @@ export const PERMISSIONS = [
   "referrals.view",
   "referrals.create",
   "referrals.manage",
+  /** Approve / reject a referral bonus and record its payment. */
+  "referrals.approve",
   "commission.view",
   "commission.manage",
   "payouts.view",
@@ -104,6 +109,18 @@ export const PERMISSIONS = [
 
   "amc.view",
   "amc.manage",
+
+  /** HR. `hr.view` is the staff directory (name, phone, skills, availability);
+   *  `hr.sensitive` is compensation, address, emergency contact and documents. */
+  "hr.view",
+  "hr.manage",
+  "hr.sensitive",
+  "attendance.record",
+  "attendance.correct",
+  "leave.manage",
+  "payroll.manage",
+  /** Verify, approve and pay freelancer job payments. */
+  "freelance.manage",
 
   "customer_approval.view",
   "customer_approval.request",
@@ -186,7 +203,11 @@ const FIELD_MANAGER: PermissionGrant = {
     "rework.complete",
     "customers.view", // contact details of the customer on the assigned job
     "properties.view",
-    "customer_approval.view"
+    "customer_approval.view",
+    // The team on their own jobs, their attendance, and expenses they incur on those jobs.
+    "hr.view",
+    "attendance.record",
+    "expenses.submit"
   ),
   ...own("photos.delete"), // only photos they uploaded themselves
   ...all("services.view"),

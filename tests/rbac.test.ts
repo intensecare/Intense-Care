@@ -121,7 +121,7 @@ test("workspaces: five separate experiences, each with its own home", () => {
   );
   assert.deepEqual(
     navFor("admin").filter((n) => n.secondary).map((n) => n.label),
-    ["Schedule", "Properties", "Services", "GST", "Reviews & Feedback", "Settings"]
+    ["Schedule", "Properties", "Services", "GST", "Expenses", "Referrals", "HR", "Reviews & Feedback", "Settings"]
   );
   assert.equal(homePathFor("admin"), "/");
   assert.equal(homePathFor("field_manager"), "/my-jobs");
@@ -206,4 +206,25 @@ test("approvals and notification deep links follow the four roles", () => {
   assert.equal(deepLinkFor("field_manager", "rework_assigned", { jobId: "J1" }).path, "/my-jobs/J1");
   assert.equal(deepLinkFor("qc_inspector", "qc_ready", { jobId: "J1" }).path, "/quality-queue/J1");
   assert.equal(deepLinkFor("customer", "team_arrived", { customerLink: "https://x/customer/service/t" }).path, "https://x/customer/service/t");
+});
+
+test("Expenses, referrals, HR, payroll: who may do what", () => {
+  const sensitive = ["hr.sensitive", "hr.manage", "payroll.manage", "leave.manage", "freelance.manage", "attendance.correct", "referrals.approve", "referrals.manage", "expenses.manage", "expenses.view"] as const;
+  for (const p of sensitive) assert.equal(scopeOf("admin", p), "ALL", `admin ${p}`);
+  // Field Manager: their own team and attendance, and expenses they submit — never money, payroll or personal details.
+  assert.equal(scopeOf("field_manager", "hr.view"), "ASSIGNED");
+  assert.equal(scopeOf("field_manager", "attendance.record"), "ASSIGNED");
+  assert.equal(scopeOf("field_manager", "expenses.submit"), "ASSIGNED");
+  for (const p of sensitive) assert.equal(scopeOf("field_manager", p), "NONE", `field_manager must not have ${p}`);
+  // QC, Tax Officer and Customer get none of it.
+  for (const r of ["qc_inspector", "tax_officer", "customer"] as const) {
+    for (const p of [...sensitive, "hr.view", "attendance.record", "expenses.submit"] as const) assert.equal(scopeOf(r, p), "NONE", `${r} must not have ${p}`);
+  }
+});
+
+test("routing: HR, Expenses and Referrals are Admin-only pages", () => {
+  for (const path of ["/hr", "/hr/abc", "/expenses", "/referrals"]) {
+    assert.equal(routeAllowed("admin", path), true, `admin ${path}`);
+    for (const r of ["field_manager", "qc_inspector", "tax_officer"] as const) assert.equal(routeAllowed(r, path), false, `${r} ${path}`);
+  }
 });

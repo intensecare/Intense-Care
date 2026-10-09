@@ -33,3 +33,7 @@ Server helpers (`src/lib/server/authz.ts`): `requirePermission(p)`, `authorizeJo
 
 The assistant has no access of its own: `ai.use` only switches it on for a role, and only **Admin** holds it (Field Manager, QC and Tax Officer get 403 from `/api/ai/chat`). Every piece of data comes from a tool in `src/lib/server/ai/tools.ts` that declares a permission (e.g. `get_revenue_summary` → `finance.view`, `get_invoices` → `gst.view`, `get_my_work_summary` → `jobs.arrive`). Tools are offered to the model only when the user holds that permission, re-checked on every call, and scoped with `jobWhereFor` / `authorizeJob` / `invoiceWhereFor`. Customers get one tool (`get_my_service`) bound to the job of their QR token. Prompt wording is never relied on for security.
 
+
+## Expenses, HR, referrals and business reports
+
+New permissions: `expenses.view|submit|manage`, `referrals.view|create|manage|approve`, `hr.view|manage|sensitive`, `attendance.record|correct`, `leave.manage`, `payroll.manage`, `freelance.manage`, `reports.financial`. Admin has all of them at `ALL`. The only grants outside Admin are Field Manager: `expenses.submit`, `hr.view` and `attendance.record`, all `ASSIGNED` (their own jobs and the staff on them). QC, Tax Officer and the customer link have none. `hr.sensitive` (pay, address, emergency contact, documents) is Admin-only, and the API leaves those fields out of the response for everyone else. See `docs/PRODUCTION_READINESS.md` for the full matrix.

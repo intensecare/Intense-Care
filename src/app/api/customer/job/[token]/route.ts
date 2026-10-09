@@ -37,9 +37,12 @@ function hashIp(ip: string | null): string | undefined {
 async function loadTeamNames(jobId: string): Promise<string[]> {
   const job = await prisma.job.findUnique({ where: { id: jobId }, select: { assignedStaffIds: true, assignedManagerId: true } });
   const ids = Array.from(new Set([job?.assignedManagerId, ...(job?.assignedStaffIds ?? [])].filter((x): x is string => !!x)));
-  if (ids.length === 0) return [];
-  const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: { name: true } });
-  return users.map((u) => u.name).filter(Boolean);
+  const [users, crew] = await Promise.all([
+    ids.length ? prisma.user.findMany({ where: { id: { in: ids } }, select: { name: true } }) : [],
+    // Cleaning staff on the job — names only (never phone, rate or documents).
+    prisma.jobAssignment.findMany({ where: { jobId, status: { in: ["ASSIGNED", "ACCEPTED", "COMPLETED"] } }, orderBy: { assignedAt: "asc" }, select: { employee: { select: { fullName: true } } } }),
+  ]);
+  return Array.from(new Set([...users.map((u) => u.name), ...crew.map((c) => c.employee.fullName)].filter(Boolean)));
 }
 
 /** GET — minimum-info journey payload. */

@@ -7,6 +7,7 @@ import { AdminLayout } from "@/components/common/AdminLayout";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { CustomerLinkCard } from "@/components/common/CustomerLinkCard";
 import { JobQrButton } from "@/components/common/JobQr";
+import { TeamCard } from "@/components/job/TeamCard";
 import { JobHubCards } from "@/components/job/JobHubCards";
 import { InvoiceTypeBadge } from "@/components/invoice/InvoiceDocument";
 import { JobJourney } from "@/components/job/JobJourney";
@@ -354,6 +355,8 @@ export default function JobPage() {
                 <Detail icon={<Star className="h-4 w-4" />} label="Rating" value={`${"★".repeat(job.customerFeedbackRating)}${"☆".repeat(5 - job.customerFeedbackRating)}${job.googleReviewClicked ? " · Google review opened" : ""}`} />
               ) : null}
             </section>
+
+            <TeamCard jobId={job.id} jobDate={job.scheduledDate} mode="admin" canEdit={!cancelled && can("jobs.assign")} />
 
             <JobHubCards job={job} property={property} canEdit={!cancelled && can("jobs.assign")} />
 

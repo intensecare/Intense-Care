@@ -21,12 +21,13 @@ export interface Column<T> {
  * on the card (title, subtitle, badge), the rest as labelled rows.
  */
 export function DataTable<T>({
-  rows,
+  rows: allRows,
   columns,
   rowKey,
   href,
   actions,
   caption,
+  pageSize = 25,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -34,7 +35,13 @@ export function DataTable<T>({
   href?: (row: T) => string;
   actions?: (row: T) => React.ReactNode;
   caption?: string;
+  /** Rows per page (default 25). Pass 0 when the list is already paged by the server. */
+  pageSize?: number;
 }) {
+  const [page, setPage] = React.useState(1);
+  const pages = pageSize > 0 ? Math.max(1, Math.ceil(allRows.length / pageSize)) : 1;
+  const current = Math.min(page, pages);
+  const rows = pageSize > 0 ? allRows.slice((current - 1) * pageSize, current * pageSize) : allRows;
   const title = columns.find((c) => c.mobile === "title") ?? columns[0];
   const subtitle = columns.find((c) => c.mobile === "subtitle");
   const badge = columns.find((c) => c.mobile === "badge");
@@ -121,6 +128,24 @@ export function DataTable<T>({
           );
         })}
       </ul>
+      {pageSize > 0 && pages > 1 && <Pager page={current} pages={pages} total={allRows.length} pageSize={pageSize} onPage={setPage} />}
     </>
+  );
+}
+
+/** Previous / Next with a "26–50 of 120" count — for client-paged and server-paged lists. */
+export function Pager({ page, pages, total, pageSize, onPage }: { page: number; pages: number; total: number; pageSize: number; onPage: (p: number) => void }) {
+  if (pages <= 1) return null;
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(total, page * pageSize);
+  return (
+    <nav aria-label="Pages" className="mt-4 flex items-center justify-between gap-3">
+      <span className="text-sm text-zinc-500">{from}–{to} of {total}</span>
+      <div className="flex gap-2">
+        <button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1} className="min-h-11 px-4 rounded-xl border border-zinc-300 bg-white text-sm font-semibold text-zinc-800 disabled:opacity-40">Previous</button>
+        <span className="self-center text-sm text-zinc-600 tabular-nums">Page {page} of {pages}</span>
+        <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pages} className="min-h-11 px-4 rounded-xl border border-zinc-300 bg-white text-sm font-semibold text-zinc-800 disabled:opacity-40">Next</button>
+      </div>
+    </nav>
   );
 }

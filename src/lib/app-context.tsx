@@ -21,7 +21,6 @@ import {
   Payout,
   Invoice,
   Payment,
-  Expense,
   SystemSettings,
   SmsGatewayLog,
 } from "./types";
@@ -72,11 +71,10 @@ interface AppContextType {
   invoices: Invoice[];
   payments: Payment[];
   refunds: Refund[];
-  expenses: Expense[];
   smsGatewayLogs: SmsGatewayLog[];
 
   // Actions
-  /** Re-fetches invoices, payments, refunds and expenses (finance.view / invoice.view). */
+  /** Re-fetches invoices, payments and refunds (finance.view / invoice.view). */
   refreshFinance: () => Promise<void>;
   finalizeInvoice: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
   updateInvoice: (invoiceId: string, updates: { discount?: number; dueDate?: string; reason?: string; invoiceType?: "GST" | "NON_GST"; interState?: boolean; customerGstin?: string }) => Promise<{ success: boolean; message: string }>;
@@ -208,8 +206,6 @@ interface AppContextType {
     reference: string
   ) => Promise<{ success: boolean; message: string }>;
 
-  createExpense: (expense: Omit<Expense, "id" | "createdAt" | "createdBy">) => Promise<{ success: boolean; message: string }>;
-  deleteExpense: (id: string) => Promise<{ success: boolean; message: string }>;
   assignStaffToJob: (jobId: string, staffIds: string[]) => Promise<{ success: boolean; message: string }>;
   /** Assignment-scoped roster of active field workers (PUT /api/users), visible
    *  to both Admin and ops_manager — backs the dispatcher tower and the
@@ -315,7 +311,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [refunds, setRefunds] = useState<Refund[]>([]);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [smsGatewayLogs, setSmsGatewayLogs] = useState<SmsGatewayLog[]>([]);
   /** Last rejected transition (jobId + server message) surfaced to the UI. */
   const [transitionError, setTransitionError] = useState<{ jobId: string; message: string } | null>(null);
@@ -416,12 +411,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     if (allowed("finance.view")) {
       parallel.push(
-        api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[]; expenses: Expense[] }>("/api/finance").then((r) => {
+        api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[] }>("/api/finance").then((r) => {
           if (r.ok && r.data) {
             setInvoices(r.data.invoices);
             setPayments(r.data.payments);
             setRefunds(r.data.refunds ?? []);
-            setExpenses(r.data.expenses);
           }
         })
       );
@@ -559,12 +553,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * that may have settled a commission (e.g. job completion).
    */
   const refreshFinance = useCallback(async () => {
-    const r = await api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[]; expenses: Expense[] }>("/api/finance");
+    const r = await api<{ invoices: Invoice[]; payments: Payment[]; refunds: Refund[] }>("/api/finance");
     if (r.ok && r.data) {
       setInvoices(r.data.invoices);
       setPayments(r.data.payments);
       setRefunds(r.data.refunds ?? []);
-      setExpenses(r.data.expenses);
     }
   }, []);
 
@@ -1253,11 +1246,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPayments((prev) => [r.data as Payment, ...prev]);
     await logAudit("payment", r.data.id, "PAYMENT_RECORDED", `Received ₹${amount} via ${method}`);
     // Refresh invoices + job payment status from the server.
-    const fr = await api<{ invoices: Invoice[]; payments: Payment[]; expenses: Expense[] }>("/api/finance");
+    const fr = await api<{ invoices: Invoice[]; payments: Payment[] }>("/api/finance");
     if (fr.ok && fr.data) {
       setInvoices(fr.data.invoices);
       setPayments(fr.data.payments);
-      setExpenses(fr.data.expenses);
     }
     const jr = await api<Job[]>("/api/jobs");
     if (jr.ok && jr.data) setJobs(jr.data);
@@ -1265,28 +1257,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // re-sync the directory so the Customers section reflects it immediately.
     await refreshCustomers();
     return { success: true, message: "Payment recorded." };
-  };
-
-  const createExpense = async (expenseData: Omit<Expense, "id" | "createdAt" | "createdBy">) => {
-    const r = await api<Expense>("/api/finance", {
-      method: "POST",
-      body: JSON.stringify({ action: "create-expense", ...expenseData }),
-    });
-    if (!r.ok || !r.data) return { success: false, message: r.error || "Could not record the expense." };
-    setExpenses((prev) => [r.data as Expense, ...prev]);
-    await logAudit("payment", r.data.id, "EXPENSE_RECORDED", `Expense ₹${expenseData.amount} — ${expenseData.category}`);
-    return { success: true, message: "Expense recorded." };
-  };
-
-  const deleteExpense = async (id: string) => {
-    const r = await api("/api/finance", {
-      method: "POST",
-      body: JSON.stringify({ action: "delete-expense", id }),
-    });
-    if (!r.ok) return { success: false, message: r.error || "Could not delete the expense." };
-    setExpenses((prev) => prev.filter((e) => e.id !== id));
-    await logAudit("payment", id, "EXPENSE_DELETED", "Expense entry deleted");
-    return { success: true, message: "Expense deleted." };
   };
 
   const createService = async (serviceData: Omit<Service, "id">) => {
@@ -1472,7 +1442,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         invoices,
         payments,
         refunds,
-        expenses,
         refreshFinance,
         finalizeInvoice,
         updateInvoice,
@@ -1512,8 +1481,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         approveCommissionEntry,
         createPayout,
         recordPayment,
-        createExpense,
-        deleteExpense,
         assignStaffToJob,
         fetchStaffDirectory,
         createService,

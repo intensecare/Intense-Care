@@ -112,6 +112,18 @@ Composed for every step and logged (`SmsLog`); delivered when a provider is conf
 
 Messages: job assigned (Field Manager), team arrived (customer link), QC ready / reinspection (QC), rework (Field Manager), approve your service (customer link).
 
+## Expenses, referrals, HR and profitability
+
+Admin-only modules (Field Managers see only what concerns their own jobs):
+
+- **Expenses** (`/expenses`) — 11 fixed categories, receipts, approval for Field Manager expenses, void instead of delete, duplicate protection, CSV.
+- **Referrals** (`/referrals`) — Created → Customer Registered → Bonus Review → Approved → Paid; rules in Settings; a bonus is never paid automatically.
+- **HR** (`/hr`) — staff profiles (`employmentType`: permanent / contract / freelance, not a role), attendance, leave, payroll, freelance payments, restricted compensation and documents.
+- **Job team** — assign several cleaners (leader, skills, duration, instructions, conflict checks, history) from the job page.
+- **Reports → Profit & costs** — revenue vs collected vs outstanding, costs by category, job contribution, operating result.
+
+Money rules (no double counting) and the full audit/test/deployment record are in [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
+
 ## Tests
 
 ```bash
@@ -119,4 +131,6 @@ npm test     # roles, permissions, routing, next action, state machine
 # Against a running server + empty test database (see the header of each script):
 node scripts/e2e-verify.mjs   # five user types, the job journey, GST rules, security
 node scripts/erp-verify.mjs   # quotations, job location, visibility, QR arrival, settings, reviews
+node scripts/biz-verify.mjs   # expenses, referrals, HR, payroll, assignment, freelance payments, reports
+# npm test needs TZ=Asia/Kolkata for one wall-clock assertion on non-IST machines
 ```
