@@ -73,11 +73,12 @@ export async function GET(request: Request) {
     return ok({
       invoices: rows.map((r) => ({
         ...serializeInvoice(r),
-        jobNumber: r.job.jobSerial,
-        customerName: r.job.customer.name,
+        jobNumber: r.job?.jobSerial ?? "—",
+        customerName: r.job?.customer?.name ?? "—",
       })),
       customers: customerRows
-        .map((r) => r.job.customer)
+        .map((r) => r.job?.customer)
+        .filter((c): c is { id: string; name: string } => Boolean(c))
         .sort((a, b) => a.name.localeCompare(b.name)),
     });
   } catch (err) {

@@ -156,8 +156,8 @@ export async function GET() {
         pendingInvoices: unpaid.length,
       };
       // Payment pending: work is done but the invoice is not settled.
-      for (const i of unpaid.filter((x) => DONE.includes(x.job.status)).slice(0, 15)) {
-        attention.push({ key: `pay-${i.id}`, jobId: null, title: `${i.job.customer?.name ?? "Customer"} · ${i.invoiceNumber}`, reason: `Payment pending — ₹${i.balanceDue.toLocaleString("en-IN")}${i.dueDate < today ? " (overdue)" : ""}`, href: `/invoices/${i.id}`, tone: i.dueDate < today ? "alert" : "warning", kind: "payment" });
+      for (const i of unpaid.filter((x) => x.job && DONE.includes(x.job.status)).slice(0, 15)) {
+        attention.push({ key: `pay-${i.id}`, jobId: null, title: `${i.job?.customer?.name ?? "Customer"} · ${i.invoiceNumber}`, reason: `Payment pending — ₹${i.balanceDue.toLocaleString("en-IN")}${i.dueDate < today ? " (overdue)" : ""}`, href: `/invoices/${i.id}`, tone: i.dueDate < today ? "alert" : "warning", kind: "payment" });
       }
     }
 

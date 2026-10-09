@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import "leaflet/dist/leaflet.css";
 import type * as Leaflet from "leaflet";
 import { Search, LocateFixed, Navigation, MapPin, AlertTriangle, ArrowLeftRight, X } from "lucide-react";
 import { Input } from "@/components/ui/input";

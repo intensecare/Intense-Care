@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import "leaflet/dist/leaflet.css";
 import type * as Leaflet from "leaflet";
 import { normalizeCoords } from "@/lib/location";
 import { pinIcon } from "./LocationPicker";

@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { ChevronLeft, Pencil, Phone, Mail, MapPin, ShieldCheck, Upload, Trash2, FileText, AlertTriangle } from "lucide-react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
@@ -26,12 +26,14 @@ const DOC_TYPES = [["ID_PROOF", "ID proof"], ["AGREEMENT", "Agreement"], ["CERTI
 
 /** Admin → HR → one staff member: profile, documents and the jobs they are on. */
 export default function EmployeePage() {
+  const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { can } = useAuth();
   const { data, error, reload } = useApiList<Detail>(() => `/api/hr/employees/${id}`, [id]);
   const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [removeDoc, setRemoveDoc] = useState<Detail["documents"][number] | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const [docType, setDocType] = useState("ID_PROOF");
   const [docLabel, setDocLabel] = useState("");
@@ -43,6 +45,21 @@ export default function EmployeePage() {
   if (!data) return <AdminLayout><div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-64" /></div></AdminLayout>;
   const e = data.employee;
   const expiring = data.documents.filter((d) => d.expiresOn && d.expiresOn <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+
+  const handleDeleteEmployee = async () => {
+    const res = await callApi<{ deleted?: boolean; retired?: boolean; message?: string }>(`/api/hr/employees/${e.id}`, { method: "DELETE" });
+    setConfirmDelete(false);
+    if (res.error) {
+      setNotice({ tone: "error", text: res.error });
+      return;
+    }
+    if (res.data?.retired) {
+      setNotice({ tone: "info" as any, text: res.data.message || "Staff member deactivated." });
+      void reload();
+    } else {
+      router.push("/hr");
+    }
+  };
 
   return (
     <AdminLayout>
@@ -57,7 +74,12 @@ export default function EmployeePage() {
             {e.employmentType === "FREELANCE" && <Pill tone={e.verificationStatus === "VERIFIED" ? "good" : "warn"}>{e.verificationStatus === "VERIFIED" ? "Verified" : `Verification ${e.verificationStatus.toLowerCase()}`}</Pill>}
           </div>
         </div>
-        {can("hr.manage") && <Button variant="outline" onClick={() => setEditing(true)}><Pencil className="h-4 w-4" aria-hidden /> Edit</Button>}
+        {can("hr.manage") && (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setEditing(true)}><Pencil className="h-4 w-4" aria-hidden /> Edit</Button>
+            <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setConfirmDelete(true)}><Trash2 className="h-4 w-4" aria-hidden /> Delete</Button>
+          </div>
+        )}
       </div>
       {notice && <Notice tone={notice.tone} className="mb-4">{notice.text}</Notice>}
 
@@ -140,6 +162,7 @@ export default function EmployeePage() {
 
       {editing && <EmployeeDialog employee={e} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); setNotice({ tone: "success", text: "Saved." }); void reload(); }} />}
       <ConfirmModal isOpen={!!removeDoc} onClose={() => setRemoveDoc(null)} title="Delete this document?" description={`${removeDoc?.label || removeDoc?.fileName} will be removed permanently.`} confirmText="Delete" onConfirm={async () => { const d = removeDoc!; setRemoveDoc(null); const r = await callApi(`/api/files/${d.id}`, { method: "DELETE" }); setNotice({ tone: r.error ? "error" : "success", text: r.error ?? "Document deleted." }); if (!r.error) void reload(); }} />
+      <ConfirmModal isOpen={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete or deactivate staff member?" description={`${e.fullName} (${e.employeeCode}) will be removed or deactivated if they have historical job assignments.`} confirmText="Delete / Deactivate" variant="destructive" onConfirm={handleDeleteEmployee} />
     </AdminLayout>
   );
 }

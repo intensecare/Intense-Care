@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ChevronLeft, Printer, CreditCard, Lock, Download } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import { ChevronLeft, Printer, CreditCard, Lock, Download, Trash2, Ban } from "lucide-react";
 import { ShareButtons } from "@/components/document/DocParts";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
@@ -17,18 +17,22 @@ import { useApp } from "@/lib/app-context";
 import { cn, formatDateTime, formatMoney } from "@/lib/utils";
 import { computeInvoiceFigures, isValidGstin } from "@/lib/tax";
 
-/** Admin → one invoice: print it, record a payment, finalize, or switch GST / Non-GST before finalizing. */
+/** Admin → one invoice: print it, record a payment, finalize, switch GST / Non-GST, void or delete. */
 export default function InvoiceDetailPage() {
+  const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { data, error, loading, reload } = useInvoiceDetail(id);
   const { payments, updateInvoice, finalizeInvoice, systemSettings } = useApp();
   const { linkUrl } = useCustomerLink(data?.job.id, !!data?.job.id);
   const [paying, setPaying] = useState(false);
   const [confirmFinal, setConfirmFinal] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmVoid, setConfirmVoid] = useState(false);
   const [type, setType] = useState<"GST" | "NON_GST">("GST");
   const [interState, setInterState] = useState(false);
   const [gstin, setGstin] = useState("");
   const [saving, setSaving] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
@@ -44,6 +48,7 @@ export default function InvoiceDetailPage() {
 
   const inv = data.invoice;
   const locked = Boolean(inv.finalizedAt);
+  const isCancelled = inv.status === "CANCELLED";
   const invPayments = payments.filter((p) => p.invoiceId === inv.id);
   const dirty = type !== inv.invoiceType || (type === "GST" && (interState !== inv.interState || gstin.trim().toUpperCase() !== (inv.customerGstin ?? "")));
   const gstinError = type === "GST" && gstin.trim() && !isValidGstin(gstin) ? "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5." : null;
@@ -65,6 +70,45 @@ export default function InvoiceDetailPage() {
     if (r.success) await reload();
   };
 
+  const handleVoidInvoice = async () => {
+    setActionLoading(true);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/invoices/${inv.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "CANCELLED", reason: "Cancelled by administrator." }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to cancel invoice.");
+      setConfirmVoid(false);
+      setNotice({ tone: "success", text: "Invoice marked as CANCELLED." });
+      await reload();
+    } catch (err: any) {
+      setNotice({ tone: "error", text: err.message || "Error cancelling invoice." });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteInvoice = async () => {
+    setActionLoading(true);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/invoices/${inv.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to delete invoice.");
+      setConfirmDelete(false);
+      router.push("/invoices");
+    } catch (err: any) {
+      setNotice({ tone: "error", text: err.message || "Error deleting invoice." });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   return (
     <AdminLayout>
       <div className="print:hidden space-y-4 mb-6">
@@ -76,7 +120,13 @@ export default function InvoiceDetailPage() {
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-950 font-mono break-all">{inv.invoiceNumber}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-600">
               <InvoiceTypeBadge type={inv.invoiceType} />
-              {locked ? <span className="inline-flex items-center gap-1"><Lock className="h-4 w-4" aria-hidden /> Finalized</span> : <span>Draft — can still be changed</span>}
+              {isCancelled ? (
+                <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-xs font-semibold">Cancelled</span>
+              ) : locked ? (
+                <span className="inline-flex items-center gap-1"><Lock className="h-4 w-4" aria-hidden /> Finalized</span>
+              ) : (
+                <span>Draft — can still be changed</span>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -89,12 +139,22 @@ export default function InvoiceDetailPage() {
                 message={(url) => `Hello ${data.customer.name}, your invoice ${inv.invoiceNumber} for ${formatMoney(inv.total)} from ${data.company.name || "Intense Care"}: ${url}`}
               />
             )}
-            {inv.balanceDue > 0 && <Button onClick={() => setPaying(true)}><CreditCard className="h-4 w-4" aria-hidden /> Record payment</Button>}
+            {!isCancelled && inv.balanceDue > 0 && <Button onClick={() => setPaying(true)}><CreditCard className="h-4 w-4" aria-hidden /> Record payment</Button>}
+            {!isCancelled && (
+              <Button variant="outline" className="text-amber-700 border-amber-300 hover:bg-amber-50" onClick={() => setConfirmVoid(true)}>
+                <Ban className="h-4 w-4" aria-hidden /> Cancel invoice
+              </Button>
+            )}
+            {invPayments.length === 0 && (
+              <Button variant="outline" className="text-rose-700 border-rose-300 hover:bg-rose-50" onClick={() => setConfirmDelete(true)}>
+                <Trash2 className="h-4 w-4" aria-hidden /> Delete
+              </Button>
+            )}
           </div>
         </div>
         {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}
 
-        {!locked && (
+        {!locked && !isCancelled && (
           <section className="rounded-2xl border border-zinc-200 bg-white p-5 space-y-4">
             <div>
               <h2 className="text-base font-semibold text-zinc-950">Invoice type</h2>
@@ -168,6 +228,24 @@ export default function InvoiceDetailPage() {
         description="After finalizing, the type and amounts can no longer be changed."
         confirmText="Finalize"
         variant="default"
+      />
+      <ConfirmModal
+        isOpen={confirmVoid}
+        onClose={() => setConfirmVoid(false)}
+        onConfirm={handleVoidInvoice}
+        title="Cancel this invoice?"
+        description="This marks the invoice as Cancelled and sets its balance to zero. Financial history is preserved."
+        confirmText="Cancel Invoice"
+        variant="destructive"
+      />
+      <ConfirmModal
+        isOpen={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={handleDeleteInvoice}
+        title="Delete this invoice?"
+        description="This will permanently delete this invoice record. This action cannot be undone."
+        confirmText="Delete permanently"
+        variant="destructive"
       />
     </AdminLayout>
   );

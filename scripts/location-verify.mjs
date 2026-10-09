@@ -53,6 +53,10 @@ ok(dbRefused, "the database itself refuses (0,0)");
 ok((await admin("/api/properties", { method: "PATCH", body: { id: p.id, lat: null, lng: null, title: "Koramangala Flat 402" } })).status === 200 && (await getProp(p.id)).lat === 12.935192, "saving the form with empty coordinates keeps the saved pin");
 ok((await admin("/api/properties", { method: "PATCH", body: { id: p.id, lat: 12.9 } })).status === 400 && (await getProp(p.id)).lat === 12.935192, "a half pin on edit is refused and the saved pin stays");
 ok((await fmc("/api/properties", { method: "PATCH", body: { id: p.id, lat: 1, lng: 1 } })).status === 403, "Field Manager cannot edit a property's location");
+ok((await admin(`/api/properties/${p.id}`, { method: "PATCH", body: { lat: 0, lng: 0 } })).status === 400, "PATCH /api/properties/[id] applies the same rules: (0,0) → 400");
+ok((await admin(`/api/properties/${p.id}`, { method: "PATCH", body: { lat: null, lng: null, title: "Koramangala Flat 402" } })).status === 200 && (await getProp(p.id)).lat === 12.935192, "PATCH /api/properties/[id] with empty coordinates keeps the saved pin");
+ok((await admin(`/api/properties/${p.id}`, { method: "PATCH", body: { createdAt: "2000-01-01", customerId: "nope" } })).status !== 200 && sql(`select extract(year from "createdAt") from "Property" where id='${p.id}'`) !== "2000", "PATCH /api/properties/[id] ignores unknown fields and refuses a missing customer");
+ok((await fmc(`/api/properties/${p.id}`, { method: "PATCH", body: { lat: 1, lng: 1 } })).status === 403, "Field Manager cannot use PATCH /api/properties/[id] either");
 
 console.log("--- Jobs use their property's location");
 const j1 = await mkJob({ customerId: cust.id, propertyId: p.id, assignedManagerId: fm1 });

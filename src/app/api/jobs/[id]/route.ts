@@ -445,3 +445,88 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     return errorResponse(err, "jobs.patch.route_error");
   }
 }
+
+/**
+ * DELETE /api/jobs/[id] — remove a job (Admin only).
+ * Protected against deleting completed jobs with recorded payments or active financial history.
+ */
+export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+  try {
+    const { id } = params;
+    const { user, job } = await authorizeJob(id, "jobs.cancel");
+
+    // Check for payments or paid invoices
+    const paidInvoice = await prisma.invoice.findFirst({
+      where: { jobId: id, amountPaid: { gt: 0 } },
+    });
+    if (paidInvoice) {
+      return fail(
+        `Job has paid invoices (₹${paidInvoice.amountPaid} received). Financial audit trail must be preserved — cancel the job instead.`,
+        409
+      );
+    }
+
+    const hasCompletedQC = await prisma.qualityCheck.findFirst({
+      where: { jobId: id, decision: "PASS" },
+    });
+    if (job.status === "COMPLETED" && hasCompletedQC) {
+      return fail(
+        "Completed jobs with passed quality inspections cannot be deleted. Use cancellation or archive workflow.",
+        409
+      );
+    }
+
+    // Perform atomic cascading delete for draft/cancelled/unpaid test jobs
+    await prisma.$transaction(async (tx) => {
+      // 1. Clear AMC visit reference if any
+      await tx.amcVisit.updateMany({ where: { jobId: id }, data: { jobId: null } });
+
+      // 2. Delete freelance payments / expenses linked to this job
+      await tx.freelancePayment.deleteMany({ where: { jobId: id } });
+      await tx.attendanceRecord.deleteMany({ where: { jobId: id } });
+      await tx.commissionEntry.deleteMany({ where: { jobId: id } });
+
+      // 3. Delete invoices and payments (all verified unpaid)
+      await tx.payment.deleteMany({ where: { jobId: id } });
+      await tx.refund.deleteMany({ where: { jobId: id } });
+      await tx.invoice.deleteMany({ where: { jobId: id } });
+
+      // 4. Delete checklist, photos, assignments, verifications, activities, complaints, quality checks
+      await tx.jobChecklistItem.deleteMany({ where: { jobId: id } });
+      await tx.jobPhoto.deleteMany({ where: { jobId: id } });
+      await tx.jobStartVerification.deleteMany({ where: { jobId: id } });
+      await tx.jobAssignmentEvent.deleteMany({ where: { jobId: id } });
+      await tx.jobAssignment.deleteMany({ where: { jobId: id } });
+      await tx.reworkTask.deleteMany({ where: { jobId: id } });
+      await tx.qualityIssue.deleteMany({ where: { jobId: id } });
+      await tx.qualityCheck.deleteMany({ where: { jobId: id } });
+      await tx.complaint.deleteMany({ where: { jobId: id } });
+      await tx.qrToken.deleteMany({ where: { jobId: id } });
+      await tx.jobActivityEvent.deleteMany({ where: { jobId: id } });
+
+      // 5. Delete the job record
+      await tx.job.delete({ where: { id } });
+
+      // 6. Decrement customer total bookings
+      await tx.customer.update({
+        where: { id: job.customerId },
+        data: { totalBookings: { decrement: 1 } },
+      }).catch(() => {});
+    });
+
+    void cancelJobEvent(id).catch(() => {});
+    void recordAudit({
+      actor: user,
+      action: "JOB_DELETED",
+      entityType: "job",
+      entityId: id,
+      details: `Job ${id} (${job.status}) deleted`,
+      request,
+    });
+
+    return NextResponse.json({ success: true, data: { id, deleted: true } });
+  } catch (err) {
+    if (err instanceof HttpError) return fail(err.message, err.status);
+    return errorResponse(err, "jobs.delete.route_error");
+  }
+}
