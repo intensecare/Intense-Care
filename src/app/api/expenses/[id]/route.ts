@@ -119,3 +119,51 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return errorResponse(err, "expenses.action.route_error");
   }
 }
+
+/** DELETE /api/expenses/[id] — Admin or creator deletes draft/unpaid expense. */
+export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+  try {
+    const { user } = await requireAnyPermission(["expenses.manage", "expenses.submit"]);
+    const manage = can(user, "expenses.manage");
+    const e = await load(params.id, user.id, manage);
+
+    if (e.sourceType) {
+      return fail(
+        "This expense was created automatically by payroll, freelance or referral payment and cannot be deleted here.",
+        400
+      );
+    }
+
+    if (e.paymentStatus === "PAID" && !manage) {
+      return fail("Paid expenses cannot be deleted. Please request Admin to void this expense.", 403);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (e.receiptFileId) {
+        await tx.storedFile
+          .update({
+            where: { id: e.receiptFileId },
+            data: { ownerId: null },
+          })
+          .catch(() => null);
+      }
+      await tx.expense.delete({ where: { id: params.id } });
+    });
+
+    void recordAudit({
+      actor: user,
+      action: "EXPENSE_DELETED",
+      entityType: "expense",
+      entityId: e.id,
+      jobId: e.jobId,
+      previousState: `${e.expenseNumber} ₹${e.amount} (${e.approvalStatus})`,
+      details: "Expense deleted",
+      request,
+    });
+
+    return ok({ success: true, message: `Expense ${e.expenseNumber} deleted.` });
+  } catch (err) {
+    return errorResponse(err, "expenses.delete.route_error");
+  }
+}
+

@@ -107,6 +107,11 @@ export default function CustomerDetailPage() {
             )}
             {showMoney && <Button variant="outline" onClick={() => setStatementOpen(true)}><FileText className="h-4 w-4" aria-hidden /> Statement</Button>}
             {can("customers.update") && <Button variant="outline" onClick={() => setEditOpen(true)}><Edit2 className="h-4 w-4" aria-hidden /> Edit</Button>}
+            {can("customers.delete") && (
+              <Button variant="outline" className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200" onClick={() => setDeleteOpen(true)}>
+                <Trash2 className="h-4 w-4" aria-hidden /> Delete
+              </Button>
+            )}
           </>
         }
       />

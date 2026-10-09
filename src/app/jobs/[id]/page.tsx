@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { CustomerLinkCard } from "@/components/common/CustomerLinkCard";
@@ -15,6 +15,7 @@ import { JobJourney } from "@/components/job/JobJourney";
 import { NextActionCard } from "@/components/job/NextAction";
 import { Skeleton } from "@/components/ui/states";
 import { PromptModal } from "@/components/common/PromptModal";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { JOB_STATUS_CONFIG } from "@/lib/state-machine";
@@ -36,6 +37,7 @@ import {
   Loader2,
   ChevronRight,
   XCircle,
+  Trash2,
 } from "lucide-react";
 import type { Job, JobActivityEvent, JobPhoto } from "@/lib/types";
 
@@ -61,6 +63,7 @@ export default function JobPage() {
   const jobComplaints = useMemo(() => complaints.filter((c) => c.jobId === jobId), [complaints, jobId]);
   const invoice = invoices.find((i) => i.jobId === jobId);
 
+  const router = useRouter();
   const [events, setEvents] = useState<JobActivityEvent[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +73,7 @@ export default function JobPage() {
   const [newDate, setNewDate] = useState("");
   const [newSlot, setNewSlot] = useState("");
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
 
   // Live: the job page follows the field, QC and the customer.
@@ -231,19 +235,20 @@ export default function JobPage() {
           </div>
           <NextActionCard action={next} onAction={primary?.onClick} busy={busy} />
           {error && <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</div>}
-          {!terminal && can("jobs.assign") && (
-            <div className="mt-4 pt-4 border-t border-zinc-100 flex flex-wrap gap-2 text-sm">
-              {["DRAFT", "SCHEDULED", "ASSIGNED"].includes(job.status) && (
-                <>
-                  <SmallButton onClick={openAssign} icon={<UserPlus className="h-4 w-4" />}>{manager ? "Change Field Manager" : "Assign Field Manager"}</SmallButton>
-                  <SmallButton onClick={openReschedule} icon={<CalendarDays className="h-4 w-4" />}>Reschedule</SmallButton>
-                </>
-              )}
-              {["DRAFT", "SCHEDULED", "ASSIGNED", "ARRIVED"].includes(job.status) && can("jobs.cancel") && (
-                <SmallButton onClick={() => setCancelOpen(true)} icon={<XCircle className="h-4 w-4" />} danger>Cancel job</SmallButton>
-              )}
-            </div>
-          )}
+          <div className="mt-4 pt-4 border-t border-zinc-100 flex flex-wrap gap-2 text-sm">
+            {!terminal && can("jobs.assign") && ["DRAFT", "SCHEDULED", "ASSIGNED"].includes(job.status) && (
+              <>
+                <SmallButton onClick={openAssign} icon={<UserPlus className="h-4 w-4" />}>{manager ? "Change Field Manager" : "Assign Field Manager"}</SmallButton>
+                <SmallButton onClick={openReschedule} icon={<CalendarDays className="h-4 w-4" />}>Reschedule</SmallButton>
+              </>
+            )}
+            {!terminal && ["DRAFT", "SCHEDULED", "ASSIGNED", "ARRIVED"].includes(job.status) && can("jobs.cancel") && (
+              <SmallButton onClick={() => setCancelOpen(true)} icon={<XCircle className="h-4 w-4" />} danger>Cancel job</SmallButton>
+            )}
+            {can("jobs.cancel") && ["DRAFT", "SCHEDULED", "CANCELLED"].includes(job.status) && (
+              <SmallButton onClick={() => setDeleteOpen(true)} icon={<Trash2 className="h-4 w-4" />} danger>Delete job</SmallButton>
+            )}
+          </div>
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -460,20 +465,24 @@ export default function JobPage() {
         }}
       />
 
-      <PromptModal
-        isOpen={!!resolving}
-        onClose={() => setResolving(null)}
-        title="Mark customer issue resolved"
-        description="What was done? (optional, saved on the job)"
-        placeholder="e.g. Re-cleaned the balcony, customer happy"
-        confirmText="Mark resolved"
-        onSubmit={async (notes) => {
-          const id = resolving;
-          setResolving(null);
-          if (!id) return;
-          const res = await fetch("/api/quality", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resolve-complaint", complaintId: id, notes }) });
-          if (!res.ok) setError("Could not mark the issue resolved.");
-          await refreshQuality();
+      <ConfirmModal
+        isOpen={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title="Delete job?"
+        description={`${job.jobNumber ?? "This job"} will be permanently deleted along with its checklist and evidence photos. Only unexecuted or cancelled jobs without payments can be deleted.`}
+        confirmText="Delete"
+        onConfirm={async () => {
+          setDeleteOpen(false);
+          setBusy(true);
+          const res = await fetch(`/api/jobs/${encodeURIComponent(job.id)}`, { method: "DELETE" });
+          const json = await res.json().catch(() => null);
+          setBusy(false);
+          if (!res.ok || !json?.success) {
+            setError(json?.error || "Could not delete this job.");
+          } else {
+            await refreshJobs();
+            router.push("/jobs");
+          }
         }}
       />
     </AdminLayout>

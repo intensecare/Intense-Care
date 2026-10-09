@@ -16,6 +16,8 @@ import {
   serializeComplaint,
   withStaffNames,
   fail,
+  ok,
+  readJson,
 } from "@/lib/server/serialize";
 
 /**
@@ -206,5 +208,102 @@ export async function GET(
     });
   } catch (err) {
     return errorResponse(err, "customers.get_one.route_error");
+  }
+}
+
+/** PATCH /api/customers/[id] — update customer by URL param */
+export async function PATCH(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { user, scope } = await requirePermission("customers.update");
+    const { id } = params;
+    if (scope === "OWN" && id !== user.customerId) return fail("You can only update your own profile.", 403);
+
+    const body = await readJson(request);
+    const data: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(body || {})) {
+      if (v !== undefined && k !== "id") data[k] = v;
+    }
+    if (scope === "OWN") {
+      for (const k of ["referralPartnerId", "source", "status", "notes"]) delete data[k];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, "referralPartnerId")) {
+      const nextPartnerId = (data.referralPartnerId as string | null) || null;
+      const existing = await prisma.customer.findUnique({ where: { id } });
+      if (!existing) return fail("Customer not found.", 404);
+      const prevPartnerId = existing.referralPartnerId || null;
+
+      if (nextPartnerId !== prevPartnerId) {
+        if (nextPartnerId) {
+          const partner = await prisma.referralPartner.findUnique({ where: { id: nextPartnerId } });
+          if (!partner) return fail("Referral partner not found.", 404);
+          data.referralCode = partner.code;
+        } else {
+          data.referralCode = null;
+        }
+        const counterOps = [];
+        if (prevPartnerId) {
+          counterOps.push(
+            prisma.referralPartner.update({
+              where: { id: prevPartnerId },
+              data: { totalReferrals: { decrement: 1 } },
+            })
+          );
+        }
+        if (nextPartnerId) {
+          counterOps.push(
+            prisma.referralPartner.update({
+              where: { id: nextPartnerId },
+              data: { totalReferrals: { increment: 1 } },
+            })
+          );
+        }
+        if (counterOps.length > 0) await prisma.$transaction(counterOps);
+      }
+    }
+
+    const updated = await prisma.customer.update({ where: { id }, data });
+    return ok(serializeCustomer(updated));
+  } catch (err) {
+    return errorResponse(err, "customers.patch_one.route_error");
+  }
+}
+
+/** DELETE /api/customers/[id] — remove customer by URL param */
+export async function DELETE(
+  _request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { user } = await requirePermission("customers.delete");
+    const { id } = params;
+    if (!id) return fail("Customer id is required.", 400);
+
+    const customer = await prisma.customer.findUnique({ where: { id } });
+    if (!customer) return fail("Customer not found.", 404);
+
+    const jobCount = await prisma.job.count({ where: { customerId: id } });
+    if (jobCount > 0) {
+      return fail(
+        `Customer has ${jobCount} job record(s) on file. Deactivate the customer instead of deleting to preserve booking history.`,
+        409
+      );
+    }
+
+    await prisma.customer.delete({ where: { id } });
+
+    if (customer.referralPartnerId) {
+      await prisma.referralPartner.update({
+        where: { id: customer.referralPartnerId },
+        data: { totalReferrals: { decrement: 1 } },
+      }).catch(() => null);
+    }
+
+    return ok({ id, deleted: true });
+  } catch (err) {
+    return errorResponse(err, "customers.delete_one.route_error");
   }
 }

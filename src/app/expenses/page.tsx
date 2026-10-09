@@ -2,11 +2,12 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Download, Receipt, Search, Paperclip, Check, X, Ban, BadgeCheck } from "lucide-react";
+import { Plus, Download, Receipt, Search, Paperclip, Check, X, Ban, BadgeCheck, Trash2 } from "lucide-react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PromptModal } from "@/components/common/PromptModal";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { DataTable, Pager } from "@/components/ui/data-table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ export default function ExpensesPage() {
 
   const [editing, setEditing] = useState<ExpenseRow | "new" | null>(null);
   const [reason, setReason] = useState<{ row: ExpenseRow; action: "reject" | "void" } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ExpenseRow | null>(null);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const set = (patch: Partial<typeof f>) => {
     setPage(1);
@@ -48,6 +50,14 @@ export default function ExpensesPage() {
   const act = async (row: ExpenseRow, action: string, reasonText?: string) => {
     const r = await callApi(`/api/expenses/${row.id}`, { method: "POST", json: { action, ...(reasonText ? { reason: reasonText } : {}) } });
     setNotice({ tone: r.error ? "error" : "success", text: r.error ?? "Done." });
+    if (!r.error) void reload();
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const r = await callApi(`/api/expenses/${deleteTarget.id}`, { method: "DELETE" });
+    setDeleteTarget(null);
+    setNotice({ tone: r.error ? "error" : "success", text: r.error ?? "Expense deleted." });
     if (!r.error) void reload();
   };
 
@@ -145,7 +155,12 @@ export default function ExpensesPage() {
                 )}
                 {!r.voided && r.approvalStatus === "APPROVED" && r.paymentStatus === "PENDING" && <Button size="sm" variant="outline" onClick={() => void act(r, "mark-paid")}><BadgeCheck className="h-4 w-4" aria-hidden /> Mark paid</Button>}
                 {!r.voided && <Button size="sm" variant="outline" onClick={() => setEditing(r)}>Edit</Button>}
-                {!r.voided && !r.source && <Button size="sm" variant="ghost" onClick={() => setReason({ row: r, action: "void" })}><Ban className="h-4 w-4 text-red-600" aria-hidden /> Void</Button>}
+                {!r.voided && !r.source && <Button size="sm" variant="ghost" onClick={() => setReason({ row: r, action: "void" })}><Ban className="h-4 w-4 text-amber-600" aria-hidden /> Void</Button>}
+                {!r.source && (
+                  <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => setDeleteTarget(r)}>
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                  </Button>
+                )}
               </>
             )}
           />
@@ -179,9 +194,19 @@ export default function ExpensesPage() {
           void act(r.row, r.action, text);
         }}
       />
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete this expense?"
+        description={deleteTarget ? `Permanently delete expense ${deleteTarget.expenseNumber} for ${inr(deleteTarget.amount)}? This cannot be undone.` : ""}
+        confirmText="Delete"
+        variant="destructive"
+        onConfirm={handleDelete}
+      />
     </AdminLayout>
   );
 }
+
 
 function ExpenseDialog({ row, jobs, onClose, onSaved }: { row: ExpenseRow | null; jobs: { id: string; label: string }[]; onClose: () => void; onSaved: (text: string) => void }) {
   const sourced = !!row?.source;
