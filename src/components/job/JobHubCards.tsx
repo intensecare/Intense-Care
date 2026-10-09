@@ -11,13 +11,7 @@ import { Field } from "@/components/ui/input";
 import { useApp } from "@/lib/app-context";
 import { CUSTOMER_VISIBILITY_KEYS, CUSTOMER_VISIBILITY_LABELS, type CustomerVisibility, type Job, type Property } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
-
-const VERIFY_LABEL: Record<string, string> = {
-  gps: "Verified by GPS",
-  qr: "Verified by QR scan",
-  admin_override: "Admin override",
-  manual: "Not verified — reason given",
-};
+import { arrivalMethodLabel } from "@/lib/start-verification";
 
 async function patchJob(id: string, body: Record<string, unknown>) {
   const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -72,11 +66,11 @@ export function JobHubCards({ job, property, canEdit }: { job: Job; property?: P
         {typeof loc.lat === "number" && typeof loc.lng === "number" ? (
           <LocationPicker key={`${loc.lat},${loc.lng}`} value={loc} readOnly height={180} />
         ) : (
-          <p className="text-sm text-amber-800">No map pin yet — arrival can't be GPS-checked. {canEdit ? "Add the pin with Edit." : ""}</p>
+          <p className="text-sm text-amber-800">No map pin yet — GPS start verification can't work for this job. {canEdit ? "Add the pin with Edit." : ""}</p>
         )}
         {job.arrivalVerification && (
           <p className="text-sm text-zinc-600 flex items-center gap-1.5">
-            <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden /> Arrival: {VERIFY_LABEL[job.arrivalVerification] ?? job.arrivalVerification}
+            <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden /> Arrival: {arrivalMethodLabel(job.arrivalVerification)}
             {job.arrivedAt ? ` · ${formatDateTime(job.arrivedAt)}` : ""}
           </p>
         )}

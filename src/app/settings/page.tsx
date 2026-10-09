@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth-context";
 import { isValidGstin } from "@/lib/tax";
 import { cn } from "@/lib/utils";
 import type { CustomerVisibility, NotificationSettings } from "@/lib/types";
+import { START_MODES, START_MODE_INFO, type StartVerificationSettings } from "@/lib/start-verification";
 
 const SECTIONS = [
   ["s-company", "Company"],
@@ -22,6 +23,7 @@ const SECTIONS = [
   ["s-invoice", "Invoices"],
   ["s-quote", "Quotations"],
   ["s-users", "Users"],
+  ["s-start", "Job start verification"],
   ["s-portal", "Customer portal"],
   ["s-notify", "Notifications"],
 ] as const;
@@ -128,6 +130,9 @@ export default function SettingsPage() {
   const [googleReviewUrl, setGoogleReviewUrl] = useState(s.googleBusinessReviewUrl || "");
   const [visibility, setVisibility] = useState<CustomerVisibility>(s.customerVisibility);
   const [notifications, setNotifications] = useState<NotificationSettings>(s.notifications);
+  const [startV, setStartV] = useState<StartVerificationSettings>(s.jobStartVerification);
+  const [startDist, setStartDist] = useState(String(s.jobStartVerification.maxDistanceMeters));
+  const [startAcc, setStartAcc] = useState(String(s.jobStartVerification.maxAccuracyMeters));
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -157,6 +162,9 @@ export default function SettingsPage() {
     setGoogleReviewUrl(s.googleBusinessReviewUrl || "");
     setVisibility(s.customerVisibility);
     setNotifications(s.notifications);
+    setStartV(s.jobStartVerification);
+    setStartDist(String(s.jobStartVerification.maxDistanceMeters));
+    setStartAcc(String(s.jobStartVerification.maxAccuracyMeters));
   }, [s]);
 
   const [googleStatus, setGoogleStatus] = useState<{ connected: boolean; calendarEmail: string | null } | null>(null);
@@ -174,6 +182,9 @@ export default function SettingsPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (gstinError) return setError(gstinError);
+    const dist = Number(startDist), acc = Number(startAcc);
+    if (!Number.isInteger(dist) || dist < 10 || dist > 5000) return setError("Job start: the allowed distance must be a whole number from 10 to 5000 metres.");
+    if (!Number.isInteger(acc) || acc < 5 || acc > 1000) return setError("Job start: the GPS accuracy limit must be a whole number from 5 to 1000 metres.");
     setIsSaving(true);
     setError(null);
     const r = await updateSystemSettings({
@@ -196,6 +207,7 @@ export default function SettingsPage() {
       googleBusinessReviewUrl: googleReviewUrl.trim(),
       customerVisibility: visibility,
       notifications,
+      jobStartVerification: { ...startV, maxDistanceMeters: dist, maxAccuracyMeters: acc },
     });
     setIsSaving(false);
     if (!r.success) return setError(r.message || "Couldn't save settings.");
@@ -272,6 +284,39 @@ export default function SettingsPage() {
             <span className="flex-1 text-sm font-semibold text-zinc-900">Manage users and roles</span>
             <ChevronRight className="h-4 w-4 text-zinc-400" aria-hidden />
           </Link>
+        </section>
+
+        <section id="s-start" className={section} aria-labelledby="s-start-h">
+          <Head id="s-start" title="Job start verification" hint="What a Field Manager must do at the property before the job starts. Checked by the server — the app can't skip it." />
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-zinc-800 mb-1">Default mode</legend>
+            {START_MODES.map((m) => (
+              <label key={m} className={cn("flex items-start gap-3 min-h-14 rounded-xl border px-4 py-3 cursor-pointer", startV.defaultMode === m ? "border-rose-400 bg-rose-50/50" : "border-zinc-200 hover:bg-zinc-50")}>
+                <input type="radio" name="st-start-mode" value={m} checked={startV.defaultMode === m} onChange={() => setStartV((v) => ({ ...v, defaultMode: m }))} className="mt-1 h-4 w-4 accent-rose-500" />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-zinc-900">{START_MODE_INFO[m].label}</span>
+                  <span className="block text-xs text-zinc-500">{START_MODE_INFO[m].needs} Button: “{START_MODE_INFO[m].action}”.</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Allowed distance (metres)" htmlFor="st-start-dist" hint="GPS modes: how far from the saved job location the phone may be.">
+              <Input id="st-start-dist" inputMode="numeric" value={startDist} onChange={(e) => setStartDist(e.target.value)} />
+            </Field>
+            <Field label="Required GPS accuracy (metres)" htmlFor="st-start-acc" hint="GPS modes: readings less accurate than this are refused.">
+              <Input id="st-start-acc" inputMode="numeric" value={startAcc} onChange={(e) => setStartAcc(e.target.value)} />
+            </Field>
+          </div>
+          <button type="button" role="switch" aria-checked={startV.allowPerJobOverride} onClick={() => setStartV((v) => ({ ...v, allowPerJobOverride: !v.allowPerJobOverride }))} className="w-full min-h-14 rounded-xl border border-zinc-200 px-4 py-2.5 flex items-center gap-3 text-left hover:bg-zinc-50">
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-semibold text-zinc-900">Allow a different mode on individual jobs</span>
+              <span className="block text-xs text-zinc-500">Admin can change the mode on a job&apos;s details page before it starts.</span>
+            </span>
+            <span aria-hidden className={cn("relative h-6 w-11 rounded-full transition-colors shrink-0", startV.allowPerJobOverride ? "bg-emerald-500" : "bg-zinc-300")}>
+              <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", startV.allowPerJobOverride ? "left-[1.375rem]" : "left-0.5")} />
+            </span>
+          </button>
         </section>
 
         <section id="s-portal" className={section} aria-labelledby="s-portal-h">

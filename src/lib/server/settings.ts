@@ -28,6 +28,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
       customerVisibility: { ...DEFAULT_SYSTEM_SETTINGS.customerVisibility, ...(data.customerVisibility ?? {}) },
       notifications: { ...DEFAULT_SYSTEM_SETTINGS.notifications, ...(data.notifications ?? {}) },
       referralRules: { ...DEFAULT_SYSTEM_SETTINGS.referralRules, ...(data.referralRules ?? {}) },
+      jobStartVerification: { ...DEFAULT_SYSTEM_SETTINGS.jobStartVerification, ...(data.jobStartVerification ?? {}) },
     };
   } catch {
     return { ...DEFAULT_SYSTEM_SETTINGS };

@@ -159,6 +159,8 @@ model Job {
   arrivalVerification     String?
   arrivalDistanceM        Float?
   arrivalBypassReason     String?
+  // Admin's per-job job-start verification mode (DIRECT | QR | QR_GPS | GPS); null = company default.
+  startVerificationMode   String?
   customerConfirmedAt     DateTime?
   // Unified QR/link workflow wiring (§3): the customer-confirmation token and
   // the current QR tokens resolve back to this single Job ID — never a copy.
@@ -193,22 +195,23 @@ model Job {
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 
-  customer          Customer             @relation(fields: [customerId], references: [id])
-  property          Property             @relation(fields: [propertyId], references: [id])
-  service           Service              @relation(fields: [serviceId], references: [id])
-  referralPartner   ReferralPartner?     @relation("JobAttribution", fields: [referralPartnerId], references: [id])
-  checklistItems    JobChecklistItem[]
-  invoices          Invoice[]
-  photos            JobPhoto[]
-  qualityChecks     QualityCheck[]
-  reworkTasks       ReworkTask[]
-  complaints        Complaint[]
-  commissionEntries CommissionEntry[]
-  qrTokens          QrToken[]
-  assignments       JobAssignment[]
-  assignmentEvents  JobAssignmentEvent[]
-  attendanceRecords AttendanceRecord[]
-  freelancePayments FreelancePayment[]
+  customer           Customer               @relation(fields: [customerId], references: [id])
+  property           Property               @relation(fields: [propertyId], references: [id])
+  service            Service                @relation(fields: [serviceId], references: [id])
+  referralPartner    ReferralPartner?       @relation("JobAttribution", fields: [referralPartnerId], references: [id])
+  checklistItems     JobChecklistItem[]
+  invoices           Invoice[]
+  photos             JobPhoto[]
+  qualityChecks      QualityCheck[]
+  reworkTasks        ReworkTask[]
+  complaints         Complaint[]
+  commissionEntries  CommissionEntry[]
+  qrTokens           QrToken[]
+  assignments        JobAssignment[]
+  assignmentEvents   JobAssignmentEvent[]
+  startVerifications JobStartVerification[]
+  attendanceRecords  AttendanceRecord[]
+  freelancePayments  FreelancePayment[]
 
   @@index([scheduledDate])
   @@index([status])
@@ -802,6 +805,31 @@ model JobAssignmentEvent {
 
   @@index([jobId, createdAt])
   @@index([employeeId])
+}
+
+/// Every job-start ("I'm here") verification attempt — passed, failed or Admin override.
+/// Append-only audit of who tried, which mode applied, GPS readings, distance and QR result.
+model JobStartVerification {
+  id             String   @id @default(cuid())
+  jobId          String
+  userId         String
+  userName       String
+  userRole       String
+  mode           String // DIRECT | QR | QR_GPS | GPS (the mode that applied)
+  result         String // PASSED | FAILED | OVERRIDE
+  failureReason  String?
+  lat            Float?
+  lng            Float?
+  accuracy       Float?
+  distanceM      Float?
+  qrResult       String? // VALID | INVALID | OTHER_JOB | MISSING | NOT_REQUIRED
+  overrideReason String?
+  statusBefore   String
+  statusAfter    String
+  createdAt      DateTime @default(now())
+  job            Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
 }
 
 /// A freelancer's pay for one completed assignment (one payment per assignment).

@@ -130,7 +130,7 @@ export async function GET(request: Request, { params }: { params: { token: strin
           arrivedAt: jobRow?.arrivedAt?.toISOString() ?? null,
           completedAt: jobRow?.completedAt?.toISOString() ?? null,
           customerConfirmedAt: jobRow?.customerConfirmedAt?.toISOString() ?? null,
-          arrivalVerified: ["gps", "qr", "manual", "admin_override"].includes(jobRow?.arrivalVerification ?? ""),
+          arrivalVerified: ["gps", "qr", "manual", "admin_override", "DIRECT", "QR", "QR_GPS", "GPS", "ADMIN_OVERRIDE"].includes(jobRow?.arrivalVerification ?? ""),
         },
         property: vis.location ? { title: job.propertyName, address: jobRow?.locationAddress || job.propertyAddress } : null,
         location:

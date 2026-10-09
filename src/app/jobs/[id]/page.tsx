@@ -9,6 +9,7 @@ import { CustomerLinkCard } from "@/components/common/CustomerLinkCard";
 import { JobQrButton } from "@/components/common/JobQr";
 import { TeamCard } from "@/components/job/TeamCard";
 import { JobHubCards } from "@/components/job/JobHubCards";
+import { StartVerificationCard } from "@/components/job/StartVerificationCard";
 import { InvoiceTypeBadge } from "@/components/invoice/InvoiceDocument";
 import { JobJourney } from "@/components/job/JobJourney";
 import { NextActionCard } from "@/components/job/NextAction";
@@ -358,6 +359,7 @@ export default function JobPage() {
 
             <TeamCard jobId={job.id} jobDate={job.scheduledDate} mode="admin" canEdit={!cancelled && can("jobs.assign")} />
 
+            {can("jobs.assign") && <StartVerificationCard job={job} canEdit={!cancelled} />}
             <JobHubCards job={job} property={property} canEdit={!cancelled && can("jobs.assign")} />
 
             {can("finance.view") && (

@@ -179,7 +179,7 @@ ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED
 ok((await qcc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { lat: 12.9716, lng: 77.5946 } } })).status === 403, "QC cannot mark arrival");
 const arr = await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { lat: 12.9717, lng: 77.5947, accuracy: 15 } } });
 ok(arr.json?.data?.status === "ARRIVED", "I'm Here at the property → ARRIVED");
-ok(sql(`select "arrivalVerification" from "Job" where id='${job.id}'`) === "gps", "arrival GPS verified");
+ok(sql(`select "arrivalVerification" from "Job" where id='${job.id}'`) === "GPS", "arrival GPS verified (default mode: GPS)");
 ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "IN_PROGRESS" } })).status >= 400, "FM cannot start before customer confirms");
 let cv = (await cust1(`/api/customer/job/${token}`)).json?.data;
 ok(cv?.job?.status === "ARRIVED", "customer page shows ARRIVED");

@@ -112,19 +112,20 @@ const otherProp = (await admin("/api/properties", { method: "POST", body: { cust
 const otherJob = (await admin("/api/jobs", { method: "POST", body: { customerId: cust.id, propertyId: otherProp.id, serviceId: svc.id, scheduledDate: "2026-12-30", scheduledTimeSlot: "09:00 - 10:00" } })).json?.data?.job;
 const otherTok = (await admin("/api/qr-links", { method: "POST", body: { action: "get", jobId: otherJob.id } })).json?.data.linkUrl.split("/").pop();
 const far = { lat: 13.5, lng: 77.5, accuracy: 10 };
-ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: far } })).status === 409, "GPS far from the job location → asks to verify");
+ok((await admin(`/api/jobs/${job.id}`, { method: "PATCH", body: { startVerificationMode: "QR" } })).status === 200, "admin sets this job to QR job start");
+ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: far } })).status === 409, "QR mode: GPS alone does not start the job");
 ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { ...far, qrToken: otherTok } } })).status === 409, "the QR of a different property is refused");
 ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { ...far, qrToken: "A".repeat(43) } } })).status === 409, "a made-up QR token is refused");
 const qrArr = await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { ...far, qrToken: token } } });
-ok(qrArr.json?.data?.status === "ARRIVED" && sql(`select "arrivalVerification" from "Job" where id='${job.id}'`) === "qr", "scanning the customer's QR verifies arrival (QR)");
-ok(sql(`select count(*) from "JobActivityEvent" where "jobId"='${job.id}' and message like '%verified by QR scan%'`) === "1", "activity log records QR verification");
+ok(qrArr.json?.data?.status === "ARRIVED" && sql(`select "arrivalVerification" from "Job" where id='${job.id}'`) === "QR", "scanning the customer's QR verifies arrival (QR)");
+ok(sql(`select count(*) from "JobActivityEvent" where "jobId"='${job.id}' and message like '%QR scanned%'`) === "1", "activity log records QR verification");
 const gpsJob = (await admin("/api/jobs", { method: "POST", body: { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: today, scheduledTimeSlot: "19:00 - 20:00", assignedManagerId: fm1, locationLat: 12.9601, locationLng: 77.6012 } })).json?.data?.job;
 await fmc(`/api/jobs/${gpsJob.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { lat: 12.9602, lng: 77.6013, accuracy: 12 } } });
-ok(sql(`select "arrivalVerification" from "Job" where id='${gpsJob.id}'`) === "gps", "GPS at the job's own pin verifies arrival (GPS)");
+ok(sql(`select "arrivalVerification" from "Job" where id='${gpsJob.id}'`) === "GPS", "GPS at the job's own pin verifies arrival (GPS)");
 const ovJob = (await admin("/api/jobs", { method: "POST", body: { customerId: cust.id, propertyId: prop.id, serviceId: svc.id, scheduledDate: today, scheduledTimeSlot: "20:00 - 21:00", assignedManagerId: fm1 } })).json?.data?.job;
 ok((await admin(`/api/jobs/${ovJob.id}`, { method: "PATCH", body: { status: "ARRIVED" } })).status === 400, "admin override needs a reason");
 await admin(`/api/jobs/${ovJob.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: { bypassReason: "Customer called — team on site" } } });
-ok(sql(`select "arrivalVerification" from "Job" where id='${ovJob.id}'`) === "admin_override" && sql(`select count(*) from "JobActivityEvent" where "jobId"='${ovJob.id}' and message like '%Admin override%'`) === "1", "admin override is recorded in the activity log");
+ok(sql(`select "arrivalVerification" from "Job" where id='${ovJob.id}'`) === "ADMIN_OVERRIDE" && sql(`select count(*) from "JobActivityEvent" where "jobId"='${ovJob.id}' and message like '%Admin override%'`) === "1", "admin override is recorded in the activity log");
 
 // ---------------------------------------------------------------- customer visibility (server-side)
 for (const [t, id] of [["before", "vb"], ["after", "va"]]) sql(`insert into "JobPhoto"(id,"jobId",area,"photoType","cloudinaryPublicId","photoUrl","uploadedByUserId","uploadedByName") values ('${id}','${job.id}','Hall','${t}','x','https://res.cloudinary.com/demo/image/upload/sample.jpg','${fm1}','Ravi')`);
