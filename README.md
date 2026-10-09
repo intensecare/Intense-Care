@@ -111,6 +111,8 @@ npm run db:seed               # creates the first Admin from SEED_SUPERADMIN_EMA
 npm run dev                   # http://localhost:3000
 ```
 
+**Deploying (Vercel).** Vercel runs `npm run vercel-build`, which applies any pending migrations (`scripts/migrate-deploy.mjs`) and then builds. If migrating fails the build stops and the previous deployment stays live. Set `DIRECT_URL` (or use the Neon integration's `DATABASE_URL_UNPOOLED`) to a direct, non-pooled connection for migrations. `SKIP_DB_MIGRATIONS=1` turns the step off. Run `npm run db:migrate` to apply migrations by hand.
+
 Production: `npm run build && npm run start`. **Set `APP_BASE_URL`** to your public https address — customer links and the job QR are built on it, and the app refuses to build them on localhost in production.
 
 First run: sign in as Admin → **Services** (add services and their checklist by area) → **Users** (add Field Managers and QC) → **Settings** (tax, Google review URL) → **New Job**.
