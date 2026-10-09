@@ -8,6 +8,8 @@ import { computeInvoiceFigures, type InvoiceType } from "@/lib/tax";
 import { ASSIGNABLE_ROLES, can } from "@/lib/rbac";
 import type { QuoteLine, SystemSettings, CustomerVisibility } from "@/lib/types";
 import { CUSTOMER_VISIBILITY_KEYS } from "@/lib/types";
+import { formatAddress, normalizeCoords } from "@/lib/location";
+import { syncOpenJobsToProperty } from "./locations";
 
 /**
  * Creating a job — ONE implementation used by "New job" and by converting a
@@ -67,6 +69,8 @@ export interface NewJob {
   customerNotes?: string | null;
   referralPartnerId?: string | null;
   location?: { lat: number | null; lng: number | null; address: string | null } | null;
+  /** Also save the job's pin on its property when the property has none yet. */
+  saveLocationToProperty?: boolean;
   customerVisibility?: Partial<CustomerVisibility> | null;
   status?: string;
   quoteId?: string | null;
@@ -102,10 +106,24 @@ export async function createJobWithInvoice(input: NewJob, settings: SystemSettin
   const subtotal = Math.round(items.reduce((a, l) => a + l.amount, 0) * 100) / 100;
   const f = computeInvoiceFigures({ invoiceType: input.invoice.type, subtotal, discount: input.invoice.discount ?? 0, gstRatePercent: settings.taxRatePercent, interState: input.invoice.interState });
   const gst = f.invoiceType === "GST";
-  const propertyAddress = [property.address, property.city].filter(Boolean).join(", ");
-  const loc = input.location ?? { lat: property.lat, lng: property.lng, address: propertyAddress };
+  const propertyAddress = formatAddress(property);
+  const propertyPin = normalizeCoords(property.lat, property.lng);
+  // The job's pin: a valid pin sent for this job, else the property's saved pin.
+  const sent = input.location ?? null;
+  const sentPin = sent ? normalizeCoords(sent.lat, sent.lng) : null;
+  if (sent && !sentPin && (sent.lat !== null || sent.lng !== null)) {
+    throw new HttpError(400, "The job's map location needs both latitude and longitude (and can't be 0, 0).");
+  }
+  const ownPin = sentPin && !(propertyPin && Math.abs(propertyPin.lat - sentPin.lat) < 1e-6 && Math.abs(propertyPin.lng - sentPin.lng) < 1e-6) ? sentPin : null;
+  const pinOnProperty = !!ownPin && !propertyPin && input.saveLocationToProperty === true;
+  const pin = ownPin ?? propertyPin;
+  const loc = { lat: pin?.lat ?? null, lng: pin?.lng ?? null, address: sent?.address?.trim() || propertyAddress };
+  const locationSource = ownPin && !pinOnProperty ? "JOB" : "PROPERTY";
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
+    if (pinOnProperty && ownPin) {
+      await tx.property.update({ where: { id: property.id }, data: { lat: ownPin.lat, lng: ownPin.lng, locationSource: "MAP_PIN", locationUpdatedAt: new Date() } });
+    }
     const job = await tx.job.create({
       data: {
         jobSerial: await nextJobSerial(tx, customer.name, input.scheduledDate),
@@ -124,6 +142,7 @@ export async function createJobWithInvoice(input: NewJob, settings: SystemSettin
         locationLat: loc.lat,
         locationLng: loc.lng,
         locationAddress: loc.address || propertyAddress || null,
+        locationSource,
         customerVisibility: (input.customerVisibility ?? undefined) as Prisma.InputJsonValue | undefined,
         quoteId: input.quoteId ?? null,
       },
@@ -160,6 +179,9 @@ export async function createJobWithInvoice(input: NewJob, settings: SystemSettin
     await tx.customer.update({ where: { id: customer.id }, data: { totalBookings: { increment: 1 } } });
     return { job, invoice };
   });
+  // The property just got its first pin: its other open jobs get it too.
+  if (pinOnProperty) await syncOpenJobsToProperty(property.id);
+  return result;
 }
 
 /** Best-effort follow-ups after a job is created: calendar sync + its one customer QR link. */

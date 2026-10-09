@@ -110,6 +110,10 @@ export const PERMISSIONS = [
   "amc.view",
   "amc.manage",
 
+  /** Lead Management: see the pipeline / create, update, log calls and convert. */
+  "leads.view",
+  "leads.manage",
+
   /** HR. `hr.view` is the staff directory (name, phone, skills, availability);
    *  `hr.sensitive` is compensation, address, emergency contact and documents. */
   "hr.view",

@@ -16,6 +16,7 @@ import {
   serializeComplaint,
   withStaffNames,
   fail,
+  JOB_PROPERTY_SELECT,
 } from "@/lib/server/serialize";
 
 /**
@@ -89,7 +90,7 @@ export async function GET(
           orderBy: { createdAt: "desc" },
           include: {
             customer: { select: { name: true, phone: true } },
-            property: { select: { title: true, address: true } },
+            property: { select: JOB_PROPERTY_SELECT },
             service: {
               select: { id: true, name: true, basePrice: true, estimatedDurationHours: true },
             },

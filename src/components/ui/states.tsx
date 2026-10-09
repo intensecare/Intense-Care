@@ -43,7 +43,7 @@ export function ErrorState({ message = "Something went wrong while loading this 
 }
 
 /** Inline success / error message after an action. */
-export function Notice({ tone, children, className }: { tone: "success" | "error" | "info"; children: React.ReactNode; className?: string }) {
+export function Notice({ tone, children, className }: { tone: "success" | "error" | "info" | "warning"; children: React.ReactNode; className?: string }) {
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
@@ -52,6 +52,7 @@ export function Notice({ tone, children, className }: { tone: "success" | "error
         tone === "success" && "bg-emerald-600 text-white",
         tone === "error" && "bg-red-50 border border-red-200 text-red-800",
         tone === "info" && "bg-info-50 border border-info-200 text-info-700",
+        tone === "warning" && "bg-amber-50 border border-amber-200 text-amber-900",
         className
       )}
     >

@@ -287,14 +287,14 @@ export default function SettingsPage() {
         </section>
 
         <section id="s-start" className={section} aria-labelledby="s-start-h">
-          <Head id="s-start" title="Job start verification" hint="What a Field Manager must do at the property before the job starts. Checked by the server — the app can't skip it." />
+          <Head id="s-start" title="Job start verification" hint="What a Field Manager must do at the property before the job starts. Checked by the server — the app can't skip it. Phone GPS is an estimate, not proof; choose GPS + QR where you need stronger assurance." />
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium text-zinc-800 mb-1">Default mode</legend>
-            {START_MODES.map((m) => (
+            {START_MODES.map((m, i) => (
               <label key={m} className={cn("flex items-start gap-3 min-h-14 rounded-xl border px-4 py-3 cursor-pointer", startV.defaultMode === m ? "border-rose-400 bg-rose-50/50" : "border-zinc-200 hover:bg-zinc-50")}>
                 <input type="radio" name="st-start-mode" value={m} checked={startV.defaultMode === m} onChange={() => setStartV((v) => ({ ...v, defaultMode: m }))} className="mt-1 h-4 w-4 accent-rose-500" />
                 <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-zinc-900">{START_MODE_INFO[m].label}</span>
+                  <span className="block text-sm font-semibold text-zinc-900">{i + 1}. {START_MODE_INFO[m].label} <span className="font-mono text-xs text-zinc-500">{m}</span></span>
                   <span className="block text-xs text-zinc-500">{START_MODE_INFO[m].needs} Button: “{START_MODE_INFO[m].action}”.</span>
                 </span>
               </label>

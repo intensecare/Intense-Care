@@ -90,6 +90,7 @@ interface AppContextType {
   refreshJobs: () => Promise<void>;
   /** Re-fetches the customer directory from the server (post-write re-sync). */
   refreshCustomers: () => Promise<void>;
+  refreshProperties: () => Promise<void>;
   /** Re-fetches the referral ledger from the server (post-write re-sync; Admin only). */
   refreshReferrals: () => Promise<void>;
   /** Re-fetches QC checks, issues, rework tasks and complaints. Live-syncs
@@ -180,7 +181,7 @@ interface AppContextType {
   ) => Promise<{ success: boolean; message: string; customer?: Customer }>;
   deleteCustomer: (id: string) => Promise<{ success: boolean; message: string }>;
   createProperty: (propertyData: Partial<Property>) => Promise<{ success: boolean; message: string; property?: Property }>;
-  updateProperty: (id: string, updates: Partial<Property>) => Promise<{ success: boolean; message: string; property?: Property }>;
+  updateProperty: (id: string, updates: Partial<Property> & { clearLocation?: boolean }) => Promise<{ success: boolean; message: string; property?: Property }>;
   deleteProperty: (id: string) => Promise<{ success: boolean; message: string }>;
   createPartner: (partnerData: Partial<ReferralPartner>) => Promise<{ success: boolean; message: string; partner?: ReferralPartner }>;
   updatePartner: (
@@ -518,6 +519,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshCustomers = useCallback(async () => {
     const r = await api<Customer[]>("/api/customers");
     if (r.ok && r.data) setCustomers(r.data);
+  }, []);
+
+  const refreshProperties = useCallback(async () => {
+    const r = await api<Property[]>("/api/properties");
+    if (r.ok && r.data) setProperties(r.data);
   }, []);
 
   /**
@@ -1048,7 +1054,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Customer deleted." };
   };
 
-  const createProperty = async (propertyData: Partial<Property>) => {
+  const createProperty = async (propertyData: Partial<Property> & { clearLocation?: boolean }) => {
     const r = await api<Property>("/api/properties", {
       method: "POST",
       body: JSON.stringify({
@@ -1058,6 +1064,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         propertyType: propertyData.propertyType,
         city: propertyData.city,
         postalCode: propertyData.postalCode,
+        addressLine: propertyData.addressLine,
+        locality: propertyData.locality,
+        state: propertyData.state,
+        country: propertyData.country,
+        locationNotes: propertyData.locationNotes,
+        locationSource: propertyData.lat != null ? propertyData.locationSource : undefined,
         bedrooms: propertyData.bedrooms,
         bathrooms: propertyData.bathrooms,
         carpetAreaSqFt: propertyData.carpetAreaSqFt,
@@ -1075,13 +1087,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message: "Property created.", property: r.data };
   };
 
-  const updateProperty = async (id: string, updates: Partial<Property>) => {
+  const updateProperty = async (id: string, updates: Partial<Property> & { clearLocation?: boolean }) => {
     const r = await api<Property>("/api/properties", {
       method: "PATCH",
       body: JSON.stringify({ id, ...updates }),
     });
     if (!r.ok || !r.data) return { success: false, message: r.error || "Could not update the property." };
     setProperties((prev) => prev.map((p) => (p.id === id ? (r.data as Property) : p)));
+    // Open jobs that follow this property may have moved with it.
+    void refreshJobs();
     return { success: true, message: "Property updated.", property: r.data };
   };
 
@@ -1451,6 +1465,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         transitionJobStatus,
         refreshJobs,
         refreshCustomers,
+        refreshProperties,
         refreshReferrals,
         refreshQuality,
         refreshPhotos,

@@ -41,7 +41,8 @@ import { compressImageForUpload } from "@/lib/image-compress";
 import { formatTimeSlot, formatDate, cn } from "@/lib/utils";
 import { getNextAction } from "@/lib/rbac";
 import { REWORK_STATUSES } from "@/lib/status";
-import { START_MODE_INFO, effectiveStartMode } from "@/lib/start-verification";
+import { START_MODE_INFO, effectiveStartMode, modeNeedsGps, modeNeedsQr } from "@/lib/start-verification";
+import { distanceMeters, navigateUrl, resolveServiceLocation, type ServiceLocation } from "@/lib/location";
 import type { Job, JobPhoto } from "@/lib/types";
 
 type FieldJob = Job & { customerName?: string; customerPhone?: string; propertyTitle?: string; service?: { name: string } };
@@ -49,8 +50,11 @@ type FieldJob = Job & { customerName?: string; customerPhone?: string; propertyT
 const DONE = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
 const startTime = (slot: string) => formatTimeSlot(slot).split(" - ")[0];
 const addressOf = (j: FieldJob) => (j.propertyTitle ?? "").split(" - ").slice(1).join(" - ") || j.propertyTitle || "";
-const mapsUrl = (j: FieldJob) =>
-  `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(typeof j.locationLat === "number" && typeof j.locationLng === "number" ? `${j.locationLat},${j.locationLng}` : addressOf(j))}`;
+const propertyNameOf = (j: FieldJob) => (j.propertyTitle ?? "").split(" - ")[0] || "Property";
+/** The SAVED service location (job pin, else property pin) — never the phone's own position. */
+const whereOf = (j: FieldJob): ServiceLocation => j.serviceLocation ?? { ...resolveServiceLocation(j), address: j.locationAddress || addressOf(j) };
+
+type CheckState = { status: "idle" | "checking" | "passed" | "failed" | "waiting"; message?: string | null };
 
 /* ========================================================================= */
 /* Field Manager job steps                                                    */
@@ -155,16 +159,22 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const patch = async (body: Record<string, unknown>) => {
+  type Verification = { gps: { result: string; message: string | null; distanceM: number | null }; qr: { result: string; message: string | null } };
+  const patch = async (body: Record<string, unknown>): Promise<{ ok: boolean; status: number; error?: string; verification?: Verification }> => {
     const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
     if (!res) return { ok: false, status: 0, error: "You're offline. Try again when the connection returns." };
     const json = await res.json().catch(() => null);
-    return { ok: res.ok && json?.success, status: res.status, error: json?.error as string | undefined };
+    return { ok: !!(res.ok && json?.success), status: res.status, error: json?.error as string | undefined, verification: json?.verification as Verification | undefined };
   };
 
   type Fix = { lat: number; lng: number; accuracy: number };
   const locate = (): Promise<{ fix: Fix } | { problem: string }> =>
     new Promise((resolve) => {
+      if (typeof window !== "undefined" && !window.isSecureContext) {
+        setGps("unavailable");
+        resolve({ problem: "Location only works on the secure (https) address of the app. Ask the office for the correct link." });
+        return;
+      }
       if (typeof navigator === "undefined" || !navigator.geolocation) {
         setGps("unavailable");
         resolve({ problem: "This browser can't share your location. Open the app in Chrome or Safari with location turned on." });
@@ -187,7 +197,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
                 : "Your phone couldn't find its location. Turn on GPS / Location and try again.",
           });
         },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
       );
     });
 
@@ -197,8 +207,12 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
    * if a check fails the Field Manager retries, or the office uses an Admin override.
    */
   const startMode = effectiveStartMode(job?.startVerificationMode, systemSettings.jobStartVerification);
-  const needsGps = startMode === "GPS" || startMode === "QR_GPS";
+  const needsGps = modeNeedsGps(startMode);
+  const needsQr = modeNeedsQr(startMode);
+  const sv = systemSettings.jobStartVerification;
   const pendingFix = useRef<Fix | null>(null);
+  const [gpsCheck, setGpsCheck] = useState<CheckState>({ status: "idle" });
+  const [qrCheck, setQrCheck] = useState<CheckState>({ status: "idle" });
 
   const sendStart = async (arrival: Record<string, unknown>) => {
     setBusy(true);
@@ -206,36 +220,66 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
     const r = await patch({ status: "ARRIVED", arrival });
     setBusy(false);
     pendingFix.current = null;
+    // The server's verdict wins: show its GPS and QR results separately.
+    if (r.verification) {
+      if (needsGps) setGpsCheck({ status: r.verification.gps.result === "PASSED" ? "passed" : "failed", message: r.verification.gps.message });
+      if (needsQr) setQrCheck({ status: r.verification.qr.result === "VALID" ? "passed" : "failed", message: r.verification.qr.message });
+    }
     if (!r.ok) {
+      if (r.status === 409 && !r.verification && /just updated/i.test(r.error ?? "")) {
+        // Someone (or a second tap) already moved the job — reload rather than retry.
+        await refreshJobs();
+      }
       setError(r.error ?? "We couldn't start the job. Try again.");
       setVerifyOpen(true);
       return;
     }
+    if (needsGps) setGpsCheck((g) => ({ status: "passed", message: g.message ?? "GPS verified." }));
+    if (needsQr) setQrCheck((q) => ({ status: "passed", message: q.message ?? "QR verified." }));
     setGps(needsGps ? "verified" : "ready");
-    flash("Arrival recorded ✓ The customer has been asked to confirm.");
+    flash("Job started ✓ The customer has been asked to confirm.");
     await refreshJobs();
   };
 
   const startJob = async () => {
+    if (busy) return; // no double submits
     setError(null);
     if (startMode === "DIRECT") return sendStart({});
-    if (startMode === "QR") return setScanOpen(true);
+    setQrCheck({ status: needsQr ? "idle" : "idle" });
+    setGpsCheck({ status: "checking", message: "Getting your GPS location…" });
     setBusy(true);
     const loc = await locate();
     setBusy(false);
     if ("problem" in loc) {
+      setGpsCheck({ status: "failed", message: loc.problem });
       setError(loc.problem);
       setVerifyOpen(true);
       return;
     }
-    if (loc.fix.accuracy > systemSettings.jobStartVerification.maxAccuracyMeters) {
-      setError(`Your GPS signal isn't accurate enough yet (±${Math.round(loc.fix.accuracy)} m; needs ±${systemSettings.jobStartVerification.maxAccuracyMeters} m). Wait a few seconds in the open and try again.`);
+    if (loc.fix.accuracy > sv.maxAccuracyMeters) {
+      const m = `Your GPS signal isn't accurate enough yet (±${Math.round(loc.fix.accuracy)} m; needs ±${sv.maxAccuracyMeters} m). Wait a few seconds in the open and try again.`;
+      setGpsCheck({ status: "failed", message: m });
+      setError(m);
       setVerifyOpen(true);
       return;
     }
-    if (startMode === "GPS") return sendStart(loc.fix);
-    // QR + GPS: location captured, now the QR.
+    // A local estimate so the Field Manager isn't sent to scan a QR when they're clearly too far; the server re-checks.
+    const target = job ? whereOf(job) : null;
+    if (target && target.lat !== null && target.lng !== null) {
+      const d = Math.round(distanceMeters(loc.fix.lat, loc.fix.lng, target.lat, target.lng));
+      if (d > sv.maxDistanceMeters) {
+        const m = `You appear to be ${d} m from the saved job location (allowed: ${sv.maxDistanceMeters} m). Move closer and try again.`;
+        setGpsCheck({ status: "failed", message: m });
+        setError(m);
+        setVerifyOpen(true);
+        return;
+      }
+      setGpsCheck({ status: needsQr ? "passed" : "checking", message: `About ${d} m from the job (±${Math.round(loc.fix.accuracy)} m)${needsQr ? " — final check after the QR scan" : ""}.` });
+    }
+    if (!needsQr) return sendStart(loc.fix);
+    // GPS + QR: location captured, now the QR.
     pendingFix.current = loc.fix;
+    setQrCheck({ status: "waiting", message: "Scan the customer's QR for this job." });
     setScanOpen(true);
   };
 
@@ -331,13 +375,15 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
   const canEditPhotos = job.status === "IN_PROGRESS" || inRework;
   const confirmed = job.status === "CUSTOMER_VERIFIED" || (job.status === "ARRIVED" && !!job.customerConfirmedAt);
   const step = fmStep(job.status);
+  const where = whereOf(job);
+  const nav = navigateUrl(where);
 
   /* ------------------------------------------------ the ONE sticky action */
   const cta = (() => {
     if (job.status === "SCHEDULED" || job.status === "ASSIGNED") {
       return (
         <Button size="lg" className="w-full" loading={busy} onClick={() => void startJob()}>
-          {startMode === "QR" || startMode === "QR_GPS" ? <ScanLine className="h-5 w-5" aria-hidden /> : startMode === "GPS" ? <MapPin className="h-5 w-5" aria-hidden /> : <Play className="h-5 w-5" aria-hidden />} {START_MODE_INFO[startMode].action.toUpperCase()}
+          {needsQr ? <ScanLine className="h-5 w-5" aria-hidden /> : needsGps ? <MapPin className="h-5 w-5" aria-hidden /> : <Play className="h-5 w-5" aria-hidden />} {START_MODE_INFO[startMode].action.toUpperCase()}
         </Button>
       );
     }
@@ -407,14 +453,25 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
         </div>
         <dl className="space-y-2">
           <Row icon={<Sparkles className="h-5 w-5" aria-hidden />} label="Service" value={job.service?.name ?? "Service"} strong />
+          <Row icon={<Briefcase className="h-5 w-5" aria-hidden />} label="Job ID" value={job.jobNumber ?? job.id} />
           <Row icon={<User className="h-5 w-5" aria-hidden />} label="Customer" value={job.customerName ?? "Customer"} />
-          <Row icon={<MapPin className="h-5 w-5" aria-hidden />} label="Property" value={job.propertyTitle ?? "Property"} />
+          <Row icon={<MapPin className="h-5 w-5" aria-hidden />} label="Property" value={propertyNameOf(job)} />
+          <Row icon={<Navigation className="h-5 w-5" aria-hidden />} label="Service address" value={where.address || "No address saved — call the office"} />
         </dl>
+        {where.lat === null && !DONE.includes(job.status) && (
+          <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            No saved map pin for this job. Navigate uses the address text.{needsGps ? " The GPS start check can't pass until the office saves the pin — call them before you go." : ""}
+          </p>
+        )}
         {!DONE.includes(job.status) && job.status !== "CANCELLED" && (
           <div className="grid grid-cols-2 gap-2">
-            <a href={mapsUrl(job)} target="_blank" rel="noreferrer" className="h-12 rounded-xl bg-zinc-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
-              <Navigation className="h-5 w-5" aria-hidden /> NAVIGATE
-            </a>
+            {nav ? (
+              <a href={nav} target="_blank" rel="noreferrer" className="h-12 rounded-xl bg-zinc-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
+                <Navigation className="h-5 w-5" aria-hidden /> NAVIGATE
+              </a>
+            ) : (
+              <span className="h-12 rounded-xl bg-zinc-50 border border-zinc-200 text-zinc-400 text-sm inline-flex items-center justify-center">No location</span>
+            )}
             {job.customerPhone ? (
               <a href={`tel:${job.customerPhone}`} className="h-12 rounded-xl border border-zinc-300 bg-white text-zinc-900 text-sm font-semibold inline-flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
                 <Phone className="h-5 w-5 text-emerald-600" aria-hidden /> CALL
@@ -425,6 +482,22 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
           </div>
         )}
       </section>
+
+      {(job.status === "SCHEDULED" || job.status === "ASSIGNED") && (
+        <section className="rounded-2xl border border-zinc-200 bg-white p-4 space-y-3" aria-labelledby="fm-start-h">
+          <div>
+            <div id="fm-start-h" className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Required to start</div>
+            <div className="mt-0.5 text-base font-semibold text-zinc-950">{START_MODE_INFO[startMode].label}</div>
+            <p className="text-sm text-zinc-600">{START_MODE_INFO[startMode].needs}{needsGps ? ` Within ${sv.maxDistanceMeters} m, GPS ±${sv.maxAccuracyMeters} m or better.` : ""}</p>
+          </div>
+          {(needsGps || needsQr) && (
+            <ul className="space-y-2" aria-label="Verification progress">
+              {needsGps && <CheckRow label="1. GPS location" state={gpsCheck} />}
+              {needsQr && <CheckRow label="2. Customer's QR" state={qrCheck} />}
+            </ul>
+          )}
+        </section>
+      )}
 
       {job.status !== "CANCELLED" && (
         <section className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -582,7 +655,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
           </DialogHeader>
           <div className="space-y-2">
             <Button size="lg" className="w-full" loading={busy} onClick={() => { setVerifyOpen(false); void startJob(); }}>
-              {startMode === "QR" ? <ScanLine className="h-5 w-5" aria-hidden /> : <MapPin className="h-5 w-5" aria-hidden />} Try again — {START_MODE_INFO[startMode].action}
+              {needsGps ? <MapPin className="h-5 w-5" aria-hidden /> : <Play className="h-5 w-5" aria-hidden />} Try again — {START_MODE_INFO[startMode].action}
             </Button>
             <p className="text-xs text-zinc-500 text-center">Still stuck? Call the office — only Admin can override this check.</p>
           </div>
@@ -590,12 +663,13 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
       </Dialog>
       <QrScanner
         open={scanOpen}
-        onClose={() => { setScanOpen(false); pendingFix.current = null; }}
-        title={startMode === "QR_GPS" ? "Location captured ✓ Now scan the QR" : "Scan the customer's QR"}
+        onClose={() => { setScanOpen(false); pendingFix.current = null; setQrCheck({ status: "failed", message: "QR scan cancelled. Tap the button to verify again." }); }}
+        title="GPS captured ✓ Now scan the customer's QR"
         description="Ask the customer to show their service QR (on their phone or the printed card), then point the camera at it."
         onToken={(token) => {
           setScanOpen(false);
-          void sendStart({ ...(startMode === "QR_GPS" && pendingFix.current ? pendingFix.current : {}), qrToken: token });
+          setQrCheck({ status: "checking", message: "Checking the QR…" });
+          void sendStart({ ...(pendingFix.current ?? {}), qrToken: token });
         }}
       />
       <ConfirmModal
@@ -611,6 +685,19 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
         }}
       />
     </MobileLayout>
+  );
+}
+
+function CheckRow({ label, state }: { label: string; state: CheckState }) {
+  const tone = state.status === "passed" ? "text-emerald-700" : state.status === "failed" ? "text-red-700" : state.status === "idle" ? "text-zinc-500" : "text-amber-800";
+  const icon =
+    state.status === "passed" ? <CheckCircle2 className="h-5 w-5" aria-hidden /> : state.status === "failed" ? <AlertTriangle className="h-5 w-5" aria-hidden /> : state.status === "checking" ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <Circle className="h-5 w-5" aria-hidden />;
+  const word = { idle: "Not checked yet", checking: "Checking…", waiting: "Waiting", passed: "Passed", failed: "Failed" }[state.status];
+  return (
+    <li className={cn("rounded-xl border px-3 py-2", state.status === "passed" ? "border-emerald-200 bg-emerald-50" : state.status === "failed" ? "border-red-200 bg-red-50" : "border-zinc-200")}>
+      <div className={cn("flex items-center gap-2 text-sm font-semibold", tone)}>{icon} {label} · {word}</div>
+      {state.message && <p className="mt-0.5 text-sm text-zinc-700">{state.message}</p>}
+    </li>
   );
 }
 
@@ -702,7 +789,7 @@ export function FieldJobList({ tab }: { tab: string }) {
           <div className="mt-3 text-base font-semibold text-zinc-950">{j.service?.name ?? "Service"}</div>
           <div className="text-base text-zinc-700">{j.customerName ?? "Customer"}</div>
           <div className="text-sm text-zinc-500 flex items-start gap-1 mt-1">
-            <MapPin className="h-4 w-4 mt-0.5 shrink-0" aria-hidden /> <span className="line-clamp-2">{addressOf(j) || j.propertyTitle}</span>
+            <MapPin className="h-4 w-4 mt-0.5 shrink-0" aria-hidden /> <span className="line-clamp-2">{whereOf(j).address || j.propertyTitle}</span>
           </div>
           {next && (
             <div className={cn("mt-3 text-sm font-semibold inline-flex items-center gap-1", actionable ? (next.tone === "warning" ? "text-amber-700" : "text-rose-600") : "text-zinc-500")}>
@@ -710,9 +797,9 @@ export function FieldJobList({ tab }: { tab: string }) {
             </div>
           )}
         </Link>
-        {showNavigate && (
+        {showNavigate && navigateUrl(whereOf(j)) && (
           <div className="px-5 pb-5">
-            <a href={mapsUrl(j)} target="_blank" rel="noreferrer" className="h-12 w-full rounded-xl bg-zinc-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2">
+            <a href={navigateUrl(whereOf(j))!} target="_blank" rel="noreferrer" className="h-12 w-full rounded-xl bg-zinc-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2">
               <Navigation className="h-5 w-5" aria-hidden /> NAVIGATE
             </a>
           </div>

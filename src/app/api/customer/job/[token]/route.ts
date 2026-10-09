@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveServiceLocation } from "@/lib/location";
 import { z } from "zod";
 import crypto from "crypto";
 import { prisma } from "@/lib/server/prisma";
@@ -86,6 +87,8 @@ export async function GET(request: Request, { params }: { params: { token: strin
           locationLat: true,
           locationLng: true,
           locationAddress: true,
+          locationSource: true,
+          property: { select: { address: true, city: true, postalCode: true, locality: true, state: true, lat: true, lng: true } },
           paymentStatus: true,
           quoteId: true,
         },
@@ -95,6 +98,7 @@ export async function GET(request: Request, { params }: { params: { token: strin
       getSystemSettings(),
     ]);
     const isGst = invoiceRow?.invoiceType === "GST";
+    const where = jobRow ? resolveServiceLocation(jobRow, jobRow.property) : null;
     const QC_PENDING = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"];
     const QC_REWORK = ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
     const DONE = ["PASS", "CUSTOMER_APPROVAL", "COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
@@ -130,13 +134,10 @@ export async function GET(request: Request, { params }: { params: { token: strin
           arrivedAt: jobRow?.arrivedAt?.toISOString() ?? null,
           completedAt: jobRow?.completedAt?.toISOString() ?? null,
           customerConfirmedAt: jobRow?.customerConfirmedAt?.toISOString() ?? null,
-          arrivalVerified: ["gps", "qr", "manual", "admin_override", "DIRECT", "QR", "QR_GPS", "GPS", "ADMIN_OVERRIDE"].includes(jobRow?.arrivalVerification ?? ""),
+          arrivalVerified: ["gps", "qr", "manual", "admin_override", "DIRECT", "QR", "QR_GPS", "GPS", "GPS_QR", "ADMIN_OVERRIDE"].includes(jobRow?.arrivalVerification ?? ""),
         },
-        property: vis.location ? { title: job.propertyName, address: jobRow?.locationAddress || job.propertyAddress } : null,
-        location:
-          vis.location && typeof jobRow?.locationLat === "number" && typeof jobRow?.locationLng === "number"
-            ? { lat: jobRow.locationLat, lng: jobRow.locationLng }
-            : null,
+        property: vis.location ? { title: job.propertyName, address: where?.address || job.propertyAddress } : null,
+        location: vis.location && where && where.lat !== null && where.lng !== null ? { lat: where.lat, lng: where.lng } : null,
         customer: { name: job.customerName, phoneMasked: `******${job.customerPhone.replace(/[^0-9]/g, "").slice(-4)}` },
         team: vis.team ? team : [],
         checklist: vis.status ? checklist.map((c) => ({ id: c.id, area: c.area, task: c.task, completed: c.status === "completed" || c.status === "skipped" })) : [],

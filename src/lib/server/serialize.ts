@@ -5,6 +5,7 @@
  * the hydrated client store consumes. Dates serialize as ISO strings.
  */
 import { Prisma } from "@prisma/client";
+import { normalizeCoords, resolveServiceLocation } from "@/lib/location";
 import type {
   Customer,
   Property,
@@ -51,6 +52,7 @@ export function serializeCustomer(c: Prisma.CustomerGetPayload<object>): Custome
 }
 
 export function serializeProperty(p: Prisma.PropertyGetPayload<object>): Property {
+  const coords = normalizeCoords(p.lat, p.lng);
   return {
     id: p.id,
     customerId: p.customerId,
@@ -59,12 +61,20 @@ export function serializeProperty(p: Prisma.PropertyGetPayload<object>): Propert
     address: p.address,
     city: p.city ?? "",
     postalCode: p.postalCode ?? "",
+    addressLine: p.addressLine ?? undefined,
+    locality: p.locality ?? undefined,
+    state: p.state ?? undefined,
+    country: p.country ?? undefined,
     carpetAreaSqFt: p.areaSqFt,
     bedrooms: p.bedrooms,
     bathrooms: p.bathrooms,
-    gpsCoordinates: { lat: p.lat ?? 0, lng: p.lng ?? 0 },
-    lat: p.lat ?? undefined,
-    lng: p.lng ?? undefined,
+    // Never a placeholder: a missing or half pin is sent as "no pin".
+    lat: coords?.lat ?? null,
+    lng: coords?.lng ?? null,
+    locationNotes: p.locationNotes ?? undefined,
+    locationSource: p.locationSource ?? undefined,
+    locationUpdatedAt: p.locationUpdatedAt ? p.locationUpdatedAt.toISOString() : undefined,
+    locationVerifiedAt: p.locationVerifiedAt ? p.locationVerifiedAt.toISOString() : undefined,
     accessNotes: p.accessNotes ?? undefined,
     parkingInstructions: p.parkingInstructions ?? undefined,
     preferredTime: p.preferredTime ?? undefined,
@@ -129,6 +139,19 @@ export function redactJobForOps(job: SerializedJob): OpsSafeJob {
   return rest;
 }
 
+/** The property fields every job query selects, so the service location resolves. */
+export const JOB_PROPERTY_SELECT = {
+  title: true,
+  address: true,
+  city: true,
+  postalCode: true,
+  locality: true,
+  state: true,
+  lat: true,
+  lng: true,
+} as const;
+export type JobPropertyLocation = Prisma.PropertyGetPayload<{ select: typeof JOB_PROPERTY_SELECT }>;
+
 /** Job shape from the DB joined with customer/property/service display names. */
 export type SerializedJob = Job & {
   customerName?: string;
@@ -141,10 +164,9 @@ export function serializeJob(
   j: Prisma.JobGetPayload<{
     include: {
       customer: { select: { name: true; phone: true } };
-      property: { select: { title: true; address: true } };
       service: { select: { id: true; name: true; basePrice: true; estimatedDurationHours: true } };
     };
-  }>
+  }> & { property?: JobPropertyLocation | null }
 ): SerializedJob {
   return {
     id: j.id,
@@ -175,6 +197,8 @@ export function serializeJob(
     locationLat: j.locationLat ?? undefined,
     locationLng: j.locationLng ?? undefined,
     locationAddress: j.locationAddress ?? undefined,
+    locationSource: j.locationSource === "JOB" ? "JOB" : "PROPERTY",
+    serviceLocation: resolveServiceLocation(j, j.property),
     customerNotes: j.customerNotes ?? undefined,
     customerVisibility: (j.customerVisibility as Job["customerVisibility"]) ?? undefined,
     quoteId: j.quoteId ?? undefined,

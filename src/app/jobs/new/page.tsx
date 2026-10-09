@@ -17,6 +17,7 @@ import { ASSIGNABLE_ROLES } from "@/lib/rbac";
 import { onDutyWorkerIds } from "@/lib/staff-availability";
 import { cn, formatCurrency } from "@/lib/utils";
 import type { CustomerVisibility } from "@/lib/types";
+import { formatAddress, hasCoords } from "@/lib/location";
 
 const today = () => new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);
 
@@ -44,6 +45,7 @@ function NewJobPage() {
   const [customerId, setCustomerId] = useState(params.get("customerId") ?? "");
   const [propertyId, setPropertyId] = useState(params.get("propertyId") ?? "");
   const [location, setLocation] = useState<LocationValue>({ lat: null, lng: null, address: "" });
+  const [savePinToProperty, setSavePinToProperty] = useState(true);
   const [serviceId, setServiceId] = useState("");
   const [invoiceType, setInvoiceType] = useState<"GST" | "NON_GST">("GST");
   const [interState, setInterState] = useState(false);
@@ -81,7 +83,7 @@ function NewJobPage() {
   }, [customerId, customerProps, propertyId]);
   // Location starts at the property's pin and address.
   useEffect(() => {
-    if (property) setLocation({ lat: property.lat ?? null, lng: property.lng ?? null, address: [property.address, property.city].filter(Boolean).join(", ") });
+    if (property) setLocation({ lat: property.lat ?? null, lng: property.lng ?? null, address: formatAddress(property) });
     // Only when a different property is picked — not on every data refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [property?.id]);
@@ -92,7 +94,10 @@ function NewJobPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [service?.id]);
 
-  const missing = !customerId ? "Select a customer." : !propertyId ? "Select a property." : !serviceId ? "Select a service." : !date ? "Pick a date." : from >= to ? "The end time must be after the start time." : null;
+  const propertyHasPin = !!property && hasCoords(property);
+  const jobHasPin = hasCoords(location);
+  const halfPin = (location.lat === null) !== (location.lng === null);
+  const missing = halfPin ? "Finish the map location (both latitude and longitude) or remove the pin." : !customerId ? "Select a customer." : !propertyId ? "Select a property." : !serviceId ? "Select a service." : !date ? "Pick a date." : from >= to ? "The end time must be after the start time." : null;
 
   const submit = async () => {
     if (missing) return setError(missing);
@@ -115,6 +120,7 @@ function NewJobPage() {
           locationLat: location.lat,
           locationLng: location.lng,
           locationAddress: location.address.trim() || undefined,
+          saveLocationToProperty: !propertyHasPin && jobHasPin && savePinToProperty,
           customerVisibility: customVis ? visibility : undefined,
           invoiceType,
           interState: invoiceType === "GST" ? interState : false,
@@ -180,7 +186,23 @@ function NewJobPage() {
         </Step>
 
         <Step n={3} title="Location" hint="Where the team goes. Starts at the property's pin — adjust it for this job if needed.">
-          {propertyId ? <LocationPicker key={propertyId} idPrefix="nj-loc" value={location} onChange={setLocation} /> : <p className="text-sm text-zinc-500">Select a property first.</p>}
+          {propertyId ? (
+            <div className="space-y-3">
+              {property && !propertyHasPin && (
+                <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">This property has no saved map pin yet. Set it below so the team can navigate and the GPS start check can work.</p>
+              )}
+              <LocationPicker key={propertyId} idPrefix="nj-loc" value={location} onChange={setLocation} />
+              {property && !propertyHasPin && jobHasPin && (
+                <label className="flex items-center gap-3 text-sm text-zinc-800 min-h-11">
+                  <input type="checkbox" checked={savePinToProperty} onChange={(e) => setSavePinToProperty(e.target.checked)} className="h-5 w-5 accent-rose-500" />
+                  Also save this pin on the property (for future jobs)
+                </label>
+              )}
+              {property && propertyHasPin && jobHasPin && (Math.abs((property.lat as number) - (location.lat as number)) > 1e-6 || Math.abs((property.lng as number) - (location.lng as number)) > 1e-6) && (
+                <p className="text-sm text-zinc-600">This job will use its own pin. The property&apos;s saved pin stays as it is.</p>
+              )}
+            </div>
+          ) : <p className="text-sm text-zinc-500">Select a property first.</p>}
         </Step>
 
         <Step n={4} title="Service">

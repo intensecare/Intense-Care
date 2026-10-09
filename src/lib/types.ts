@@ -272,13 +272,18 @@ export interface Property {
   carpetAreaSqFt?: number;
   bedrooms?: number;
   bathrooms?: number;
-  /** Map location (unset until picked on the map). */
+  addressLine?: string;
+  locality?: string;
+  state?: string;
+  country?: string;
+  /** Saved map location — both set or both unset; never a placeholder (0,0). */
   lat?: number | null;
   lng?: number | null;
-  gpsCoordinates: {
-    lat: number;
-    lng: number;
-  };
+  locationNotes?: string;
+  /** SEARCH | MAP_PIN | DEVICE_GPS | MANUAL | IMPORTED */
+  locationSource?: string;
+  locationUpdatedAt?: string;
+  locationVerifiedAt?: string;
   accessNotes?: string;
   parkingInstructions?: string;
   preferredTime?: string;
@@ -653,6 +658,10 @@ export interface Job {
   locationLat?: number;
   locationLng?: number;
   locationAddress?: string;
+  /** PROPERTY = follows the property's pin; JOB = a pin for this job only. */
+  locationSource?: "PROPERTY" | "JOB";
+  /** Resolved by the server: the job's pin, else its property's. Use this to display / navigate. */
+  serviceLocation?: import("./location").ServiceLocation;
   /** Notes for the customer (internal notes are `notes`). */
   customerNotes?: string;
   /** Per-job overrides of what the customer sees (unset = company default). */

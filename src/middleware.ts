@@ -70,5 +70,5 @@ export async function middleware(request: NextRequest) {
 export const config = {
   // Every page except: API routes, Next internals, static files, login and
   // the customer's secure link.
-  matcher: ["/((?!api/|_next/|customer/|login|favicon\\.ico|.*\\.[a-zA-Z0-9]+$).*)"],
+  matcher: ["/((?!api/|_next/|customer/|login|enquiry|favicon\\.ico|.*\\.[a-zA-Z0-9]+$).*)"],
 };

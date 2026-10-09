@@ -12,6 +12,7 @@ import { useApp } from "@/lib/app-context";
 import { CUSTOMER_VISIBILITY_KEYS, CUSTOMER_VISIBILITY_LABELS, type CustomerVisibility, type Job, type Property } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { arrivalMethodLabel } from "@/lib/start-verification";
+import { resolveServiceLocation } from "@/lib/location";
 
 async function patchJob(id: string, body: Record<string, unknown>) {
   const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -26,12 +27,9 @@ async function patchJob(id: string, body: Record<string, unknown>) {
  */
 export function JobHubCards({ job, property, canEdit }: { job: Job; property?: Property; canEdit: boolean }) {
   const { systemSettings, refreshJobs } = useApp();
-  const fallback = property ? [property.address, property.city].filter(Boolean).join(", ") : "";
-  const loc: LocationValue = {
-    lat: job.locationLat ?? property?.lat ?? null,
-    lng: job.locationLng ?? property?.lng ?? null,
-    address: job.locationAddress || fallback,
-  };
+  // The server resolves it (job pin, else the property's); recompute only for an older payload.
+  const where = job.serviceLocation ?? resolveServiceLocation(job, property);
+  const loc: LocationValue = { lat: where.lat, lng: where.lng, address: where.address };
   const effective: CustomerVisibility = { ...systemSettings.customerVisibility, ...(job.customerVisibility ?? {}) };
   const hidden = CUSTOMER_VISIBILITY_KEYS.filter((k) => !effective[k]);
 
@@ -62,11 +60,12 @@ export function JobHubCards({ job, property, canEdit }: { job: Job; property?: P
             <Button size="sm" variant="ghost" onClick={() => { setDraftLoc(loc); setError(null); setEditLoc(true); }}><Pencil className="h-4 w-4" aria-hidden /> Edit</Button>
           )}
         </div>
+        {property && <p className="text-sm font-semibold text-zinc-900 break-words">{property.title}</p>}
         {loc.address && <p className="text-sm text-zinc-700 break-words">{loc.address}</p>}
-        {typeof loc.lat === "number" && typeof loc.lng === "number" ? (
-          <LocationPicker key={`${loc.lat},${loc.lng}`} value={loc} readOnly height={180} />
-        ) : (
-          <p className="text-sm text-amber-800">No map pin yet — GPS start verification can't work for this job. {canEdit ? "Add the pin with Edit." : ""}</p>
+        {property?.locationNotes && <p className="text-sm text-zinc-600 break-words">Note: {property.locationNotes}</p>}
+        <LocationPicker key={`${loc.lat},${loc.lng}`} value={loc} readOnly height={180} />
+        {where.source && (
+          <p className="text-xs text-zinc-500">{where.source === "JOB" ? "Pin set for this job only (the property's saved pin is different)." : "Using the property's saved pin."}</p>
         )}
         {job.arrivalVerification && (
           <p className="text-sm text-zinc-600 flex items-center gap-1.5">
@@ -114,9 +113,13 @@ export function JobHubCards({ job, property, canEdit }: { job: Job; property?: P
             <DialogDescription>Used for Navigate and for the Field Manager&apos;s arrival check.</DialogDescription>
           </DialogHeader>
           {editLoc && <LocationPicker idPrefix="job-loc" value={draftLoc} onChange={setDraftLoc} height={240} />}
+          <p className="text-xs text-zinc-500">To move the property itself (for every future job), edit the property instead.</p>
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditLoc(false)}>Cancel</Button>
+            {where.source === "JOB" && (
+              <Button variant="outline" loading={saving} onClick={() => void save({ location: { lat: null, lng: null, address: null, followProperty: true } }, () => setEditLoc(false))}>Use property&apos;s pin</Button>
+            )}
             <Button loading={saving} onClick={() => void save({ location: { lat: draftLoc.lat, lng: draftLoc.lng, address: draftLoc.address || null } }, () => setEditLoc(false))}>Save location</Button>
           </DialogFooter>
         </DialogContent>

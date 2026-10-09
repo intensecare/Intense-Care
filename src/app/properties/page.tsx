@@ -9,6 +9,8 @@ import { JobStatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/utils";
+
+const LocationsMap = dynamic(() => import("@/components/common/LocationsMap").then((m) => m.LocationsMap), { ssr: false });
 import {
   Building2,
   MapPin,
@@ -22,6 +24,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import dynamic from "next/dynamic";
+import { LocationPicker } from "@/components/common/LocationPicker";
+import { formatAddress, hasCoords, LOCATION_SOURCE_LABEL, type PropertyLocationSource } from "@/lib/location";
+import { cn, formatDateTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
 import {
@@ -50,16 +56,19 @@ export default function PropertiesPage() {
   const [detailPropertyId, setDetailPropertyId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [actionError, setActionError] = useState("");
+  const [view, setView] = useState<"list" | "map">("list");
+  const [pinFilter, setPinFilter] = useState<"all" | "missing">("all");
 
   const canEdit = can("properties.update");
   const canDelete = can("properties.delete");
 
+  const q = searchQuery.trim().toLowerCase();
   const filteredProperties = properties.filter(
     (p) =>
-      p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.address.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.city.toLowerCase().includes(searchQuery.toLowerCase())
+      (pinFilter === "all" || !hasCoords(p)) &&
+      [p.title, p.address, p.city, p.locality, p.postalCode, p.state].some((v) => (v ?? "").toLowerCase().includes(q))
   );
+  const missingPins = properties.filter((p) => !hasCoords(p)).length;
 
   const openCreate = () => {
     setActionError("");
@@ -104,10 +113,29 @@ export default function PropertiesPage() {
         description={`${properties.length} propert${properties.length === 1 ? "y" : "ies"} · tap one for access notes, history and the optional property QR`}
         actions={can("properties.create") ? <Button onClick={openCreate}><Plus className="h-5 w-5" aria-hidden /> Add Property</Button> : undefined}
       />
-      <div className="relative mb-5 max-w-md">
-        <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" aria-hidden />
-        <Input type="search" placeholder="Search name, address or city" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" aria-label="Search properties" />
+      <div className="mb-5 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="relative flex-1 max-w-md">
+          <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" aria-hidden />
+          <Input type="search" placeholder="Search name, address, area, city or PIN" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" aria-label="Search properties" />
+        </div>
+        <div className="flex gap-2" role="group" aria-label="View">
+          {(["list", "map"] as const).map((v) => (
+            <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={cn("min-h-11 px-4 rounded-xl border text-sm font-semibold capitalize", view === v ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-700")}>{v}</button>
+          ))}
+          <button type="button" aria-pressed={pinFilter === "missing"} onClick={() => setPinFilter(pinFilter === "missing" ? "all" : "missing")} className={cn("min-h-11 px-4 rounded-xl border text-sm font-semibold", pinFilter === "missing" ? "border-amber-600 bg-amber-50 text-amber-900" : "border-zinc-300 bg-white text-zinc-700")}>
+            No pin ({missingPins})
+          </button>
+        </div>
       </div>
+      {missingPins > 0 && pinFilter === "all" && (
+        <Notice tone="warning" className="mb-4">{missingPins} propert{missingPins === 1 ? "y has" : "ies have"} no saved map pin — navigation falls back to the address text and GPS job starts can&apos;t run there. Use “No pin” to find and fix them.</Notice>
+      )}
+      {view === "map" && filteredProperties.length > 0 && (
+        <div className="mb-5 space-y-2">
+          <LocationsMap points={filteredProperties.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, title: p.title, subtitle: formatAddress(p) }))} onSelect={(id) => setDetailPropertyId(id)} />
+          <p className="text-xs text-zinc-500">Tap a pin to open that property. {filteredProperties.filter((p) => !hasCoords(p)).length} without a pin {filteredProperties.some((p) => !hasCoords(p)) ? "are listed below but not drawn" : ""}.</p>
+        </div>
+      )}
       {actionError && <Notice tone="error" className="mb-4">{actionError}</Notice>}
 
       {loading && properties.length === 0 ? (
@@ -123,7 +151,8 @@ export default function PropertiesPage() {
           rowKey={(p) => p.id}
           columns={[
             { key: "title", header: "Property", mobile: "title", cell: (p) => <button onClick={() => setDetailPropertyId(p.id)} className="font-semibold text-zinc-950 hover:text-rose-600 text-left">{p.title}</button> },
-            { key: "address", header: "Address", mobile: "subtitle", cell: (p) => <span className="break-words">{p.address}{p.city ? `, ${p.city}` : ""}</span> },
+            { key: "address", header: "Address", mobile: "subtitle", cell: (p) => <span className="break-words">{formatAddress(p)}</span> },
+            { key: "pin", header: "Map pin", cell: (p) => hasCoords(p) ? <span className="inline-flex items-center gap-1 text-emerald-700 text-sm"><MapPin className="h-4 w-4" aria-hidden /> Saved</span> : <span className="inline-flex items-center gap-1 text-amber-800 text-sm"><MapPin className="h-4 w-4" aria-hidden /> Missing</span> },
             { key: "owner", header: "Customer", cell: (p) => { const o = ownerOf(p.customerId); return o ? <Link href={`/customers/${o.id}`} className="text-rose-600 font-medium">{o.name}</Link> : "—"; } },
             { key: "type", header: "Type", cell: (p) => <span className="capitalize">{p.propertyType}</span> },
             { key: "jobs", header: "Jobs", cell: (p) => jobs.filter((j) => j.propertyId === p.id).length },
@@ -140,9 +169,20 @@ export default function PropertiesPage() {
             <>
               <DialogHeader>
                 <DialogTitle>{detailProperty.title}</DialogTitle>
-                <DialogDescription>{detailProperty.address}{detailProperty.city ? `, ${detailProperty.city}` : ""}</DialogDescription>
+                <DialogDescription>{formatAddress(detailProperty)}</DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
+                <section className="space-y-2" aria-label="Saved location">
+                  <LocationPicker key={`${detailProperty.id}:${detailProperty.lat},${detailProperty.lng}`} value={{ lat: detailProperty.lat ?? null, lng: detailProperty.lng ?? null, address: formatAddress(detailProperty) }} readOnly height={180} />
+                  {hasCoords(detailProperty) && (
+                    <p className="text-xs text-zinc-500">
+                      {detailProperty.locationSource ? `Set by: ${LOCATION_SOURCE_LABEL[detailProperty.locationSource as PropertyLocationSource] ?? detailProperty.locationSource}` : ""}
+                      {detailProperty.locationUpdatedAt ? ` · updated ${formatDateTime(detailProperty.locationUpdatedAt)}` : ""}
+                      {detailProperty.locationVerifiedAt ? ` · confirmed on site ${formatDateTime(detailProperty.locationVerifiedAt)}` : ""}
+                    </p>
+                  )}
+                  {detailProperty.locationNotes && <p className="rounded-xl bg-zinc-50 px-4 py-3 text-sm"><span className="font-semibold text-zinc-900">Location notes: </span><span className="text-zinc-700">{detailProperty.locationNotes}</span></p>}
+                </section>
                 {(() => {
                   const owner = ownerOf(detailProperty.customerId);
                   return owner ? (
