@@ -241,3 +241,30 @@ export async function notifyAccountsBillable(jobId: string): Promise<NotifyResul
   }
   return last;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Cleaning staff (no login — reached by phone)                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Tells cleaning staff about a job assignment (or a change). No customer name or
+ * phone is included — only the date, time and area. Honours the "Job assigned"
+ * switch in Settings → Notifications and is audited in SmsLog like every message.
+ */
+export async function notifyStaffAssignment(jobId: string, employeeIds: string[], kind: "assigned" | "removed" | "updated"): Promise<NotifyResult> {
+  if (employeeIds.length === 0) return { queued: false, provider: "none", reason: "no_staff" };
+  if (!(await notificationOn("fieldManagerAssigned"))) return { queued: false, provider: "none", reason: "disabled_in_settings" };
+  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { scheduledDate: true, scheduledTimeSlot: true, assignedManagerId: true, property: { select: { city: true, title: true } }, service: { select: { name: true } } } });
+  if (!job) return { queued: false, provider: "none", reason: "no_job" };
+  const [people, manager] = await Promise.all([
+    prisma.employee.findMany({ where: { id: { in: employeeIds }, status: { not: "EXITED" } }, select: { phone: true } }),
+    job.assignedManagerId ? prisma.user.findUnique({ where: { id: job.assignedManagerId }, select: { name: true, phone: true } }) : null,
+  ]);
+  const where = [job.property.city, job.property.title].filter(Boolean).join(" · ");
+  const lead = manager ? ` Contact ${manager.name}${manager.phone ? ` ${manager.phone}` : ""}.` : "";
+  const verb = kind === "removed" ? "You are no longer assigned to" : kind === "updated" ? "Your job has changed:" : "You are assigned to";
+  const body = `${company()}: ${verb} ${job.service.name} on ${job.scheduledDate}, ${job.scheduledTimeSlot}${where ? ` (${where})` : ""}.${lead}`;
+  let last: NotifyResult = { queued: false, provider: "none", reason: "no_phone" };
+  for (const p of people) last = await auditAndMaybeSend({ jobId, phone: p.phone, purpose: kind === "removed" ? "STAFF_REMOVED" : "STAFF_ASSIGNED", body });
+  return last;
+}

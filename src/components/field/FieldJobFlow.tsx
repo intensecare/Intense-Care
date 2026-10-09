@@ -30,6 +30,8 @@ import { useApp } from "@/lib/app-context";
 import { MobileLayout, ProfilePanel } from "@/components/common/MobileLayout";
 import { StatusBadge } from "@/components/common/JobStatusBadge";
 import { PromptModal } from "@/components/common/PromptModal";
+import { TeamCard } from "@/components/job/TeamCard";
+import { FieldExpense } from "@/components/field/FieldExpense";
 import { QrScanner } from "@/components/common/QrScanner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
@@ -395,6 +397,9 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
           <MiniJourney status={job.status} />
         </section>
       )}
+
+      {job.status !== "CANCELLED" && <TeamCard jobId={job.id} jobDate={job.scheduledDate} mode="field" />}
+      {job.status !== "CANCELLED" && <FieldExpense jobId={job.id} jobDate={job.scheduledDate} />}
 
       {/* CURRENT STEP */}
       {current && job.status !== "IN_PROGRESS" && !inRework && (

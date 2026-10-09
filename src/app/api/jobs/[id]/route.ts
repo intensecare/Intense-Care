@@ -13,6 +13,9 @@ import { serializeJob, withStaffNames, fail } from "@/lib/server/serialize";
 import { projectJob } from "@/lib/server/projections";
 import { recordActivity } from "@/lib/server/activity";
 import { recordAudit } from "@/lib/server/audit";
+import { ACTIVE_ASSIGNMENT, conflictsForMany, crewClash, logAssignment } from "@/lib/server/assignments";
+import { notifyStaffAssignment } from "@/lib/server/notify";
+import { userNames } from "@/lib/server/biz";
 import { syncJobEvent, cancelJobEvent } from "@/lib/server/google-calendar";
 import { ASSIGNABLE_ROLES, can, scopeOf, type JobStatus } from "@/lib/rbac";
 import type { SessionUser } from "@/lib/server/session";
@@ -130,19 +133,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         }
         if (existing.scheduledDate) {
           const slotRow = await prisma.job.findUnique({ where: { id }, select: { scheduledTimeSlot: true } });
-          const terminal = ["COMPLETED", "CANCELLED", "CLOSED"];
-          const clash = await prisma.job.findFirst({
-            where: {
-              id: { not: id },
-              scheduledDate: existing.scheduledDate,
-              scheduledTimeSlot: slotRow?.scheduledTimeSlot ?? "",
-              status: { notIn: terminal },
-              OR: [{ assignedStaffIds: { hasSome: crew } }, { assignedManagerId: { in: crew } }],
-            },
-            select: { id: true },
-          });
+          const clash = await crewClash(crew, { id, scheduledDate: existing.scheduledDate, scheduledTimeSlot: slotRow?.scheduledTimeSlot ?? "" });
           if (clash) {
-            return fail("Worker already booked on another job in this date & time slot (double-booking is not allowed).", 409);
+            return fail(`Already booked on ${clash.jobSerial} (${clash.scheduledTimeSlot}) — overlapping times can't be double-booked.`, 409);
           }
         }
       }
@@ -158,6 +151,10 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         where: { id },
         data: { assignedStaffIds: ids, assignedManagerId: managerId, status: nextStatus, updatedAt: new Date() },
       });
+      if (managerId !== existing.assignedManagerId) {
+        const names = await userNames([existing.assignedManagerId, managerId]);
+        await logAssignment({ jobId: id, action: "MANAGER_CHANGED", actor: { id: user.id, name: user.name }, detail: `${existing.assignedManagerId ? names.get(existing.assignedManagerId) ?? "—" : "none"} → ${managerId ? names.get(managerId) ?? "—" : "none"}` }).catch(() => {});
+      }
       logger.info("jobs.assignment_updated", { jobId: id, count: crew.length, by: user.id });
       await recordActivity({
         jobId: id,
@@ -181,7 +178,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         details: `crew=${crew.join(",") || "none"} manager=${managerId ?? "none"}`,
         request,
       });
-      if (crew.length > 0 && existing.status !== nextStatus) {
+      if (crew.length > 0 && (existing.status !== nextStatus || managerId !== existing.assignedManagerId)) {
         try {
           const { notifyJobAssigned } = await import("@/lib/server/notify");
           void notifyJobAssigned(id).catch(() => {});
@@ -203,18 +200,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       const scheduledDate = body.scheduledDate ?? current?.scheduledDate ?? "";
       const scheduledTimeSlot = body.scheduledTimeSlot ?? current?.scheduledTimeSlot ?? "";
       const crew = [...existing.assignedStaffIds, ...(existing.assignedManagerId ? [existing.assignedManagerId] : [])];
-      if (crew.length > 0) {
-        const clash = await prisma.job.findFirst({
-          where: {
-            id: { not: id },
-            scheduledDate,
-            scheduledTimeSlot,
-            status: { notIn: ["COMPLETED", "CANCELLED", "CLOSED"] },
-            OR: [{ assignedStaffIds: { hasSome: crew } }, { assignedManagerId: { in: crew } }],
-          },
-          select: { id: true },
-        });
-        if (clash) return fail("The assigned crew is already booked in that slot. Re-assign or choose another window.", 409);
+      const clash = await crewClash(crew, { id, scheduledDate, scheduledTimeSlot });
+      if (clash) return fail(`The assigned crew is already booked on ${clash.jobSerial} (${clash.scheduledTimeSlot}). Re-assign or choose another window.`, 409);
+      // Cleaning staff on the job must also be free at the new time.
+      const team = await prisma.jobAssignment.findMany({ where: { jobId: id, status: { in: ACTIVE_ASSIGNMENT } }, select: { employeeId: true, employee: { select: { fullName: true } } } });
+      if (team.length) {
+        const cf = await conflictsForMany(team.map((t) => t.employeeId), { id, scheduledDate, scheduledTimeSlot });
+        const bad = team.flatMap((t) => (cf.get(t.employeeId) ?? []).filter((c) => c.kind === "job" || c.kind === "leave").map((c) => `${t.employee.fullName}: ${c.message}`));
+        if (bad.length) return fail(`Some cleaning staff aren't free at the new time — ${bad.join(" ")} Remove or replace them first.`, 409);
       }
       await prisma.job.update({ where: { id }, data: { scheduledDate, scheduledTimeSlot, updatedAt: new Date() } });
       await recordActivity({
@@ -234,6 +227,10 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         reason: body.reason,
         request,
       });
+      if (team.length) {
+        await logAssignment({ jobId: id, action: "RESCHEDULED", actor: { id: user.id, name: user.name }, detail: `${current?.scheduledDate} ${current?.scheduledTimeSlot} → ${scheduledDate} ${scheduledTimeSlot}` }).catch(() => {});
+        void notifyStaffAssignment(id, team.map((t) => t.employeeId), "updated").catch(() => {});
+      }
       void syncJobEvent(id).catch(() => {});
       return respondWithJob(user, id);
     }

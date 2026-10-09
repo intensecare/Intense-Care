@@ -131,42 +131,42 @@ model ServiceChecklistItem {
 }
 
 model Job {
-  id                String    @id @default(cuid())
-  customerId        String
-  propertyId        String
-  serviceId         String
-  scheduledDate     String
-  scheduledTimeSlot String
-  assignedManagerId String?
-  assignedStaffIds  String[]  @default([]) // directly-assigned field worker ids (first entry = lead worker)
-  amount            Float
-  paymentStatus     String    @default("UNPAID")
-  status            String    @default("SCHEDULED")
-  notes             String?
-  qualityCheckId    String?
-  referralPartnerId String?
-  arrivedAt         DateTime?
-  startedAt         DateTime?
-  completedAt       DateTime?
-  googleEventId     String? // §1 Google Calendar — event synced for this job (null = not connected)
+  id                      String    @id @default(cuid())
+  customerId              String
+  propertyId              String
+  serviceId               String
+  scheduledDate           String
+  scheduledTimeSlot       String
+  assignedManagerId       String?
+  assignedStaffIds        String[]  @default([]) // directly-assigned field worker ids (first entry = lead worker)
+  amount                  Float
+  paymentStatus           String    @default("UNPAID")
+  status                  String    @default("SCHEDULED")
+  notes                   String?
+  qualityCheckId          String?
+  referralPartnerId       String?
+  arrivedAt               DateTime?
+  startedAt               DateTime?
+  completedAt             DateTime?
+  googleEventId           String? // §1 Google Calendar — event synced for this job (null = not connected)
   // §11 GPS-verified arrival: the coordinates the manager reported when they
   // tapped [ARRIVED] and how the gate decided. arrivalVerification = "gps"
   // (inside geofence) | "manual" (outside/unavailable + explicit reason). The
   // distance is stored (metres) so the audit timeline can show the verdict.
-  arrivalLat        Float?
-  arrivalLng        Float?
-  arrivalAccuracy   Float?
-  arrivalVerification String?
-  arrivalDistanceM  Float?
-  arrivalBypassReason String?
-  customerConfirmedAt DateTime?
+  arrivalLat              Float?
+  arrivalLng              Float?
+  arrivalAccuracy         Float?
+  arrivalVerification     String?
+  arrivalDistanceM        Float?
+  arrivalBypassReason     String?
+  customerConfirmedAt     DateTime?
   // Unified QR/link workflow wiring (§3): the customer-confirmation token and
   // the current QR tokens resolve back to this single Job ID — never a copy.
-  jobSerial         String    @unique // readable Job ID, e.g. RAHUL-SHARMA-08102026-001
-  customerTokenId   String?
-  approvedAt        DateTime?
-  approvedBy        String?
-  approvalMethod    String?
+  jobSerial               String    @unique // readable Job ID, e.g. RAHUL-SHARMA-08102026-001
+  customerTokenId         String?
+  approvedAt              DateTime?
+  approvedBy              String?
+  approvalMethod          String?
   // §24 unified-journey feedback: star rating captured on the customer's
   // secure approval link right after they approve completion.
   customerFeedbackRating  Int?
@@ -174,29 +174,29 @@ model Job {
   googleReviewClicked     Boolean   @default(false)
   customerFeedbackComment String?
   /// Service location for THIS job (map pin). Defaults to the property's.
-  locationLat       Float?
-  locationLng       Float?
-  locationAddress   String?
+  locationLat             Float?
+  locationLng             Float?
+  locationAddress         String?
   /// What the customer may see on their QR page; null = company defaults
   /// (Settings → Customer Portal). Enforced by the customer API.
-  customerVisibility Json?
+  customerVisibility      Json?
   /// Notes written for the customer. Internal notes stay in `notes`.
-  customerNotes     String?
-  quoteId           String?
+  customerNotes           String?
+  quoteId                 String?
   /// Skills the crew needs, expected duration and instructions for the team.
-  requiredSkills        String[]  @default([])
-  specialInstructions   String?
-  expectedDurationHours Float?
+  requiredSkills          String[]  @default([])
+  specialInstructions     String?
+  expectedDurationHours   Float?
   /// Set when Admin confirms the team (and the team is notified).
-  assignmentConfirmedAt DateTime?
-  assignmentConfirmedBy String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  assignmentConfirmedAt   DateTime?
+  assignmentConfirmedBy   String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
-  customer          Customer           @relation(fields: [customerId], references: [id])
-  property          Property           @relation(fields: [propertyId], references: [id])
-  service           Service            @relation(fields: [serviceId], references: [id])
-  referralPartner   ReferralPartner?   @relation("JobAttribution", fields: [referralPartnerId], references: [id])
+  customer          Customer             @relation(fields: [customerId], references: [id])
+  property          Property             @relation(fields: [propertyId], references: [id])
+  service           Service              @relation(fields: [serviceId], references: [id])
+  referralPartner   ReferralPartner?     @relation("JobAttribution", fields: [referralPartnerId], references: [id])
   checklistItems    JobChecklistItem[]
   invoices          Invoice[]
   photos            JobPhoto[]
@@ -205,6 +205,10 @@ model Job {
   complaints        Complaint[]
   commissionEntries CommissionEntry[]
   qrTokens          QrToken[]
+  assignments       JobAssignment[]
+  assignmentEvents  JobAssignmentEvent[]
+  attendanceRecords AttendanceRecord[]
+  freelancePayments FreelancePayment[]
 
   @@index([scheduledDate])
   @@index([status])
@@ -232,38 +236,38 @@ model JobChecklistItem {
 }
 
 model Invoice {
-  id            String   @id @default(cuid())
-  invoiceNumber String   @unique
-  jobId         String
-  customerId    String
-  subtotal      Float
-  tax           Float
-  discount      Float    @default(0)
-  total         Float
-  amountPaid    Float    @default(0)
-  balanceDue    Float
-  dueDate       String
-  status        String   @default("UNPAID") // UNPAID | PARTIAL | PAID | REFUNDED | CANCELLED
-  issuedAt      DateTime @default(now())
+  id             String    @id @default(cuid())
+  invoiceNumber  String    @unique
+  jobId          String
+  customerId     String
+  subtotal       Float
+  tax            Float
+  discount       Float     @default(0)
+  total          Float
+  amountPaid     Float     @default(0)
+  balanceDue     Float
+  dueDate        String
+  status         String    @default("UNPAID") // UNPAID | PARTIAL | PAID | REFUNDED | CANCELLED
+  issuedAt       DateTime  @default(now())
   /// Set when Accounts finalizes the invoice; line amounts are frozen after this.
-  finalizedAt   DateTime?
-  finalizedBy   String?
+  finalizedAt    DateTime?
+  finalizedBy    String?
   /// Running total of approved refunds against this invoice.
-  refundedAmount Float   @default(0)
+  refundedAmount Float     @default(0)
   /// GST | NON_GST — chosen by Admin when the invoice is created. A Non-GST
   /// invoice never carries GST data (enforced by a DB check constraint).
   /// Tax Officers can only ever read GST invoices (enforced in every API).
-  invoiceType   String
+  invoiceType    String
   /// GST % applied (e.g. 18). 0 on Non-GST invoices.
-  gstRate       Float    @default(0)
-  cgst          Float    @default(0)
-  sgst          Float    @default(0)
-  igst          Float    @default(0)
+  gstRate        Float     @default(0)
+  cgst           Float     @default(0)
+  sgst           Float     @default(0)
+  igst           Float     @default(0)
   /// Inter-state supply → IGST; intra-state → CGST + SGST.
-  interState    Boolean  @default(false)
-  customerGstin String?
+  interState     Boolean   @default(false)
+  customerGstin  String?
   /// Company GSTIN at the time the invoice was issued.
-  supplierGstin String?
+  supplierGstin  String?
   /// Line items [{ description, quantity, rate, amount }]; null = one line for the job's service.
   items          Json?
   notes          String?
@@ -645,55 +649,62 @@ model Referral {
 /// few who do (e.g. a Field Manager). Compensation and personal documents are
 /// served only to `hr.sensitive`.
 model Employee {
-  id                    String   @id @default(cuid())
-  employeeCode          String   @unique // EMP-0001 / FRL-0001
+  id                    String             @id @default(cuid())
+  employeeCode          String             @unique // EMP-0001 / FRL-0001
   fullName              String
   phone                 String
   email                 String?
   address               String?
   emergencyContactName  String?
   emergencyContactPhone String?
-  employmentType        String   @default("PERMANENT") // PERMANENT | CONTRACT | FREELANCE
+  employmentType        String             @default("PERMANENT") // PERMANENT | CONTRACT | FREELANCE
   department            String?
   designation           String?
   joiningDate           String?
-  status                String   @default("ACTIVE") // ACTIVE | INACTIVE | ON_LEAVE | EXITED
+  status                String             @default("ACTIVE") // ACTIVE | INACTIVE | ON_LEAVE | EXITED
   managerUserId         String?
-  userId                String?  @unique
-  skills                String[] @default([])
-  serviceCategories     String[] @default([])
+  userId                String?            @unique
+  skills                String[]           @default([])
+  serviceCategories     String[]           @default([])
   availabilityNotes     String?
   preferredLocations    String?
   payType               String? // MONTHLY | DAILY | HOURLY | PER_JOB
   payRate               Float?
-  verificationStatus    String   @default("PENDING") // PENDING | VERIFIED | REJECTED
-  agreementOnFile       Boolean  @default(false)
+  verificationStatus    String             @default("PENDING") // PENDING | VERIFIED | REJECTED
+  agreementOnFile       Boolean            @default(false)
   notes                 String?
   createdBy             String
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  assignments           JobAssignment[]
+  attendance            AttendanceRecord[]
+  leaveRequests         LeaveRequest[]
+  payrollRecords        PayrollRecord[]
+  freelancePayments     FreelancePayment[]
 
   @@index([employmentType, status])
   @@index([managerUserId])
 }
 
 model AttendanceRecord {
-  id               String    @id @default(cuid())
-  employeeId       String
-  date             String
-  checkIn          DateTime?
-  checkOut         DateTime?
-  status           String    @default("PRESENT") // PRESENT | ABSENT | HALF_DAY | LEAVE | HOLIDAY | WEEKLY_OFF
-  jobId            String?
-  verificationMethod String  @default("NONE") // NONE | GPS | QR | MANUAL
-  verificationRef  String?
-  notes            String?
-  recordedBy       String
-  correctedBy      String?
-  correctedAt      DateTime?
-  correctionReason String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  employeeId         String
+  date               String
+  checkIn            DateTime?
+  checkOut           DateTime?
+  status             String    @default("PRESENT") // PRESENT | ABSENT | HALF_DAY | LEAVE | HOLIDAY | WEEKLY_OFF
+  jobId              String?
+  verificationMethod String    @default("NONE") // NONE | GPS | QR | MANUAL
+  verificationRef    String?
+  notes              String?
+  recordedBy         String
+  correctedBy        String?
+  correctedAt        DateTime?
+  correctionReason   String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  employee           Employee  @relation(fields: [employeeId], references: [id])
+  job                Job?      @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
   @@unique([employeeId, date])
   @@index([date])
@@ -714,6 +725,7 @@ model LeaveRequest {
   decidedAt    DateTime?
   decisionNote String?
   createdAt    DateTime  @default(now())
+  employee     Employee  @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId, status])
   @@index([startDate])
@@ -745,6 +757,7 @@ model PayrollRecord {
   createdBy        String
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  employee         Employee  @relation(fields: [employeeId], references: [id])
 
   @@unique([employeeId, period])
 }
@@ -752,21 +765,24 @@ model PayrollRecord {
 /// Who is on a job. Several staff per job; one may lead. Rows are never
 /// deleted — removal sets status REMOVED and is written to the history.
 model JobAssignment {
-  id             String    @id @default(cuid())
-  jobId          String
-  employeeId     String
-  role           String    @default("MEMBER") // LEAD | MEMBER
-  status         String    @default("ASSIGNED") // ASSIGNED | ACCEPTED | DECLINED | COMPLETED | REMOVED
-  rateType       String? // FIXED | HOURLY (freelancers)
-  rate           Float?
-  expectedHours  Float?
-  actualHours    Float?
-  assignedBy     String
-  assignedAt     DateTime  @default(now())
-  respondedAt    DateTime?
-  completedAt    DateTime?
-  removedAt      DateTime?
-  removedReason  String?
+  id               String            @id @default(cuid())
+  jobId            String
+  employeeId       String
+  role             String            @default("MEMBER") // LEAD | MEMBER
+  status           String            @default("ASSIGNED") // ASSIGNED | ACCEPTED | DECLINED | COMPLETED | REMOVED
+  rateType         String? // FIXED | HOURLY (freelancers)
+  rate             Float?
+  expectedHours    Float?
+  actualHours      Float?
+  assignedBy       String
+  assignedAt       DateTime          @default(now())
+  respondedAt      DateTime?
+  completedAt      DateTime?
+  removedAt        DateTime?
+  removedReason    String?
+  job              Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  employee         Employee          @relation(fields: [employeeId], references: [id])
+  freelancePayment FreelancePayment?
 
   @@unique([jobId, employeeId])
   @@index([employeeId, status])
@@ -777,11 +793,12 @@ model JobAssignmentEvent {
   id         String   @id @default(cuid())
   jobId      String
   employeeId String?
-  action     String // ASSIGNED | REMOVED | ROLE_CHANGED | ACCEPTED | DECLINED | COMPLETED | MANAGER_CHANGED | TEAM_CONFIRMED
+  action     String // ASSIGNED | REMOVED | ROLE_CHANGED | ACCEPTED | DECLINED | COMPLETED | MANAGER_CHANGED | TEAM_CONFIRMED | RESCHEDULED
   actorId    String?
   actorName  String
   detail     String?
   createdAt  DateTime @default(now())
+  job        Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([jobId, createdAt])
   @@index([employeeId])
@@ -791,16 +808,16 @@ model JobAssignmentEvent {
 /// PENDING_VERIFICATION → VERIFIED → APPROVED → PAID; PAID creates the
 /// FREELANCE_PAYMENTS expense exactly once.
 model FreelancePayment {
-  id               String    @id @default(cuid())
-  paymentNumber    String    @unique
-  assignmentId     String    @unique
+  id               String        @id @default(cuid())
+  paymentNumber    String        @unique
+  assignmentId     String        @unique
   employeeId       String
   jobId            String
   rateType         String // FIXED | HOURLY
   rate             Float
   hours            Float?
   amount           Float
-  status           String    @default("PENDING_VERIFICATION") // PENDING_VERIFICATION | VERIFIED | APPROVED | PAID | REJECTED
+  status           String        @default("PENDING_VERIFICATION") // PENDING_VERIFICATION | VERIFIED | APPROVED | PAID | REJECTED
   verifiedBy       String?
   verifiedAt       DateTime?
   approvedBy       String?
@@ -809,11 +826,14 @@ model FreelancePayment {
   paidAt           DateTime?
   paymentMethod    String?
   paymentReference String?
-  expenseId        String?   @unique
+  expenseId        String?       @unique
   rejectionReason  String?
   notes            String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  assignment       JobAssignment @relation(fields: [assignmentId], references: [id])
+  employee         Employee      @relation(fields: [employeeId], references: [id])
+  job              Job           @relation(fields: [jobId], references: [id])
 
   @@index([status])
   @@index([employeeId])
@@ -824,21 +844,21 @@ model FreelancePayment {
 /// revocation, and per-use counters. The raw token is never persisted — only
 /// its SHA-256 hash — so a database dump cannot mint working links.
 model QrToken {
-  id           String    @id @default(cuid())
-  tokenHash    String    @unique // SHA-256 hex of the raw token (verification only)
-  tokenEnc     String?   // AES-256-GCM encrypted raw token — lets admins re-show the SAME link without minting
-  tokenLast4   String // masked display only
-  purpose      String // CUSTOMER_JOB | CUSTOMER_VERIFICATION | CUSTOMER_APPROVAL | MANAGER_JOB | QC_INSPECTION | REWORK | REINSPECTION
-  jobId        String
-  expiresAt    DateTime? // null = governed by job status (e.g. QC link until revoked)
-  revokedAt    DateTime?
-  revokedBy    String?
+  id            String    @id @default(cuid())
+  tokenHash     String    @unique // SHA-256 hex of the raw token (verification only)
+  tokenEnc      String? // AES-256-GCM encrypted raw token — lets admins re-show the SAME link without minting
+  tokenLast4    String // masked display only
+  purpose       String // CUSTOMER_JOB | CUSTOMER_VERIFICATION | CUSTOMER_APPROVAL | MANAGER_JOB | QC_INSPECTION | REWORK | REINSPECTION
+  jobId         String
+  expiresAt     DateTime? // null = governed by job status (e.g. QC link until revoked)
+  revokedAt     DateTime?
+  revokedBy     String?
   revokedReason String?
-  usageCount   Int       @default(0)
-  lastUsedAt   DateTime?
-  createdBy    String?
+  usageCount    Int       @default(0)
+  lastUsedAt    DateTime?
+  createdBy     String?
   createdByName String?
-  createdAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
