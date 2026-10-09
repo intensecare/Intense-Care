@@ -8,7 +8,6 @@ import { errorResponse } from "@/lib/server/http";
 import {
   serializeInvoice,
   serializePayment,
-  serializeExpense,
   serializeQuote,
   serializeRefund,
   ok,
@@ -24,7 +23,7 @@ import { recordActivity } from "@/lib/server/activity";
 import { can, canApprove, refundNeedsApproval, discountNeedsApproval } from "@/lib/rbac";
 
 /**
- * GET /api/finance — invoices, payments, refunds, expenses.
+ * GET /api/finance — invoices, payments, refunds. (Expenses have their own API: /api/expenses.)
  * (Quotations have their own module: /api/quotations.)
  *   finance.view ALL  (Accounts, Super Admin) → everything
  *   invoice.view OWN  (customer login)        → own invoices + payments only
@@ -35,18 +34,16 @@ export async function GET() {
     const own = scope === "OWN";
     const customerFilter = own ? { customerId: user.customerId ?? "__none__" } : {};
 
-    const [invoices, payments, refunds, expenses] = await Promise.all([
+    const [invoices, payments, refunds] = await Promise.all([
       prisma.invoice.findMany({ where: customerFilter, orderBy: { issuedAt: "desc" }, take: 500 }),
       prisma.payment.findMany({ where: customerFilter, orderBy: { paidAt: "desc" }, take: 500 }),
       prisma.refund.findMany({ where: customerFilter, orderBy: { createdAt: "desc" }, take: 500 }),
-      own || !can(user, "expenses.manage") ? Promise.resolve([]) : prisma.expense.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
     ]);
     logger.debug("finance.get", { by: user.id, permission, scope });
     return ok({
       invoices: invoices.map(serializeInvoice),
       payments: payments.map(serializePayment),
       refunds: refunds.map(serializeRefund),
-      expenses: expenses.map(serializeExpense),
     });
   } catch (err) {
     return errorResponse(err, "finance.get.route_error");
@@ -89,15 +86,7 @@ const RefundDecisionSchema = z.object({
   reason: z.string().max(300).optional(),
 });
 
-const ExpenseSchema = z.object({
-  action: z.literal("create-expense"),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  category: z.enum(["equipment", "chemicals", "fuel", "salaries", "marketing", "utilities", "other"]),
-  amount: z.number().min(0.01).max(100000000),
-  description: z.string().min(1).max(500),
-  paymentMethod: z.enum(["cash", "card", "bank_transfer", "upi"]),
-  reference: z.string().max(160).optional(),
-});
+
 
 /** Applies an approved refund to the ledger (invoice totals + job status), atomically. */
 async function processRefund(refundId: string) {
@@ -308,30 +297,6 @@ export async function POST(request: Request) {
       void recordAudit({ actor: user, action: "REFUND_APPROVED", entityType: "refund", entityId: refund.id, jobId: refund.jobId, previousState: "PENDING_APPROVAL", newState: "PROCESSED", reason: parsed.data.reason, details: `₹${refund.amount}`, request });
       return ok(serializeRefund(processed));
     }
-
-    /* ------------------------------------------------------------- expenses */
-    if (action === "create-expense") {
-      const { user } = await requirePermission("expenses.manage");
-      const parsed = ExpenseSchema.safeParse(body);
-      if (!parsed.success) return fail("Invalid expense payload.", 400);
-      const { action: _action, ...d } = parsed.data;
-      const created = await prisma.expense.create({ data: { ...d, reference: d.reference, createdBy: user.id } });
-      void recordAudit({ actor: user, action: "EXPENSE_CREATED", entityType: "expense", entityId: created.id, details: `₹${d.amount} ${d.category}`, request });
-      return ok(serializeExpense(created), 201);
-    }
-
-    if (action === "delete-expense") {
-      const { user } = await requirePermission("expenses.manage");
-      const parsed = z.object({ action: z.literal("delete-expense"), id: z.string().min(1).max(64) }).safeParse(body);
-      if (!parsed.success) return fail("Invalid expense delete payload.", 400);
-      const existing = await prisma.expense.findUnique({ where: { id: parsed.data.id } });
-      if (!existing) return fail("Expense not found.", 404);
-      await prisma.expense.delete({ where: { id: parsed.data.id } });
-      logger.info("finance.expense_deleted", { expenseId: parsed.data.id, by: user.id });
-      void recordAudit({ actor: user, action: "EXPENSE_DELETED", entityType: "expense", entityId: parsed.data.id, request });
-      return ok({ id: parsed.data.id, deleted: true });
-    }
-
 
     return fail("Unknown action.", 400);
   } catch (err) {

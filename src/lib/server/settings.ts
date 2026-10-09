@@ -27,6 +27,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
       // Nested groups merge key by key so new options get their defaults.
       customerVisibility: { ...DEFAULT_SYSTEM_SETTINGS.customerVisibility, ...(data.customerVisibility ?? {}) },
       notifications: { ...DEFAULT_SYSTEM_SETTINGS.notifications, ...(data.notifications ?? {}) },
+      referralRules: { ...DEFAULT_SYSTEM_SETTINGS.referralRules, ...(data.referralRules ?? {}) },
     };
   } catch {
     return { ...DEFAULT_SYSTEM_SETTINGS };

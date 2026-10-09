@@ -92,6 +92,8 @@ export interface SystemSettings {
   customerVisibility: CustomerVisibility;
   /** Which automatic messages are sent. */
   notifications: NotificationSettings;
+  /** When a referral earns a bonus, and how much. Admin-only (never sent to other roles). */
+  referralRules: import("./business").ReferralRules;
 }
 
 /** What a customer may see on their QR page. Internal data is never included. */
@@ -155,19 +157,6 @@ export interface Refund {
   approvedBy?: string;
   approvedAt?: string;
   processedAt?: string;
-  createdAt: string;
-}
-
-export interface Expense {
-  id: string;
-  date: string;
-  category: "equipment" | "chemicals" | "fuel" | "salaries" | "marketing" | "utilities" | "other";
-  amount: number;
-  description: string;
-  paymentMethod: "cash" | "card" | "bank_transfer" | "upi";
-  reference?: string;
-  attachmentUrl?: string;
-  createdBy: string;
   createdAt: string;
 }
 

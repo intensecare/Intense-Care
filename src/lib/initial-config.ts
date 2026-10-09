@@ -37,5 +37,6 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
     beforePhotos: true, afterPhotos: true, qcResult: true, quotation: true, invoice: true,
     paymentStatus: true, serviceNotes: true, feedback: true,
   },
+  referralRules: { enabled: true, bonusType: "FIXED", bonusValue: 500, minJobValue: 2000, requirePaid: true, eligibilityDays: 90, maxBonus: 0 },
   notifications: { customerArrived: true, customerCompleted: true, fieldManagerAssigned: true, reworkAssigned: true, qcReady: true },
 };

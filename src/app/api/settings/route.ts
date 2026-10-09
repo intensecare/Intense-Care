@@ -7,6 +7,7 @@ import {
   getSystemSettings,
   updateSystemSettings,
 } from "@/lib/server/settings";
+import { can } from "@/lib/rbac";
 import type { SystemSettings } from "@/lib/types";
 import { CUSTOMER_VISIBILITY_KEYS } from "@/lib/types";
 
@@ -16,8 +17,13 @@ import { CUSTOMER_VISIBILITY_KEYS } from "@/lib/types";
  */
 export async function GET() {
   try {
-    await requireUser();
+    const { user } = await requireUser();
     const settings = await getSystemSettings();
+    // Business rules (bonus amounts, approval limits) are for those who manage settings.
+    if (!can(user, "settings.view")) {
+      const { referralRules: _r, refundApprovalLimit: _a, discountApprovalLimitPercent: _d, ...safe } = settings;
+      return ok(safe);
+    }
     return ok(settings);
   } catch (err) {
     return errorResponse(err, "settings.get.route_error");
@@ -98,6 +104,21 @@ export async function PATCH(request: Request) {
         if (typeof v === "boolean") next[k] = v;
       }
       patch.notifications = next;
+    }
+
+    if (body.referralRules && typeof body.referralRules === "object") {
+      const r = body.referralRules as Record<string, unknown>;
+      const next = { ...current.referralRules };
+      if (typeof r.enabled === "boolean") next.enabled = r.enabled;
+      if (r.bonusType === "FIXED" || r.bonusType === "PERCENT") next.bonusType = r.bonusType;
+      if (typeof r.requirePaid === "boolean") next.requirePaid = r.requirePaid;
+      const num = (v: unknown, min: number, max: number) => (typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? v : undefined);
+      next.bonusValue = num(r.bonusValue, 0, next.bonusType === "PERCENT" ? 100 : 1_000_000) ?? next.bonusValue;
+      next.minJobValue = num(r.minJobValue, 0, 100_000_000) ?? next.minJobValue;
+      next.eligibilityDays = num(r.eligibilityDays, 1, 3650) ?? next.eligibilityDays;
+      next.maxBonus = num(r.maxBonus, 0, 1_000_000) ?? next.maxBonus;
+      if (next.bonusType === "PERCENT" && next.bonusValue > 100) return NextResponse.json({ success: false, error: "A percentage bonus can't be more than 100%." }, { status: 400 });
+      patch.referralRules = next;
     }
 
     const updated = await updateSystemSettings(patch);

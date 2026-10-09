@@ -183,6 +183,13 @@ model Job {
   /// Notes written for the customer. Internal notes stay in `notes`.
   customerNotes     String?
   quoteId           String?
+  /// Skills the crew needs, expected duration and instructions for the team.
+  requiredSkills        String[]  @default([])
+  specialInstructions   String?
+  expectedDurationHours Float?
+  /// Set when Admin confirms the team (and the team is notified).
+  assignmentConfirmedAt DateTime?
+  assignmentConfirmedBy String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -534,16 +541,282 @@ model Payout {
   @@index([partnerId])
 }
 
+/// Business expenses and job costs. `amount` is the TOTAL paid (tax included);
+/// `taxAmount` is the GST part of it. Payroll, freelance payments and referral
+/// bonuses create their expense row only when they are PAID (`sourceType` +
+/// `sourceId`, unique) — so a cost is counted once, in one place.
+/// Never hard-deleted: a wrong entry is voided with a reason.
 model Expense {
-  id            String   @id @default(cuid())
-  date          String
-  category      String
-  amount        Float
-  description   String
-  paymentMethod String
-  reference     String?
-  createdBy     String
-  createdAt     DateTime @default(now())
+  id             String    @id @default(cuid())
+  expenseNumber  String?   @unique
+  date           String
+  category       String
+  description    String
+  amount         Float
+  taxAmount      Float     @default(0)
+  paymentMethod  String
+  paidBy         String?
+  vendor         String?
+  reference      String?
+  jobId          String?
+  employeeId     String?
+  receiptFileId  String?
+  paymentStatus  String    @default("PAID") // PAID | PENDING
+  approvalStatus String    @default("APPROVED") // APPROVED | PENDING_APPROVAL | REJECTED
+  approvedBy     String?
+  approvedAt     DateTime?
+  notes          String?
+  sourceType     String? // PAYROLL | FREELANCE | REFERRAL
+  sourceId       String?
+  idempotencyKey String?   @unique
+  voidedAt       DateTime?
+  voidedBy       String?
+  voidReason     String?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([sourceType, sourceId])
+  @@index([date])
+  @@index([category])
+  @@index([jobId])
+  @@index([employeeId])
+}
+
+/// Receipts, bills and HR documents. Bytes live in the database and are only
+/// served by /api/files/[id] after a permission check — never a public URL.
+model StoredFile {
+  id         String   @id @default(cuid())
+  ownerType  String // expense | employee
+  ownerId    String?
+  category   String? // RECEIPT | ID_PROOF | AGREEMENT | CERTIFICATE | OTHER
+  label      String?
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  sha256     String
+  data       Bytes
+  expiresOn  String?
+  uploadedBy String
+  createdAt  DateTime @default(now())
+
+  @@index([ownerType, ownerId])
+}
+
+/// Customer referrals and the bonus they may earn. One referral per referred
+/// customer / phone, one bonus per qualifying job, paid only after approval.
+model Referral {
+  id                 String    @id @default(cuid())
+  referralNumber     String    @unique
+  referrerName       String
+  referrerContact    String    @default("")
+  referrerCustomerId String?
+  referredCustomerId String?   @unique
+  referredName       String
+  referredContact    String    @default("")
+  referredPhoneKey   String?   @unique
+  referralDate       String
+  source             String    @default("customer")
+  qualifyingJobId    String?   @unique
+  status             String    @default("CREATED") // CREATED | CUSTOMER_REGISTERED | QUALIFYING_JOB_COMPLETED | BONUS_REVIEW | APPROVED | PAID | REJECTED | EXPIRED
+  bonusType          String? // FIXED | PERCENT
+  bonusValue         Float?
+  bonusAmount        Float?
+  approvalStatus     String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedBy         String?
+  approvedAt         DateTime?
+  rejectionReason    String?
+  paymentStatus      String    @default("UNPAID") // UNPAID | PAID
+  paidAt             DateTime?
+  paidBy             String?
+  paymentMethod      String?
+  paymentReference   String?
+  expenseId          String?   @unique
+  notes              String?
+  createdBy          String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status])
+}
+
+/// Staff record for permanent employees, contract staff and freelancers
+/// (`employmentType`). Cleaning staff do not need a login; `userId` links the
+/// few who do (e.g. a Field Manager). Compensation and personal documents are
+/// served only to `hr.sensitive`.
+model Employee {
+  id                    String   @id @default(cuid())
+  employeeCode          String   @unique // EMP-0001 / FRL-0001
+  fullName              String
+  phone                 String
+  email                 String?
+  address               String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  employmentType        String   @default("PERMANENT") // PERMANENT | CONTRACT | FREELANCE
+  department            String?
+  designation           String?
+  joiningDate           String?
+  status                String   @default("ACTIVE") // ACTIVE | INACTIVE | ON_LEAVE | EXITED
+  managerUserId         String?
+  userId                String?  @unique
+  skills                String[] @default([])
+  serviceCategories     String[] @default([])
+  availabilityNotes     String?
+  preferredLocations    String?
+  payType               String? // MONTHLY | DAILY | HOURLY | PER_JOB
+  payRate               Float?
+  verificationStatus    String   @default("PENDING") // PENDING | VERIFIED | REJECTED
+  agreementOnFile       Boolean  @default(false)
+  notes                 String?
+  createdBy             String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([employmentType, status])
+  @@index([managerUserId])
+}
+
+model AttendanceRecord {
+  id               String    @id @default(cuid())
+  employeeId       String
+  date             String
+  checkIn          DateTime?
+  checkOut         DateTime?
+  status           String    @default("PRESENT") // PRESENT | ABSENT | HALF_DAY | LEAVE | HOLIDAY | WEEKLY_OFF
+  jobId            String?
+  verificationMethod String  @default("NONE") // NONE | GPS | QR | MANUAL
+  verificationRef  String?
+  notes            String?
+  recordedBy       String
+  correctedBy      String?
+  correctedAt      DateTime?
+  correctionReason String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([date])
+}
+
+model LeaveRequest {
+  id           String    @id @default(cuid())
+  employeeId   String
+  leaveType    String // CASUAL | SICK | PAID | UNPAID | OTHER
+  startDate    String
+  endDate      String
+  days         Float
+  reason       String
+  status       String    @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELLED
+  requestedBy  String
+  approverId   String?
+  approverName String?
+  decidedAt    DateTime?
+  decisionNote String?
+  createdAt    DateTime  @default(now())
+
+  @@index([employeeId, status])
+  @@index([startDate])
+}
+
+/// One payroll record per employee per month. Net payable is computed on the
+/// server. Marking it PAID creates the STAFF_WAGES expense exactly once.
+model PayrollRecord {
+  id               String    @id @default(cuid())
+  employeeId       String
+  period           String // YYYY-MM
+  periodStart      String
+  periodEnd        String
+  basic            Float
+  allowances       Float     @default(0)
+  deductions       Float     @default(0)
+  advances         Float     @default(0)
+  bonuses          Float     @default(0)
+  netPayable       Float
+  status           String    @default("DRAFT") // DRAFT | APPROVED | PAID
+  notes            String?
+  approvedBy       String?
+  approvedAt       DateTime?
+  paidBy           String?
+  paidAt           DateTime?
+  paymentMethod    String?
+  paymentReference String?
+  expenseId        String?   @unique
+  createdBy        String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([employeeId, period])
+}
+
+/// Who is on a job. Several staff per job; one may lead. Rows are never
+/// deleted — removal sets status REMOVED and is written to the history.
+model JobAssignment {
+  id             String    @id @default(cuid())
+  jobId          String
+  employeeId     String
+  role           String    @default("MEMBER") // LEAD | MEMBER
+  status         String    @default("ASSIGNED") // ASSIGNED | ACCEPTED | DECLINED | COMPLETED | REMOVED
+  rateType       String? // FIXED | HOURLY (freelancers)
+  rate           Float?
+  expectedHours  Float?
+  actualHours    Float?
+  assignedBy     String
+  assignedAt     DateTime  @default(now())
+  respondedAt    DateTime?
+  completedAt    DateTime?
+  removedAt      DateTime?
+  removedReason  String?
+
+  @@unique([jobId, employeeId])
+  @@index([employeeId, status])
+  @@index([jobId])
+}
+
+model JobAssignmentEvent {
+  id         String   @id @default(cuid())
+  jobId      String
+  employeeId String?
+  action     String // ASSIGNED | REMOVED | ROLE_CHANGED | ACCEPTED | DECLINED | COMPLETED | MANAGER_CHANGED | TEAM_CONFIRMED
+  actorId    String?
+  actorName  String
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  @@index([jobId, createdAt])
+  @@index([employeeId])
+}
+
+/// A freelancer's pay for one completed assignment (one payment per assignment).
+/// PENDING_VERIFICATION → VERIFIED → APPROVED → PAID; PAID creates the
+/// FREELANCE_PAYMENTS expense exactly once.
+model FreelancePayment {
+  id               String    @id @default(cuid())
+  paymentNumber    String    @unique
+  assignmentId     String    @unique
+  employeeId       String
+  jobId            String
+  rateType         String // FIXED | HOURLY
+  rate             Float
+  hours            Float?
+  amount           Float
+  status           String    @default("PENDING_VERIFICATION") // PENDING_VERIFICATION | VERIFIED | APPROVED | PAID | REJECTED
+  verifiedBy       String?
+  verifiedAt       DateTime?
+  approvedBy       String?
+  approvedAt       DateTime?
+  paidBy           String?
+  paidAt           DateTime?
+  paymentMethod    String?
+  paymentReference String?
+  expenseId        String?   @unique
+  rejectionReason  String?
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([employeeId])
 }
 
 /// Unified dynamic QR / secure-link token (§3–§6). A QR contains ONLY the

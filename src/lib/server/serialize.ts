@@ -23,7 +23,6 @@ import type {
   Payout,
   Quote,
   QuoteLine,
-  Expense,
   Refund,
   JobStatus,
   PaymentStatus,
@@ -464,20 +463,6 @@ export function serializeQuote(
     hasShareLink: Boolean(q.shareTokenHash),
     createdAt: q.createdAt.toISOString(),
     updatedAt: q.updatedAt.toISOString(),
-  };
-}
-
-export function serializeExpense(e: Prisma.ExpenseGetPayload<object>): Expense {
-  return {
-    id: e.id,
-    date: e.date,
-    category: e.category as Expense["category"],
-    amount: e.amount,
-    description: e.description,
-    paymentMethod: e.paymentMethod as Expense["paymentMethod"],
-    reference: e.reference ?? undefined,
-    createdBy: e.createdBy,
-    createdAt: new Date(e.createdAt).toISOString(),
   };
 }
 
