@@ -9,6 +9,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SkeletonList } from "@/components/ui/states";
+import { BusinessReport } from "@/components/reports/BusinessReport";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { formatCurrency, cn, toLocalDateString } from "@/lib/utils";
@@ -16,9 +17,10 @@ import { formatCurrency, cn, toLocalDateString } from "@/lib/utils";
 const DONE = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED"];
 const REWORK = ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS", "REWORK_COMPLETED", "REINSPECTION"];
 type Preset = "month" | "last30" | "quarter" | "year" | "custom";
-type SectionKey = "jobs" | "revenue" | "customers" | "services" | "qc" | "rework" | "gst" | "invoices" | "feedback" | "fm";
+type SectionKey = "business" | "jobs" | "revenue" | "customers" | "services" | "qc" | "rework" | "gst" | "invoices" | "feedback" | "fm";
 
 const SECTIONS: { key: SectionKey; label: string; money?: boolean }[] = [
+  { key: "business", label: "Profit & costs", money: true },
   { key: "jobs", label: "Jobs" },
   { key: "revenue", label: "Revenue", money: true },
   { key: "customers", label: "Customers" },
@@ -132,6 +134,7 @@ export default function ReportsPage() {
   const [serviceId, setServiceId] = useState("");
   const [fmId, setFmId] = useState("");
   const [section, setSection] = useState<SectionKey>("jobs");
+  const canBusiness = can("reports.financial");
 
   const [from, to] = useMemo((): [string, string] => {
     const today = toLocalDateString();
@@ -241,7 +244,7 @@ export default function ReportsPage() {
     total: r2(gstInv.reduce((a, i) => a + i.tax, 0)),
   };
 
-  const sections = SECTIONS.filter((s) => !s.money || showMoney);
+  const sections = SECTIONS.filter((s) => (s.key === "business" ? canBusiness : !s.money || showMoney));
   const tag = `${from}_to_${to}`;
   const jobCols: Column<(typeof jobsIn)[number]>[] = [
     { key: "id", header: "Job ID", mobile: "title", cell: (j) => <span className="font-mono font-semibold break-all">{j.jobNumber}</span> },
@@ -307,6 +310,8 @@ export default function ReportsPage() {
             <EmptyState icon={BarChart3} title="No activity in this range" description="Try a wider date range or clear the filters." />
           ) : (
             <>
+              {section === "business" && canBusiness && <BusinessReport from={from} to={to} serviceId={serviceId} />}
+
               {section === "jobs" && (
                 <>
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
