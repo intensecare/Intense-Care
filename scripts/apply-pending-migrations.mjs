@@ -12,22 +12,70 @@ if (!connectionString) {
 const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
+/**
+ * Splits a migration into statements on top-level ";" only — never inside
+ * '…' / "…" strings or $$ / $tag$ dollar-quoted bodies (DO blocks), and drops
+ * line and block comments. BEGIN / COMMIT are skipped: this script runs statement by
+ * statement on a connection pool, where a transaction would stay open.
+ */
 function splitStatements(sql) {
-  // Remove single line comments
-  const lines = sql.split("\n");
-  const cleanedLines = lines.filter((l) => !l.trim().startsWith("--"));
-  const cleanSql = cleanedLines.join("\n");
-  
-  // Split by semicolons, but ignore semicolons inside quotes/functions if simple
-  const rawStmts = cleanSql.split(";");
   const stmts = [];
-  for (const s of rawStmts) {
-    const trimmed = s.trim();
-    if (trimmed.length > 0) {
-      stmts.push(trimmed);
+  let cur = "";
+  let i = 0;
+  let quote = null; // "'" | '"' | "$tag$"
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (quote) {
+      if (quote.length > 1 ? sql.startsWith(quote, i) : ch === quote) {
+        cur += quote;
+        i += quote.length;
+        quote = null;
+        continue;
+      }
+      cur += ch;
+      i++;
+      continue;
     }
+    if (ch === "/" && sql[i + 1] === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      i = end === -1 ? sql.length : end + 2;
+      continue;
+    }
+    if (ch === "-" && sql[i + 1] === "-") {
+      while (i < sql.length && sql[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      cur += ch;
+      i++;
+      continue;
+    }
+    if (ch === "$") {
+      const m = /^\$[A-Za-z_]*\$/.exec(sql.slice(i));
+      if (m) {
+        quote = m[0];
+        cur += m[0];
+        i += m[0].length;
+        continue;
+      }
+    }
+    if (ch === ";") {
+      push(cur);
+      cur = "";
+      i++;
+      continue;
+    }
+    cur += ch;
+    i++;
   }
+  push(cur);
   return stmts;
+
+  function push(s) {
+    const t = s.trim();
+    if (t && !/^(BEGIN|COMMIT)$/i.test(t)) stmts.push(t);
+  }
 }
 
 async function main() {

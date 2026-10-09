@@ -145,7 +145,7 @@ Rollback: redeploy the previous build — the previous code ignores the new tabl
 
 ## Addendum — job start verification modes
 
-Admin chooses how a Field Manager proves they are at the job before it starts: `DIRECT`, `QR`, `QR_GPS` or `GPS` (Settings → Job start verification; optional per-job mode before the job starts). This applies to the existing "arrived" step, which then waits for the customer's confirmation as before — the job workflow and its statuses are unchanged, and the existing customer QR link is reused (no new QR codes, no new roles).
+Admin chooses how a Field Manager proves they are at the job before it starts: `DIRECT`, `GPS` or `GPS_QR` (the earlier `QR` and `QR_GPS` modes were migrated to `GPS_QR` on 2026-10-13 — see docs/LOCATION_FIX_REPORT.md) (Settings → Job start verification; optional per-job mode before the job starts). This applies to the existing "arrived" step, which then waits for the customer's confirmation as before — the job workflow and its statuses are unchanged, and the existing customer QR link is reused (no new QR codes, no new roles).
 
 Behaviour changes from before:
 - A Field Manager can no longer continue with just a reason when verification fails; only Admin can override, with a reason.

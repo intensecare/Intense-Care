@@ -51,6 +51,7 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
       { label: "Intense AI", href: "/assistant", permission: "ai.use" },
       { label: "Jobs", href: "/jobs", permission: "jobs.view", badge: "jobs_open" },
       { label: "Customers", href: "/customers", permission: "customers.view" },
+      { label: "Leads", href: "/leads", permission: "leads.view" },
       { label: "Quotations", href: "/quotations", permission: "quotes.manage" },
       { label: "Invoices", href: "/invoices", permission: "finance.view", badge: "overdue" },
       { label: "QC", href: "/quality-queue", permission: "qc.view", badge: "qc_pending" },
@@ -117,6 +118,7 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
 const ROUTE_PERMISSIONS: { prefix: string; permission: Permission; layouts: WorkspaceLayout[] }[] = [
   { prefix: "/jobs/", permission: "jobs.view", layouts: ["desk"] },
   { prefix: "/customers/", permission: "customers.view", layouts: ["desk"] },
+  { prefix: "/leads/", permission: "leads.view", layouts: ["desk"] },
   { prefix: "/invoices/", permission: "finance.view", layouts: ["desk"] },
   { prefix: "/quotations/", permission: "quotes.manage", layouts: ["desk"] },
   { prefix: "/hr/", permission: "hr.view", layouts: ["desk"] },
@@ -126,7 +128,7 @@ const ROUTE_PERMISSIONS: { prefix: string; permission: Permission; layouts: Work
 ];
 
 /** Paths that need no sign-in (login and the customer's secure links). */
-export const PUBLIC_PATH_PREFIXES = ["/login", "/customer/"];
+export const PUBLIC_PATH_PREFIXES = ["/login", "/customer/", "/enquiry"];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));

@@ -3,7 +3,7 @@ import { authorizeJob } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { ok } from "@/lib/server/serialize";
 import { getSystemSettings } from "@/lib/server/settings";
-import { effectiveStartMode } from "@/lib/start-verification";
+import { effectiveStartMode, normalizeStartMode } from "@/lib/start-verification";
 
 /**
  * GET /api/jobs/[id]/start-verification — the mode that applies to this job and
@@ -20,9 +20,9 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     ]);
     return ok({
       mode: effectiveStartMode(job.startVerificationMode, sv),
-      jobMode: job.startVerificationMode,
+      jobMode: normalizeStartMode(job.startVerificationMode),
       settings: sv,
-      attempts: attempts.map((a) => ({ id: a.id, at: a.createdAt.toISOString(), user: a.userName, role: a.userRole, mode: a.mode, result: a.result, failureReason: a.failureReason, lat: a.lat, lng: a.lng, accuracy: a.accuracy, distanceM: a.distanceM, qrResult: a.qrResult, overrideReason: a.overrideReason, statusBefore: a.statusBefore, statusAfter: a.statusAfter })),
+      attempts: attempts.map((a) => ({ id: a.id, at: a.createdAt.toISOString(), user: a.userName, role: a.userRole, mode: a.mode, result: a.result, failureReason: a.failureReason, lat: a.lat, lng: a.lng, accuracy: a.accuracy, distanceM: a.distanceM, qrResult: a.qrResult, gpsResult: a.gpsResult, gpsCheckedAt: a.gpsCheckedAt?.toISOString() ?? null, qrCheckedAt: a.qrCheckedAt?.toISOString() ?? null, targetLat: a.targetLat, targetLng: a.targetLng, targetSource: a.targetSource, overrideReason: a.overrideReason, statusBefore: a.statusBefore, statusAfter: a.statusAfter })),
     });
   } catch (err) {
     return errorResponse(err, "jobs.start_verification.get_error");

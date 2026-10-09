@@ -12,6 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CalendarDays, Plus, UserPlus, Clock, AlertTriangle, CheckCircle2 } from "lucide-react";
 import type { Job } from "@/lib/types";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { hasCoords } from "@/lib/location";
+
+const LocationsMap = dynamic(() => import("@/components/common/LocationsMap").then((m) => m.LocationsMap), { ssr: false });
 
 type DeskJob = Job & { customerName?: string; propertyTitle?: string; service?: { name: string } };
 
@@ -32,6 +37,8 @@ export default function SchedulePage() {
   const [newSlot, setNewSlot] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [showMap, setShowMap] = useState(false);
+  const router = useRouter();
 
   const days = useMemo(
     () =>
@@ -112,6 +119,26 @@ export default function SchedulePage() {
           </button>
         ))}
       </div>
+
+      {dayJobs.length > 0 && (
+        <div className="mb-4 space-y-2">
+          <button type="button" aria-expanded={showMap} onClick={() => setShowMap((v) => !v)} className="min-h-11 px-4 rounded-xl border border-zinc-300 bg-white text-sm font-semibold text-zinc-800">
+            {showMap ? "Hide map" : "Show the day on a map"}
+          </button>
+          {showMap && (
+            <>
+              <LocationsMap
+                height={320}
+                points={dayJobs.map((j) => ({ id: j.id, lat: j.serviceLocation?.lat, lng: j.serviceLocation?.lng, title: `${formatTimeSlot(j.scheduledTimeSlot)} · ${j.customerName ?? ""}`, subtitle: j.serviceLocation?.address, color: j.assignedManagerId || j.assignedStaffIds.length ? "#ea506c" : "#d97706" }))}
+                onSelect={(id) => router.push(`/jobs/${id}`)}
+              />
+              {dayJobs.some((j) => !hasCoords(j.serviceLocation)) && (
+                <p className="text-sm text-amber-800">{dayJobs.filter((j) => !hasCoords(j.serviceLocation)).length} job(s) have no saved pin and aren&apos;t on the map — open them to set the location.</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {message && <div role="status" className="mb-3 text-sm rounded-xl border px-3 py-2 bg-zinc-50 border-zinc-200 text-zinc-700">{message}</div>}
 

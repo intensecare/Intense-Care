@@ -117,7 +117,7 @@ test("workspaces: five separate experiences, each with its own home", () => {
   assert.deepEqual(navFor("tax_officer").map((n) => n.label), ["GST Dashboard", "GST Invoices", "GST Reports"]);
   assert.deepEqual(
     navFor("admin").filter((n) => !n.secondary).map((n) => n.label),
-    ["Dashboard", "Intense AI", "Jobs", "Customers", "Quotations", "Invoices", "QC", "Reports", "Users"]
+    ["Dashboard", "Intense AI", "Jobs", "Customers", "Leads", "Quotations", "Invoices", "QC", "Reports", "Users"]
   );
   assert.deepEqual(
     navFor("admin").filter((n) => n.secondary).map((n) => n.label),

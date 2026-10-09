@@ -12,14 +12,14 @@ A simple service-management app for a deep-cleaning business. **Five user types,
 
 ## Structure
 
-Sidebar — **Main:** Dashboard · Intense AI · Jobs · Customers · Quotations · Invoices · QC · Reports · Users. **More:** Schedule · Properties · Services · GST · Reviews & Feedback · Settings. QR, location, rework, approval, custom services, payment, field staff and job tracking are parts of the Job, not separate modules.
+Sidebar — **Main:** Dashboard · Intense AI · Jobs · Customers · Leads · Quotations · Invoices · QC · Reports · Users. **More:** Schedule · Properties · Services · GST · Reviews & Feedback · Settings. QR, location, rework, approval, custom services, payment, field staff and job tracking are parts of the Job, not separate modules.
 
 - **Jobs are the centre.** New Job (`/jobs/new`) walks through Customer → Property → Location (map: address search, current location, drop / drag the pin, lat / lng, address, Navigate) → Service → Date & time → Field Manager → Notes (internal + for the customer) → Customer visibility. The Job Details page shows customer, property, location, service, schedule, team, work, QC, quotation, invoice, approval and feedback in one place.
 - **Quotations** (`/quotations`): catalogue and custom lines, quantity, rate, discount, GST / Non-GST (CGST + SGST or IGST), terms, payment terms, valid-until. Download PDF / Print (browser *Save as PDF*), Share (share sheet, WhatsApp, copy link), Edit, Duplicate, Convert to Job, Convert to Invoice. The share link `APP_BASE_URL/customer/quote/<token>` carries only a random token; the customer can accept or decline it once while it is valid.
 - **Quotations and invoices print as one professional document:** logo, company details, number and date, customer, property / service address, service table, totals (GST rows only on GST documents), payment terms, notes / T&C and the authorized signature (Settings → Logo & signature).
 - **Services:** Standard and Custom in one module; a custom service has its own price, duration, GST treatment, checklist and notes and works in quotations, jobs, invoices, reports and the customer page.
 - **Customer visibility** (Settings → Customer portal for the company default, and per job on the Job page): Job ID, service, date, location, team, status, before / after photos, QC result, quotation, invoice, payment status, service notes, feedback. **Enforced by the API** — anything hidden is left out of `/api/customer/job/<token>`, the photo proxy and the customer's Intense AI answers, not just hidden in the page. Internal notes, costs, margins, QC comments and staff details are never sent.
-- **Arrival verification:** GPS against the job's pin (else the property's). If GPS can't confirm it, the Field Manager taps **Scan QR to Verify Location** and scans the customer's QR — accepted only when it belongs to this job or this property. Otherwise they continue with a reason. The activity log records *verified by GPS*, *verified by QR scan*, *Admin override* (reason required) or *not verified*.
+- **Job start (arrival) verification:** one of three modes — Direct, GPS, or GPS + QR — set in Settings and optionally per job; see *Job start verification* below. Only Admin can override, with a reason; every attempt is logged.
 - **Reviews & Feedback** (`/reviews`): private ratings and comments from the customer page, complaints, Google review status, and — with `GOOGLE_PLACES_API_KEY` + `GOOGLE_PLACE_ID` — the public Google rating and latest reviews. Kept separate.
 - **Reports:** date range, service and Field Manager filters, cards, charts and CSV export for Jobs, Revenue, Customers, Services, QC, Rework, GST, Invoices, Feedback and FM Performance.
 - **Dashboard:** Today's Jobs, Active, Completed, Pending QC, Rework, Revenue, Pending Invoices, Customer Feedback, and *Attention Required* grouped by QC pending, payment pending, rework, unassigned and upcoming.
@@ -39,16 +39,29 @@ Server-enforced: the job start ("arrived") step follows the **job start verifica
 
 ### Job start verification
 
-Admin picks one policy in **Settings → Job start verification** (and may set a different one on an individual job before it starts, from its details page):
+Admin picks one of exactly three modes in **Settings → Job start verification** (and may set a different one on an individual job before it starts, from its details page — the mode is shown on Job Details and on the Field Manager's job screen):
 
 | Mode | Field Manager button | What the server requires |
 |---|---|---|
-| `DIRECT` | Start Job | Assigned Field Manager — nothing else |
-| `QR` | Scan QR to Start | The scanned token must resolve to **this job's** customer QR (not another job or property, not revoked) |
-| `QR_GPS` | Verify GPS + Scan QR | Both the QR check and the GPS check |
-| `GPS` | Verify GPS & Start Job | Device within the allowed distance of the saved job/property pin, with GPS accuracy at or better than the limit |
+| `DIRECT` — Direct Job Start | Start Job | Assigned Field Manager + a startable status — no GPS, no QR |
+| `GPS` — GPS Job Start | Verify GPS & Start Job | Device within the allowed distance of the SAVED job/property pin, GPS accuracy at or better than the limit |
+| `GPS_QR` — GPS + QR Job Start | Verify GPS + Scan QR | Both: the GPS check AND the scanned QR must be this job's customer QR (not another job or property, not expired or revoked) |
 
-Distance and accuracy limits are set in the same section (default 300 m, ±100 m). Nothing falls back silently: a failed check shows a retry message, and a Field Manager can't skip it by giving a reason. Only Admin can start a job on their behalf, with a reason (recorded as `ADMIN_OVERRIDE`). The mode is read from the database, never from the request. Every attempt — passed, failed or override — is stored in `JobStartVerification` (job, user, mode, GPS lat/lng, accuracy, distance, QR result, override reason, status before → after), summarised in the job activity log and the audit log, and listed under *Verification history* on the job page.
+Distance and accuracy limits are set in the same section (default 300 m, ±100 m). Nothing falls back silently: a failed check shows a retry message with separate GPS and QR results, and a Field Manager can't skip it by giving a reason. Only Admin can start a job on their behalf, with a reason (recorded as `ADMIN_OVERRIDE`). The mode is read from the database, never from the request. Every attempt — passed, failed or override — is stored in `JobStartVerification` (job, user, mode, device GPS lat/lng, accuracy, distance, the saved pin it was compared with, GPS result + time, QR result + time, override reason, status before → after) and in the audit log. Browser GPS is an estimate reported by the phone, not tamper-proof proof of presence; use `GPS_QR` where stronger assurance is needed. The retired `QR` and `QR_GPS` modes were migrated to `GPS_QR` (never to a weaker check).
+
+### Locations
+
+A property stores its full address plus address line, locality, city, state, postal code, country, location notes and ONE saved pin (latitude + longitude — both or neither, never (0,0); enforced by a DB check). Pins are set by address search (pick from the results), tapping / dragging the pin, the device's current location, or typing coordinates; the source and the time are kept. A job follows its property's pin (`locationSource = PROPERTY`, kept in step while the job hasn't started) or carries its own pin (`JOB`). Every screen — Job Details, Field Manager, Navigate, customer page, calendar, Schedule / Properties maps — uses the same server-resolved `serviceLocation`. With no pin the app says so and navigates by address; it never substitutes the viewer's location. A Field Manager's GPS reading is stored on the verification row only; a passed on-site check just stamps the property's *last verified* time. See [docs/LOCATION_FIX_REPORT.md](docs/LOCATION_FIX_REPORT.md) and `node scripts/location-diagnose.mjs` for checking existing data.
+
+### Leads
+
+**Leads** (sidebar, Admin; permissions `leads.view` / `leads.manage`) tracks every enquiry until it becomes a customer and a job: Lead ID, name, phone, email, source (Phone Call, Google Search, Google Maps, Google Ads, Website, WhatsApp, Referral, Walk-in, Other), source details, service, property location, preferred date, estimated value, assignee, status, notes, next follow-up, last contacted, linked quotation, converted customer / job, UTM tags and Google Ads click id. Workflow `NEW → CONTACTED → QUALIFIED → QUOTATION_SENT → FOLLOW_UP → WON / LOST` (LOST needs a reason). Dashboard: totals, new, by source, follow-ups due today / overdue, quotations sent, won, lost, conversion rate, pipeline value; search, date / source / status / follow-up filters, list and Kanban, CSV export.
+
+- **Log Call** — record calls on the office's normal mobile (outcome, notes, follow-up). Calls are *not* detected automatically; that needs a telephony provider.
+- **Website** — the public form at `/enquiry` and the embeddable `public/enquiry-widget.js` post to `/api/public/enquiry` (origin allowlist, honeypot, minimum fill time, rate limits, duplicate merge, UTM / gclid / referrer capture).
+- **WhatsApp** — official WhatsApp Business Platform webhook at `/api/webhooks/whatsapp` (verify token + signed deliveries). Personal WhatsApp is never automated.
+- **Google** — Business Profile performance counts on the dashboard (aggregate; never leads; nobody is identified). Google Ads: the widget can fire your conversion tag, and won leads with a click id export as an offline-conversion CSV.
+- **Convert to Customer & Job** (WON leads) reuses an existing customer with the same phone and the lead's property where possible, keeps the lead's history, and can only happen once (DB-unique). A lead with a linked quotation converts through the quotation, which links the job back automatically.
 
 ## One QR per job
 
@@ -147,6 +160,9 @@ npm test     # roles, permissions, routing, next action, state machine
 node scripts/e2e-verify.mjs   # five user types, the job journey, GST rules, security
 node scripts/erp-verify.mjs   # quotations, job location, visibility, QR arrival, settings, reviews
 node scripts/biz-verify.mjs   # expenses, referrals, HR, payroll, assignment, freelance payments, reports
-node scripts/start-verify.mjs # job start verification: DIRECT, QR, QR_GPS, GPS, overrides, duplicates
+node scripts/start-verify.mjs # job start verification: DIRECT, GPS, GPS_QR, overrides, duplicates
+node scripts/location-verify.mjs # property / job / customer-page / Field Manager location consistency
+node scripts/lead-verify.mjs  # leads, log call, website form, WhatsApp webhook, conversion (see its header for env)
+node scripts/location-diagnose.mjs [--apply]  # report (and safely fix) location problems in existing data
 # npm test needs TZ=Asia/Kolkata for one wall-clock assertion on non-IST machines
 ```

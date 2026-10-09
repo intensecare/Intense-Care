@@ -68,15 +68,27 @@ model Property {
   title               String
   address             String
   propertyType        String   @default("apartment") // apartment | villa | office | penthouse | commercial | duplex
+  /// Full, printable address (always required). The parts below are optional
+  /// structure used for search, filters and documents.
   city                String   @default("")
   postalCode          String?
+  addressLine         String?
+  locality            String?
+  state               String?
+  country             String?
   bedrooms            Int      @default(1)
   bathrooms           Int      @default(1)
   areaSqFt            Int      @default(1000)
-  // §11 GPS coordinates for arrival geofencing (null = not captured yet;
-  // arrival then requires an explicit bypass reason until coords are set).
+  /// The property's PERMANENT saved location. Both set or both null (DB check);
+  /// never (0,0). A Field Manager's GPS reading is stored on the verification
+  /// row and never written here.
   lat                 Float?
   lng                 Float?
+  locationNotes       String?
+  /// How the pin was set: SEARCH | MAP_PIN | DEVICE_GPS | MANUAL | IMPORTED
+  locationSource      String?
+  locationUpdatedAt   DateTime?
+  locationVerifiedAt  DateTime?
   accessCode          String?
   accessNotes         String?
   parkingInstructions String?
@@ -159,7 +171,7 @@ model Job {
   arrivalVerification     String?
   arrivalDistanceM        Float?
   arrivalBypassReason     String?
-  // Admin's per-job job-start verification mode (DIRECT | QR | QR_GPS | GPS); null = company default.
+  // Admin's per-job job-start verification mode (DIRECT | GPS | GPS_QR); null = company default.
   startVerificationMode   String?
   customerConfirmedAt     DateTime?
   // Unified QR/link workflow wiring (§3): the customer-confirmation token and
@@ -179,6 +191,9 @@ model Job {
   locationLat             Float?
   locationLng             Float?
   locationAddress         String?
+  /// PROPERTY = follows the property's pin (kept in step when the property
+  /// moves); JOB = a pin set for this job only.
+  locationSource          String?
   /// What the customer may see on their QR page; null = company defaults
   /// (Settings → Customer Portal). Enforced by the customer API.
   customerVisibility      Json?
@@ -815,14 +830,22 @@ model JobStartVerification {
   userId         String
   userName       String
   userRole       String
-  mode           String // DIRECT | QR | QR_GPS | GPS (the mode that applied)
+  mode           String // DIRECT | GPS | GPS_QR (QR / QR_GPS on rows written before 2026-10-13)
   result         String // PASSED | FAILED | OVERRIDE
   failureReason  String?
   lat            Float?
   lng            Float?
   accuracy       Float?
   distanceM      Float?
-  qrResult       String? // VALID | INVALID | OTHER_JOB | MISSING | NOT_REQUIRED
+  qrResult       String? // VALID | INVALID | EXPIRED | REVOKED | OTHER_JOB | OTHER_PROPERTY | MISSING | NOT_REQUIRED
+  gpsResult      String? // PASSED | FAILED | NOT_REQUIRED
+  gpsCheckedAt   DateTime?
+  qrCheckedAt    DateTime?
+  qrTokenId      String?
+  /// The saved job/property location the GPS reading was compared with.
+  targetLat      Float?
+  targetLng      Float?
+  targetSource   String? // JOB | PROPERTY
   overrideReason String?
   statusBefore   String
   statusAfter    String
@@ -893,6 +916,96 @@ model QrToken {
   @@index([jobId])
   @@index([purpose])
   @@index([jobId, purpose])
+}
+
+/// Every automatic correction of stored coordinates (migration or the
+/// location-diagnose script): what changed, from what, to what, and why.
+model LocationRepair {
+  id         String   @id @default(cuid())
+  entityType String // property | job
+  entityId   String
+  action     String
+  oldValue   String?
+  newValue   String?
+  reason     String
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId], map: "LocationRepair_entity_idx")
+}
+
+/// A sales enquiry before it becomes a customer and a job. Sources:
+/// PHONE_CALL | GOOGLE_SEARCH | GOOGLE_MAPS | GOOGLE_ADS | WEBSITE | WHATSAPP |
+/// REFERRAL | WALK_IN | OTHER. Workflow: NEW → CONTACTED → QUALIFIED →
+/// QUOTATION_SENT → FOLLOW_UP → WON / LOST (LOST needs a reason — DB check).
+/// Converting a WON lead links the customer, property and job it became;
+/// `convertedJobId` is unique, so a lead can never be converted twice.
+model Lead {
+  id                  String         @id @default(cuid())
+  leadNumber          String         @unique
+  customerName        String
+  phone               String
+  phoneKey            String
+  email               String?
+  source              String
+  sourceDetails       String?
+  serviceInterest     String?
+  serviceId           String?
+  propertyAddress     String?
+  locality            String?
+  city                String?
+  postalCode          String?
+  lat                 Float?
+  lng                 Float?
+  preferredDate       String?
+  estimatedValue      Float?
+  assignedUserId      String?
+  status              String         @default("NEW")
+  lostReason          String?
+  notes               String?
+  nextFollowUpDate    String?
+  lastContactedAt     DateTime?
+  quoteId             String?
+  convertedCustomerId String?
+  convertedPropertyId String?
+  convertedJobId      String?        @unique
+  convertedAt         DateTime?
+  convertedBy         String?
+  utmSource           String?
+  utmMedium           String?
+  utmCampaign         String?
+  utmTerm             String?
+  utmContent          String?
+  gclid               String?
+  landingPage         String?
+  referrerUrl         String?
+  createdBy           String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @default(now()) @updatedAt
+  activities          LeadActivity[]
+
+  @@index([phoneKey])
+  @@index([status])
+  @@index([source])
+  @@index([nextFollowUpDate])
+  @@index([createdAt])
+  @@index([quoteId])
+}
+
+/// Append-only history of a lead: calls, notes, status changes, follow-ups,
+/// incoming WhatsApp messages and the conversion.
+model LeadActivity {
+  id         String   @id @default(cuid())
+  leadId     String
+  type       String // CREATED | STATUS_CHANGED | NOTE | CALL_LOGGED | FOLLOW_UP_SET | FOLLOW_UP_DONE | ASSIGNED | WEBSITE_ENQUIRY | WHATSAPP_MESSAGE | QUOTE_LINKED | CUSTOMER_LINKED | CONVERTED | UPDATED
+  message    String
+  outcome    String?
+  externalId String?  @unique
+  actorId    String?
+  actorName  String
+  createdAt  DateTime @default(now())
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
 }
 
 /// Sessions revoked by signing out (kept until the cookie would expire).

@@ -280,6 +280,7 @@ export interface ResolvedQrToken {
     customerName: string;
     customerPhone: string;
     serviceId: string;
+    propertyId: string;
     propertyName: string;
     propertyAddress: string;
     scheduledDate: string;
@@ -359,6 +360,7 @@ export async function resolveQrToken(
         customerName: job.customer?.name ?? "Customer",
         customerPhone: job.customer?.phone ?? "",
         serviceId: job.serviceId,
+        propertyId: job.propertyId,
         propertyName: job.property?.title ?? "Property",
         propertyAddress: job.property?.address ?? "",
         scheduledDate: job.scheduledDate,

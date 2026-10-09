@@ -8,13 +8,16 @@ import { Notice } from "@/components/ui/states";
 import { SelectField, textareaCls, useApiList, Pill } from "@/components/biz/Bits";
 import { Field } from "@/components/ui/input";
 import { useApp } from "@/lib/app-context";
-import { START_MODES, START_MODE_INFO, effectiveStartMode, type StartMode, type StartVerificationSettings } from "@/lib/start-verification";
+import { START_MODES, START_MODE_INFO, effectiveStartMode, modeNeedsGps, normalizeStartMode, type StartMode, type StartVerificationSettings } from "@/lib/start-verification";
 import type { Job } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 
-interface Attempt { id: string; at: string; user: string; role: string; mode: StartMode; result: "PASSED" | "FAILED" | "OVERRIDE"; failureReason: string | null; lat: number | null; lng: number | null; accuracy: number | null; distanceM: number | null; qrResult: string | null; overrideReason: string | null; statusBefore: string; statusAfter: string }
+interface Attempt { id: string; at: string; user: string; role: string; mode: string; result: "PASSED" | "FAILED" | "OVERRIDE"; failureReason: string | null; lat: number | null; lng: number | null; accuracy: number | null; distanceM: number | null; qrResult: string | null; gpsResult: string | null; targetLat: number | null; targetLng: number | null; targetSource: string | null; overrideReason: string | null; statusBefore: string; statusAfter: string }
 
-const QR_LABEL: Record<string, string> = { VALID: "QR valid", INVALID: "QR invalid", OTHER_JOB: "QR of another job", MISSING: "No QR scanned" };
+const QR_LABEL: Record<string, string> = { VALID: "QR valid", INVALID: "QR invalid", EXPIRED: "QR expired", REVOKED: "QR cancelled", OTHER_JOB: "QR of another job", OTHER_PROPERTY: "QR of another property", MISSING: "No QR scanned", RATE_LIMITED: "Too many QR attempts" };
+const GPS_LABEL: Record<string, string> = { PASSED: "GPS passed", FAILED: "GPS failed" };
+/** Rows written before the three-mode change. */
+const LEGACY_MODE: Record<string, string> = { QR: "QR job start (retired)", QR_GPS: "QR + GPS (retired)" };
 
 async function patchJob(id: string, body: Record<string, unknown>) {
   const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
@@ -33,7 +36,7 @@ export function StartVerificationCard({ job, canEdit }: { job: Job; canEdit: boo
   const log = useApiList<{ attempts: Attempt[] }>(() => `/api/jobs/${encodeURIComponent(job.id)}/start-verification`, [job.id, job.status]);
 
   const [edit, setEdit] = useState(false);
-  const [draft, setDraft] = useState<string>(job.startVerificationMode ?? "");
+  const [draft, setDraft] = useState<string>(normalizeStartMode(job.startVerificationMode) ?? "");
   const [override, setOverride] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -55,11 +58,11 @@ export function StartVerificationCard({ job, canEdit }: { job: Job; canEdit: boo
       <div className="flex items-center justify-between gap-2">
         <h2 id="sv-h" className="text-base font-semibold text-zinc-900 flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-rose-500" aria-hidden /> Job start verification</h2>
         {canEdit && notStarted && sv.allowPerJobOverride && (
-          <Button size="sm" variant="ghost" onClick={() => { setDraft(job.startVerificationMode ?? ""); setError(null); setEdit(true); }}><Pencil className="h-4 w-4" aria-hidden /> Change</Button>
+          <Button size="sm" variant="ghost" onClick={() => { setDraft(normalizeStartMode(job.startVerificationMode) ?? ""); setError(null); setEdit(true); }}><Pencil className="h-4 w-4" aria-hidden /> Change</Button>
         )}
       </div>
       <p className="text-sm text-zinc-800"><span className="font-semibold">{START_MODE_INFO[mode].label}</span> {custom ? "(set for this job)" : "(company default)"}</p>
-      <p className="text-sm text-zinc-600">{START_MODE_INFO[mode].needs}{mode === "GPS" || mode === "QR_GPS" ? ` Within ${sv.maxDistanceMeters} m, GPS accuracy ±${sv.maxAccuracyMeters} m or better.` : ""}</p>
+      <p className="text-sm text-zinc-600">{START_MODE_INFO[mode].needs}{modeNeedsGps(mode) ? ` Within ${sv.maxDistanceMeters} m, GPS accuracy ±${sv.maxAccuracyMeters} m or better.` : ""}</p>
       {canEdit && notStarted && (
         <Button size="sm" variant="outline" onClick={() => { setReason(""); setError(null); setOverride(true); }}>Start on the Field Manager&apos;s behalf…</Button>
       )}
@@ -76,10 +79,12 @@ export function StartVerificationCard({ job, canEdit }: { job: Job; canEdit: boo
                   <span className="text-zinc-500">{formatDateTime(a.at)}</span>
                 </div>
                 <div className="text-xs text-zinc-600 break-words">
-                  {START_MODE_INFO[a.mode]?.label ?? a.mode}
+                  {START_MODE_INFO[a.mode as StartMode]?.label ?? LEGACY_MODE[a.mode] ?? a.mode}
+                  {a.gpsResult && GPS_LABEL[a.gpsResult] ? ` · ${GPS_LABEL[a.gpsResult]}` : ""}
                   {a.distanceM !== null ? ` · ${a.distanceM} m away` : ""}
                   {a.accuracy !== null ? ` · ±${Math.round(a.accuracy)} m` : ""}
-                  {a.lat !== null && a.lng !== null ? ` · ${a.lat.toFixed(5)}, ${a.lng.toFixed(5)}` : ""}
+                  {a.lat !== null && a.lng !== null ? ` · device ${a.lat.toFixed(5)}, ${a.lng.toFixed(5)}` : ""}
+                  {a.targetLat !== null && a.targetLng !== null ? ` · saved ${a.targetSource === "JOB" ? "job" : "property"} pin ${a.targetLat.toFixed(5)}, ${a.targetLng.toFixed(5)}` : ""}
                   {a.qrResult && QR_LABEL[a.qrResult] ? ` · ${QR_LABEL[a.qrResult]}` : ""}
                   {` · ${a.statusBefore.toLowerCase()} → ${a.statusAfter.toLowerCase()}`}
                 </div>

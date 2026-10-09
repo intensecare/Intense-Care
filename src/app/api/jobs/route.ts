@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizeCoords } from "@/lib/location";
 import { validateCrew, createJobWithInvoice, cleanVisibility, afterJobCreated } from "@/lib/server/job-create";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -12,6 +13,7 @@ import {
   withStaffNames,
   fail,
   readJson,
+  JOB_PROPERTY_SELECT,
 } from "@/lib/server/serialize";
 import { projectJob } from "@/lib/server/projections";
 import { recordAudit } from "@/lib/server/audit";
@@ -24,7 +26,7 @@ import { can } from "@/lib/rbac";
 /** Include shape shared by every job-list fetch (display joins only). */
 const JOB_LIST_INCLUDE = {
   customer: { select: { name: true, phone: true } },
-  property: { select: { title: true, address: true } },
+  property: { select: JOB_PROPERTY_SELECT },
   service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
 } as const;
 
@@ -97,6 +99,8 @@ const CreateJobSchema = z.object({
   locationLat: z.number().min(-90).max(90).nullable().optional(),
   locationLng: z.number().min(-180).max(180).nullable().optional(),
   locationAddress: z.string().max(500).optional(),
+  /** Save the pin on the property too, when the property has none yet. */
+  saveLocationToProperty: z.boolean().optional(),
   /** Per-job customer visibility (unset keys follow the company default). */
   customerVisibility: z.record(z.string(), z.boolean()).optional(),
   /** The Admin's choice for this job's invoice; default follows the service's GST setting. */
@@ -167,13 +171,17 @@ export async function POST(request: Request) {
     if (!propertyId) {
       const address = d.propertyAddress || d.locationAddress;
       if (!address) return fail("Property address is required.", 400);
+      const pin = normalizeCoords(d.locationLat, d.locationLng);
+      if (!pin && (d.locationLat != null || d.locationLng != null)) return fail("The map location needs both latitude and longitude (and can't be 0, 0).", 400);
       const created = await prisma.property.create({
         data: {
           customerId,
           title: d.propertyTitle || `${(d.customerName || "Customer").split(" ")[0]}'s Property`,
           address,
-          lat: d.locationLat ?? null,
-          lng: d.locationLng ?? null,
+          lat: pin?.lat ?? null,
+          lng: pin?.lng ?? null,
+          locationSource: pin ? "MAP_PIN" : null,
+          locationUpdatedAt: pin ? new Date() : null,
         },
       });
       propertyId = created.id;
@@ -194,9 +202,10 @@ export async function POST(request: Request) {
         customerNotes: d.customerNotes,
         referralPartnerId: d.referralPartnerId,
         location:
-          d.locationLat !== undefined || d.locationAddress
+          d.locationLat != null || d.locationLng != null || d.locationAddress
             ? { lat: d.locationLat ?? null, lng: d.locationLng ?? null, address: d.locationAddress ?? null }
             : null,
+        saveLocationToProperty: d.saveLocationToProperty,
         customerVisibility: cleanVisibility(d.customerVisibility),
         invoice: { type: invoiceType, interState: d.interState },
       },

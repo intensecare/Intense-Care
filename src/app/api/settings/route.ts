@@ -136,7 +136,7 @@ export async function PATCH(request: Request) {
       const next = { ...current.jobStartVerification };
       const bad = (msg: string) => NextResponse.json({ success: false, error: msg }, { status: 400 });
       if (v.defaultMode !== undefined) {
-        if (!isStartMode(v.defaultMode)) return bad("Choose one of the four job start verification modes.");
+        if (!isStartMode(v.defaultMode)) return bad("Choose one of the three job start modes: DIRECT, GPS or GPS_QR.");
         next.defaultMode = v.defaultMode;
       }
       const whole = (x: unknown, min: number, max: number) => typeof x === "number" && Number.isInteger(x) && x >= min && x <= max;

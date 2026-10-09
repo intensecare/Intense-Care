@@ -20,17 +20,27 @@ export interface PropertyFormPayload {
   title: string;
   propertyType: Property["propertyType"];
   address: string;
+  addressLine: string;
+  locality: string;
   city: string;
+  state: string;
+  postalCode: string;
+  country: string;
   bedrooms: number;
   bathrooms: number;
   carpetAreaSqFt: number;
   accessNotes: string;
   parkingInstructions: string;
+  preferredTime: string;
   recurringService: boolean;
   recurringFrequency?: "weekly" | "biweekly" | "monthly" | "quarterly";
-  /** Map location (optional). */
+  /** Map location (optional). Both or neither. */
   lat: number | null;
   lng: number | null;
+  locationNotes: string;
+  locationSource?: LocationValue["source"];
+  /** Edit only: the user removed the saved pin on purpose. */
+  clearLocation?: boolean;
 }
 
 interface PropertyFormDialogProps {
@@ -65,8 +75,13 @@ export function PropertyFormDialog({
   const [title, setTitle] = useState("");
   const [propertyType, setPropertyType] = useState<PropertyFormPayload["propertyType"]>("apartment");
   const [address, setAddress] = useState("");
+  const [addressLine, setAddressLine] = useState("");
+  const [locality, setLocality] = useState("");
   const [city, setCity] = useState("Bengaluru");
+  const [stateName, setStateName] = useState("");
   const [postalCode, setPostalCode] = useState("");
+  const [country, setCountry] = useState("India");
+  const [locationNotes, setLocationNotes] = useState("");
   const [bedrooms, setBedrooms] = useState(3);
   const [bathrooms, setBathrooms] = useState(2);
   const [sqFt, setSqFt] = useState(1800);
@@ -88,8 +103,13 @@ export function PropertyFormDialog({
     setTitle(editing?.title ?? "");
     setPropertyType(editing?.propertyType || "apartment");
     setAddress(editing?.address ?? "");
-    setCity(editing?.city || "Bengaluru");
+    setAddressLine(editing?.addressLine ?? "");
+    setLocality(editing?.locality ?? "");
+    setCity(editing ? editing.city ?? "" : "Bengaluru");
+    setStateName(editing?.state ?? "");
     setPostalCode(editing?.postalCode ?? "");
+    setCountry(editing ? editing.country ?? "" : "India");
+    setLocationNotes(editing?.locationNotes ?? "");
     setBedrooms(editing?.bedrooms ?? 3);
     setBathrooms(editing?.bathrooms ?? 2);
     setSqFt(editing?.carpetAreaSqFt ?? 1800);
@@ -98,7 +118,7 @@ export function PropertyFormDialog({
     setPreferredTime(editing?.preferredTime ?? "");
     setRecurring(editing?.recurringService ?? false);
     setRecurringFrequency(editing?.recurringFrequency ?? "monthly");
-    setLoc({ lat: editing?.lat ?? null, lng: editing?.lng ?? null, address: "" });
+    setLoc({ lat: editing?.lat ?? null, lng: editing?.lng ?? null, address: editing?.address ?? "" });
   }, [open, editing, defaultCustomerId, customers]);
 
   const customerOptions = customers.map((c) => ({
@@ -106,9 +126,26 @@ export function PropertyFormDialog({
     label: `${c.name} (${c.phone})`,
   }));
 
+  // A chosen search result / pin lookup fills only the address parts that are still empty.
+  const onLocation = (v: LocationValue) => {
+    setLoc(v);
+    if (v.address !== loc.address) setAddress(v.address);
+    const f = v.found;
+    if (f && f !== loc.found) {
+      if (!addressLine.trim() && f.addressLine) setAddressLine(f.addressLine);
+      if (!locality.trim() && f.locality) setLocality(f.locality);
+      if ((!city.trim() || (!isEditing && city === "Bengaluru")) && f.city) setCity(f.city);
+      if (!stateName.trim() && f.state) setStateName(f.state);
+      if (!postalCode.trim() && f.postalCode) setPostalCode(f.postalCode);
+      if (!country.trim() && f.country) setCountry(f.country);
+    }
+  };
+  const halfPin = (loc.lat === null) !== (loc.lng === null);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !address || !customerId) return;
+    if (halfPin) return setError("The map location needs both latitude and longitude. Finish it or remove the pin.");
     setIsSubmitting(true);
     setError("");
 
@@ -116,17 +153,26 @@ export function PropertyFormDialog({
       customerId,
       title,
       propertyType,
-      address,
-      city,
+      address: address.trim(),
+      addressLine: addressLine.trim(),
+      locality: locality.trim(),
+      city: city.trim(),
+      state: stateName.trim(),
+      postalCode: postalCode.trim(),
+      country: country.trim(),
       bedrooms,
       bathrooms,
       carpetAreaSqFt: sqFt,
       accessNotes,
       parkingInstructions: parking,
+      preferredTime,
       recurringService: recurring,
       recurringFrequency: recurring ? recurringFrequency : undefined,
       lat: loc.lat,
       lng: loc.lng,
+      locationNotes: locationNotes.trim(),
+      locationSource: loc.source,
+      clearLocation: isEditing && typeof editing?.lat === "number" && loc.lat === null && loc.lng === null,
     });
 
     setIsSubmitting(false);
@@ -159,23 +205,40 @@ export function PropertyFormDialog({
             <Input id="pf-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Sobha Dream Acres 3BHK" required />
           </Field>
 
-          <Field label="Address" required htmlFor="pf-address">
-            <Input id="pf-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Flat, tower, community, locality" required autoComplete="street-address" />
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-semibold text-zinc-950">Location on the map <span className="font-normal text-zinc-500">(for navigation and the GPS start check)</span></legend>
+            {open && <LocationPicker key={editing?.id ?? "new"} idPrefix="pf-loc" value={{ ...loc, address }} onChange={onLocation} height={220} showAddress={false} />}
+          </fieldset>
+
+          <Field label="Full address" required htmlFor="pf-address" hint="As the team should read it — flat, building, street, area">
+            <textarea id="pf-address" value={address} onChange={(e) => setAddress(e.target.value)} rows={2} required autoComplete="street-address" className="w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm" placeholder="Flat 402, Tower B, Sobha Dream Acres, Panathur Rd" />
+          </Field>
+
+          <Field label="Address line" htmlFor="pf-line" hint="Optional — flat / house number and street">
+            <Input id="pf-line" value={addressLine} onChange={(e) => setAddressLine(e.target.value)} autoComplete="address-line1" />
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
+            <Field label="Locality / area" htmlFor="pf-locality">
+              <Input id="pf-locality" value={locality} onChange={(e) => setLocality(e.target.value)} placeholder="Bellandur" autoComplete="address-level3" />
+            </Field>
             <Field label="City" htmlFor="pf-city">
               <Input id="pf-city" value={city} onChange={(e) => setCity(e.target.value)} autoComplete="address-level2" />
+            </Field>
+            <Field label="State" htmlFor="pf-state">
+              <Input id="pf-state" value={stateName} onChange={(e) => setStateName(e.target.value)} placeholder="Karnataka" autoComplete="address-level1" />
             </Field>
             <Field label="Postal code" htmlFor="pf-pin">
               <Input id="pf-pin" inputMode="numeric" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} placeholder="560102" autoComplete="postal-code" />
             </Field>
+            <Field label="Country" htmlFor="pf-country">
+              <Input id="pf-country" value={country} onChange={(e) => setCountry(e.target.value)} autoComplete="country-name" />
+            </Field>
           </div>
 
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-semibold text-zinc-950">Location on the map <span className="font-normal text-zinc-500">(for navigation and arrival check)</span></legend>
-            {open && <LocationPicker key={editing?.id ?? "new"} idPrefix="pf-loc" value={{ ...loc, address: loc.address || address }} onChange={(v) => { setLoc(v); if (!address && v.address) setAddress(v.address); }} height={220} />}
-          </fieldset>
+          <Field label="Location notes" htmlFor="pf-locnotes" hint="Optional — landmark, which gate, how to find the building">
+            <Input id="pf-locnotes" value={locationNotes} onChange={(e) => setLocationNotes(e.target.value)} placeholder="Opposite the Total Mall, gate 3" />
+          </Field>
 
           <fieldset className="space-y-3">
             <legend className="text-sm font-semibold text-zinc-950">Size</legend>

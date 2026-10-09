@@ -182,6 +182,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
         throw e instanceof HttpError ? e : new HttpError(500, "Could not create the job.");
       });
       await prisma.quote.update({ where: { id: q.id }, data: { status: "converted_to_job", jobId: job.id, propertyId } });
+      // A lead that carried this quotation becomes WON and points at the job (once).
+      const leads = await prisma.lead.findMany({ where: { quoteId: q.id, convertedJobId: null }, select: { id: true } });
+      for (const l of leads.slice(0, 1)) {
+        await prisma.lead.update({ where: { id: l.id }, data: { status: "WON", lostReason: null, convertedJobId: job.id, convertedAt: new Date(), convertedBy: user.id, convertedCustomerId: q.customerId, convertedPropertyId: propertyId } });
+        await prisma.leadActivity.create({ data: { leadId: l.id, type: "CONVERTED", message: `Quotation ${q.quoteNumber} converted to job ${job.jobSerial}`, actorId: user.id, actorName: user.name } });
+      }
       afterJobCreated(job.id, user);
       void recordAudit({ actor: user, action: "QUOTE_CONVERTED", entityType: "quote", entityId: q.id, jobId: job.id, newState: job.status, details: `${q.quoteNumber} → ${job.jobSerial}`, request });
       return ok({ jobId: job.id, jobNumber: job.jobSerial, invoiceId: invoice.id }, 201);

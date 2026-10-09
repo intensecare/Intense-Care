@@ -11,7 +11,7 @@
     "lint": "next lint",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:demo": "tsx prisma/seed-demo.ts",
-    "test": "tsx --test tests/rbac.test.ts tests/visibility.test.ts tests/markdown.test.tsx && tsx tests/ops-visibility.test.ts"
+    "test": "tsx --test tests/rbac.test.ts tests/visibility.test.ts tests/markdown.test.tsx tests/location-leads.test.ts && tsx tests/ops-visibility.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",

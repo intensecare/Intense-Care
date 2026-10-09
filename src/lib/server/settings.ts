@@ -4,6 +4,7 @@
  * settings row — the company configures everything through the Settings page).
  */
 import type { Prisma } from "@prisma/client";
+import { normalizeStartMode } from "@/lib/start-verification";
 import { prisma } from "./prisma";
 import type { SystemSettings, CustomerVisibility } from "@/lib/types";
 import { DEFAULT_SYSTEM_SETTINGS } from "@/lib/initial-config";
@@ -28,7 +29,11 @@ export async function getSystemSettings(): Promise<SystemSettings> {
       customerVisibility: { ...DEFAULT_SYSTEM_SETTINGS.customerVisibility, ...(data.customerVisibility ?? {}) },
       notifications: { ...DEFAULT_SYSTEM_SETTINGS.notifications, ...(data.notifications ?? {}) },
       referralRules: { ...DEFAULT_SYSTEM_SETTINGS.referralRules, ...(data.referralRules ?? {}) },
-      jobStartVerification: { ...DEFAULT_SYSTEM_SETTINGS.jobStartVerification, ...(data.jobStartVerification ?? {}) },
+      jobStartVerification: (() => {
+        const sv = { ...DEFAULT_SYSTEM_SETTINGS.jobStartVerification, ...(data.jobStartVerification ?? {}) };
+        // A stored retired mode (QR / QR_GPS) reads as the mode that replaced it.
+        return { ...sv, defaultMode: normalizeStartMode(sv.defaultMode) ?? DEFAULT_SYSTEM_SETTINGS.jobStartVerification.defaultMode };
+      })(),
     };
   } catch {
     return { ...DEFAULT_SYSTEM_SETTINGS };

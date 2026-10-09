@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/server/prisma";
+import { resolveServiceLocation } from "@/lib/location";
 import { logger } from "@/lib/server/logger";
 
 /**
@@ -106,7 +107,7 @@ async function buildEventPayload(jobId: string): Promise<{
     where: { id: jobId },
     include: {
       customer: { select: { name: true, phone: true } },
-      property: { select: { title: true, address: true } },
+      property: { select: { title: true, address: true, city: true, postalCode: true, locality: true, state: true, lat: true, lng: true } },
       service: { select: { name: true, estimatedDurationHours: true } },
     },
   });
@@ -121,19 +122,21 @@ async function buildEventPayload(jobId: string): Promise<{
   const durationH = 3; // slot-agnostic reminder block
   const end = `${job.scheduledDate}T${String(9 + durationH).padStart(2, "0")}:00:00`;
 
+  const where = resolveServiceLocation(job, job.property);
   const description = [
     `Job ID: ${job.id}`,
     `Customer: ${job.customer?.name ?? "—"}`,
     `Contact: ${job.customer?.phone ?? "—"}`,
     `Service: ${job.service?.name ?? "Deep Cleaning"}`,
-    `Address: ${job.property?.address ?? "—"}`,
+    `Address: ${where.address || "—"}`,
+    ...(where.lat !== null ? [`Map: https://www.google.com/maps/search/?api=1&query=${where.lat},${where.lng}`] : []),
     `Team: ${teamNames || "Not yet assigned"}`,
   ].join("\n");
 
   const payload = {
     summary: `Intense Care · ${job.service?.name ?? "Deep Cleaning"} — ${job.customer?.name ?? job.id}`,
     description,
-    location: job.property?.address ?? undefined,
+    location: where.address || undefined,
     status: job.status === "CANCELLED" ? ("cancelled" as const) : ("confirmed" as const),
     start: { dateTime: start, timeZone: process.env.GOOGLE_CALENDAR_TIMEZONE || "Asia/Kolkata" },
     end: { dateTime: end, timeZone: process.env.GOOGLE_CALENDAR_TIMEZONE || "Asia/Kolkata" },

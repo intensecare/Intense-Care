@@ -4,6 +4,7 @@ import { requirePermission, jobWhereFor } from "@/lib/server/authz";
 import { recordAudit } from "@/lib/server/audit";
 import { errorResponse } from "@/lib/server/http";
 import { serializeProperty, ok, fail, readJson } from "@/lib/server/serialize";
+import { PATCH as patchProperty } from "../route";
 
 /** GET /api/properties/[id] — get a single property */
 export async function GET(
@@ -36,35 +37,19 @@ export async function GET(
   }
 }
 
-/** PATCH /api/properties/[id] — update property by URL param */
-export async function PATCH(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const { user } = await requirePermission("properties.update");
-    const { id } = params;
-    const body = await readJson(request);
-
-    const property = await prisma.property.findUnique({ where: { id } });
-    if (!property) return fail("Property not found.", 404);
-
-    const data: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(body || {})) {
-      if (v === undefined || k === "id") continue;
-      if (k === "customerId") {
-        const customer = await prisma.customer.findUnique({ where: { id: String(v) } });
-        if (!customer) return fail("Customer not found.", 404);
-      }
-      data[k === "carpetAreaSqFt" ? "areaSqFt" : k] = v;
-    }
-
-    const updated = await prisma.property.update({ where: { id }, data });
-    void recordAudit({ actor: user, action: "PROPERTY_UPDATED", entityType: "property", entityId: id, details: Object.keys(data).join(","), request });
-    return ok(serializeProperty(updated));
-  } catch (err) {
-    return errorResponse(err, "properties.patch_one.route_error");
-  }
+/**
+ * PATCH /api/properties/[id] — same rules as PATCH /api/properties (one
+ * implementation): only known fields, a map pin is a full valid pair, empty
+ * values never wipe a saved pin, and open jobs follow a moved pin.
+ */
+export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const body = await readJson(request);
+  const forwarded = new Request(request.url, {
+    method: "PATCH",
+    headers: request.headers,
+    body: JSON.stringify({ ...(body && typeof body === "object" ? body : {}), id: params.id }),
+  });
+  return patchProperty(forwarded);
 }
 
 /** DELETE /api/properties/[id] — delete property by URL param */

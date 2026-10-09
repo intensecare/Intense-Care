@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
+import { formatAddress, normalizeCoords } from "@/lib/location";
 import { prisma } from "@/lib/server/prisma";
 import { cleanVisibility } from "@/lib/server/job-create";
 import { getSystemSettings } from "@/lib/server/settings";
@@ -11,7 +12,7 @@ import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { validateTransition, JOB_STATUS_CONFIG } from "@/lib/state-machine";
 import type { Job } from "@/lib/types";
-import { serializeJob, withStaffNames, fail } from "@/lib/server/serialize";
+import { serializeJob, withStaffNames, fail, JOB_PROPERTY_SELECT } from "@/lib/server/serialize";
 import { projectJob } from "@/lib/server/projections";
 import { recordActivity } from "@/lib/server/activity";
 import { recordAudit } from "@/lib/server/audit";
@@ -24,9 +25,17 @@ import type { SessionUser } from "@/lib/server/session";
 
 const JOB_INCLUDE = {
   customer: { select: { name: true, phone: true } },
-  property: { select: { title: true, address: true } },
+  property: { select: JOB_PROPERTY_SELECT },
   service: { select: { id: true, name: true, basePrice: true, estimatedDurationHours: true } },
 } as const;
+
+/** GPS and QR results kept apart, for the Field Manager's screen. */
+function verificationView(c: StartCheck) {
+  return {
+    gps: { result: c.gpsResult, message: c.gpsMessage ?? null, distanceM: c.distanceM, at: c.gpsCheckedAt?.toISOString() ?? null },
+    qr: { result: c.qrResult, message: c.qrMessage ?? null, at: c.qrCheckedAt?.toISOString() ?? null },
+  };
+}
 
 async function respondWithJob(user: SessionUser, id: string, status = 200) {
   const full = await prisma.job.findUnique({ where: { id }, include: JOB_INCLUDE });
@@ -72,7 +81,13 @@ const PatchSchema = z.object({
   reason: z.string().max(500).optional(),
   /** Admin: the job's map location, notes for the customer, what the customer sees. */
   location: z
-    .object({ lat: z.number().min(-90).max(90).nullable(), lng: z.number().min(-180).max(180).nullable(), address: z.string().max(500).nullable() })
+    .object({
+      lat: z.number().min(-90).max(90).nullable(),
+      lng: z.number().min(-180).max(180).nullable(),
+      address: z.string().max(500).nullable(),
+      /** true = drop this job's own pin and follow the property's saved location again. */
+      followProperty: z.boolean().optional(),
+    })
     .nullable()
     .optional(),
   customerNotes: z.string().max(2000).nullable().optional(),
@@ -230,9 +245,28 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       const { user } = await authorizeJob(id, "jobs.assign");
       const data: Prisma.JobUpdateInput = { updatedAt: new Date() };
       if (body.location !== undefined) {
-        data.locationLat = body.location?.lat ?? null;
-        data.locationLng = body.location?.lng ?? null;
-        data.locationAddress = body.location?.address || null;
+        const cur = await prisma.job.findUnique({ where: { id }, include: { property: true } });
+        if (!cur) return fail("Job not found.", 404);
+        const propPin = normalizeCoords(cur.property.lat, cur.property.lng);
+        const propAddress = formatAddress(cur.property);
+        if (body.location === null || body.location.followProperty) {
+          Object.assign(data, { locationLat: propPin?.lat ?? null, locationLng: propPin?.lng ?? null, locationAddress: propAddress || null, locationSource: "PROPERTY" });
+        } else {
+          const pin = normalizeCoords(body.location.lat, body.location.lng);
+          if (!pin && (body.location.lat !== null || body.location.lng !== null)) {
+            return fail("The map location needs both latitude and longitude (and can't be 0, 0).", 400);
+          }
+          // Empty values never wipe a saved pin or address.
+          const keep = normalizeCoords(cur.locationLat, cur.locationLng);
+          const next = pin ?? keep ?? propPin;
+          const same = !!next && !!propPin && Math.abs(next.lat - propPin.lat) < 1e-6 && Math.abs(next.lng - propPin.lng) < 1e-6;
+          Object.assign(data, {
+            locationLat: next?.lat ?? null,
+            locationLng: next?.lng ?? null,
+            locationAddress: body.location.address?.trim() || cur.locationAddress || propAddress || null,
+            locationSource: !next || same ? "PROPERTY" : "JOB",
+          });
+        }
       }
       if (body.customerNotes !== undefined) data.customerNotes = body.customerNotes?.trim() || null;
       if (body.startVerificationMode !== undefined) {
@@ -299,7 +333,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       if (!check.ok) {
         await logStartAttempt({ jobId: id, user, mode, check, arrival, statusBefore: existing.status, statusAfter: existing.status });
         void recordAudit({ actor: user, action: "JOB_START_VERIFICATION_FAILED", entityType: "job", entityId: id, jobId: id, previousState: existing.status, newState: existing.status, details: `mode=${mode} code=${check.code} distance=${check.distanceM ?? "n/a"} qr=${check.qrResult}`, request });
-        return NextResponse.json({ success: false, error: check.error, code: check.code, mode }, { status: check.status ?? 409 });
+        return NextResponse.json({ success: false, error: check.error, code: check.code, mode, verification: verificationView(check) }, { status: check.status ?? 409 });
       }
       start = { mode, check, arrival };
       Object.assign(data, {
@@ -330,7 +364,13 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       if (start) await logStartAttempt({ jobId: id, user, mode: start.mode, check: { ...start.check, ok: false, result: "FAILED" }, arrival: start.arrival, statusBefore: existing.status, statusAfter: existing.status, failureReason: "Duplicate or out-of-date start request — the job had already changed." });
       return fail("This job was just updated by someone else. Refresh and try again.", 409);
     }
-    if (start) await logStartAttempt({ jobId: id, user, mode: start.mode, check: start.check, arrival: start.arrival, statusBefore: existing.status, statusAfter: status });
+    if (start) {
+      await logStartAttempt({ jobId: id, user, mode: start.mode, check: start.check, arrival: start.arrival, statusBefore: existing.status, statusAfter: status });
+      // A passed on-site GPS check confirms the property's saved pin (its coordinates are never replaced by the device's).
+      if (start.check.gpsResult === "PASSED" && start.check.target?.source === "PROPERTY") {
+        await prisma.property.update({ where: { id: existing.propertyId }, data: { locationVerifiedAt: new Date() } }).catch(() => {});
+      }
+    }
     const job = { status };
 
     const STATUS_EVENT_MESSAGES: Record<string, string> = {
