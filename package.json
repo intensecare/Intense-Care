@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "prisma generate && next build",
+    "vercel-build": "node scripts/migrate-deploy.mjs && npm run build",
+    "db:migrate": "node scripts/migrate-deploy.mjs",
     "start": "next start -H 0.0.0.0 -p 3000",
     "lint": "next lint",
     "db:seed": "tsx prisma/seed.ts",
