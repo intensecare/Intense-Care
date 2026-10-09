@@ -22,6 +22,19 @@ function b64urlToBytes(s: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+const FALLBACK_SECRET = "intense_care_default_production_fallback_session_secret_32_chars_minimum";
+
+function getSessionSecret(): string {
+  const secret = process.env.ERP_SESSION_SECRET || process.env.NEXTAUTH_SECRET;
+  if (!secret || secret.length < 16) {
+    return FALLBACK_SECRET;
+  }
+  if (secret.length < 32) {
+    return secret.padEnd(32, "x");
+  }
+  return secret;
+}
+
 async function validCookie(token: string | undefined): Promise<boolean> {
   if (!token) return false;
   const dot = token.lastIndexOf(".");
@@ -31,8 +44,7 @@ async function validCookie(token: string | undefined): Promise<boolean> {
   try {
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(encoded)));
     if (typeof payload.exp !== "number" || payload.exp < Date.now()) return false;
-    const secret = process.env.ERP_SESSION_SECRET;
-    if (!secret) return true; // cannot verify here; every API call still verifies
+    const secret = getSessionSecret();
     const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
     return await crypto.subtle.verify("HMAC", key, b64urlToBytes(sig), new TextEncoder().encode(encoded));
   } catch {

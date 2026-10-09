@@ -66,11 +66,12 @@ export function MobileLayout({
   headerRight?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const { currentUser } = useAuth();
+  const { currentUser, can } = useAuth();
   const online = useNetworkStatus();
   const pathname = usePathname();
   const params = useSearchParams();
-  const tabs = TABS[currentUser?.role ?? ""] ?? [];
+  // Intense AI shows only for roles allowed to use it (the API enforces the same).
+  const tabs = (TABS[currentUser?.role ?? ""] ?? []).filter((t) => t.key !== "ai" || can("ai.use"));
   const currentTab = params?.get("tab") ?? "home";
   const showTabs = !backHref && tabs.length > 0;
 
@@ -114,7 +115,7 @@ export function MobileLayout({
 
       {showTabs && !action && (
         <nav aria-label="Main" className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-zinc-200 pb-[env(safe-area-inset-bottom)]">
-          <div className="max-w-md mx-auto grid grid-cols-5">
+          <div className={cn("max-w-md mx-auto grid", tabs.length === 5 ? "grid-cols-5" : "grid-cols-4")}>
             {tabs.map(({ key, label, href, Icon }) => {
               const active = key === "ai" ? pathname === "/assistant" : pathname === href.split("?")[0] && currentTab === key;
               return (

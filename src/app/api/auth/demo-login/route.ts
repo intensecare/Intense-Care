@@ -8,20 +8,32 @@ import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { canSignIn, homePathFor, normalizeRole } from "@/lib/rbac";
 import { DEMO_ACCOUNTS, DEMO_CUSTOMER, demoLoginsEnabled } from "@/lib/demo";
+import { ensureDemoAccounts } from "@/lib/server/demo-service";
 
 const notFound = () => NextResponse.json({ success: false, error: "Not found." }, { status: 404 });
 
 /**
  * GET /api/auth/demo-login — which demo buttons to show (none when demo
  * sign-in is off). Only accounts that exist and are active are listed.
+ * Automatically provisions demo accounts if missing.
  */
 export async function GET() {
   try {
     if (!demoLoginsEnabled()) return NextResponse.json({ success: true, data: { enabled: false, accounts: [] } });
-    const users = await prisma.user.findMany({
+    
+    let users = await prisma.user.findMany({
       where: { email: { in: DEMO_ACCOUNTS.map((a) => a.email) }, active: true },
       select: { email: true },
     });
+
+    if (users.length < DEMO_ACCOUNTS.length) {
+      await ensureDemoAccounts();
+      users = await prisma.user.findMany({
+        where: { email: { in: DEMO_ACCOUNTS.map((a) => a.email) }, active: true },
+        select: { email: true },
+      });
+    }
+
     const have = new Set(users.map((u) => u.email));
     const customer = await prisma.customer.findFirst({ where: { email: DEMO_CUSTOMER.email }, select: { id: true, jobs: { select: { id: true }, take: 1 } } });
     const accounts = [
@@ -53,11 +65,18 @@ export async function POST(request: Request) {
     const { role } = parsed.data;
 
     if (role === "customer") {
-      const customer = await prisma.customer.findFirst({ where: { email: DEMO_CUSTOMER.email }, select: { id: true } });
-      const job = customer
+      let customer = await prisma.customer.findFirst({ where: { email: DEMO_CUSTOMER.email }, select: { id: true } });
+      let job = customer
         ? await prisma.job.findFirst({ where: { customerId: customer.id, status: { not: "CANCELLED" } }, orderBy: { createdAt: "desc" }, select: { id: true } })
         : null;
-      if (!job) return NextResponse.json({ success: false, error: "No demo customer job yet. Run npm run db:seed:demo." }, { status: 404 });
+      if (!job) {
+        await ensureDemoAccounts();
+        customer = await prisma.customer.findFirst({ where: { email: DEMO_CUSTOMER.email }, select: { id: true } });
+        job = customer
+          ? await prisma.job.findFirst({ where: { customerId: customer.id, status: { not: "CANCELLED" } }, orderBy: { createdAt: "desc" }, select: { id: true } })
+          : null;
+      }
+      if (!job) return NextResponse.json({ success: false, error: "No demo customer job available." }, { status: 404 });
       const link = await ensureCustomerLink(job.id, { name: "Demo" });
       if (!link.success) return NextResponse.json({ success: false, error: link.failure.message }, { status: 500 });
       logger.info("auth.demo.customer_link", { jobId: job.id });
@@ -65,10 +84,14 @@ export async function POST(request: Request) {
     }
 
     const account = DEMO_ACCOUNTS.find((a) => a.role === role)!;
-    const user = await prisma.user.findUnique({ where: { email: account.email } });
+    let user = await prisma.user.findUnique({ where: { email: account.email } });
+    if (!user || !user.active) {
+      await ensureDemoAccounts();
+      user = await prisma.user.findUnique({ where: { email: account.email } });
+    }
     // Only a real, active demo account with the expected role — never anyone else.
     if (!user || !user.active || normalizeRole(user.role) !== role || !canSignIn(user.role)) {
-      return NextResponse.json({ success: false, error: "This demo account is not set up. Run npm run db:seed:demo." }, { status: 404 });
+      return NextResponse.json({ success: false, error: "This demo account is not set up." }, { status: 404 });
     }
     const session = toSessionUser(user);
     await createSession(session);

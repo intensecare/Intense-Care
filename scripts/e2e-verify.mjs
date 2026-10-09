@@ -100,7 +100,7 @@ const taxU = await mk("Tara Tax", "tax@test.local", "tax_officer");
 ok(taxU?.role === "tax_officer", "admin creates a Tax Officer");
 const taxc = (await login("tax@test.local", "password123")).c;
 const taxSess = (await taxc("/api/auth/session")).json?.data;
-ok(taxSess?.role === "tax_officer" && taxSess.workspace.home === "/gst" && taxSess.workspace.nav.map((n) => n.label).join("|") === "GST Dashboard|GST Invoices|GST Reports|Intense AI", "Tax Officer lands on the GST workspace (3 GST pages + Intense AI)");
+ok(taxSess?.role === "tax_officer" && taxSess.workspace.home === "/gst" && taxSess.workspace.nav.map((n) => n.label).join("|") === "GST Dashboard|GST Invoices|GST Reports", "Tax Officer lands on the GST workspace (3 GST pages)");
 const taxList = (await taxc("/api/invoices")).json?.data?.invoices ?? [];
 ok(taxList.length === adminGst.length && taxList.every((i) => i.invoiceType === "GST"), `Tax Officer list = GST invoices only (${taxList.length})`);
 ok((await taxc("/api/invoices?type=NON_GST")).status === 403, "Tax Officer asking for Non-GST invoices → 403");

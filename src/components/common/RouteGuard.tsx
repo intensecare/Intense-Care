@@ -45,8 +45,10 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    if (redirectTarget) router.replace(redirectTarget);
-  }, [redirectTarget, router]);
+    if (redirectTarget && redirectTarget !== pathname) {
+      router.replace(redirectTarget);
+    }
+  }, [redirectTarget, pathname, router]);
 
   if (!mounted || isLoading) {
     return (

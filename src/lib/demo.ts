@@ -25,5 +25,6 @@ export type DemoRole = (typeof DEMO_ACCOUNTS)[number]["role"] | "customer";
 export const DEMO_CUSTOMER = { name: "Demo Customer", email: `customer@${DEMO_DOMAIN}`, phone: "+910000000000" };
 
 export function demoLoginsEnabled(): boolean {
-  return process.env.DEMO_LOGINS_ENABLED === "true";
+  const val = String(process.env.DEMO_LOGINS_ENABLED ?? "").toLowerCase().trim();
+  return val === "true" || val === "1" || val === "yes";
 }

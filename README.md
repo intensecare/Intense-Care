@@ -54,13 +54,10 @@ Server-enforced: arrival is GPS-checked against the job's location (`ARRIVAL_GEO
 
 ## Intense AI
 
-A business assistant inside the app (**Intense AI** in the menu for every signed-in role, and an **Intense AI** button on the customer's QR page). Ask in plain language — "Summarize today's business performance", "Why are we getting more rework this month?", "Which customers haven't booked again?", "Give me a monthly business report" — or tap a suggested question or quick action. Answers stream in, keep **What the data shows** separate from **Recommendations**, and reports follow Executive Summary → … → Next Actions.
+A business assistant inside the app (**Intense AI** in the Admin menu, and an **Intense AI** button on the customer's QR page — Field Manager, QC and Tax Officer do not have it; the API returns 403 for them). Ask in plain language — "Summarize today's business performance", "Why are we getting more rework this month?", "Which customers haven't booked again?", "Give me a monthly business report" — or tap a suggested question or quick action. Answers stream in, keep **What the data shows** separate from **Recommendations**, and reports follow Executive Summary → … → Next Actions.
 
 - **It sees only what the user can see.** The model never gets the database. It can only call server-side data tools (`src/lib/server/ai/tools.ts`), and each tool (1) is offered only to roles holding its permission, (2) is re-checked when the model calls it, and (3) queries through the same scoping as the normal APIs (`jobWhereFor`, `authorizeJob`, `invoiceWhereFor`), with money fields only for `finance.view`. So:
   - Admin — full business intelligence (metrics, jobs, customers, revenue, invoices, GST, QC, rework, feedback, Field Manager and service performance).
-  - Field Manager — their own assigned jobs, customers on those jobs, their QC results and rework; no money.
-  - QC — quality checks, rework and the jobs behind them; no money.
-  - Tax Officer — GST invoices and GST summaries only (Non-GST requests return "not permitted").
   - Customer — only their own job, via the QR token.
 - The provider key (`GEMINI_API_KEY`) stays on the server; the browser talks only to `/api/ai/chat`. Users never see the provider's name — errors are replaced with plain messages.
 - Limits: 40 questions per user per 10 minutes (20 per customer IP), questions up to 4,000 characters, at most 6 rounds of data lookups per answer.

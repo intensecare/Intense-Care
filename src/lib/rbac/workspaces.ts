@@ -72,7 +72,6 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     layout: "mobile",
     nav: [
       { label: "My Jobs", href: "/my-jobs", permission: "jobs.view" },
-      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
     ],
   },
   qc_inspector: {
@@ -83,7 +82,6 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
     layout: "mobile",
     nav: [
       { label: "Quality", href: "/quality-queue", permission: "qc.inspect", badge: "qc_pending" },
-      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
     ],
   },
   tax_officer: {
@@ -96,7 +94,6 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
       { label: "GST Dashboard", href: "/gst", permission: "gst.view" },
       { label: "GST Invoices", href: "/gst/invoices", permission: "gst.view" },
       { label: "GST Reports", href: "/gst/reports", permission: "gst.reports" },
-      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
     ],
   },
   customer: {
@@ -118,6 +115,7 @@ const ROUTE_PERMISSIONS: { prefix: string; permission: Permission; layouts: Work
   { prefix: "/jobs/", permission: "jobs.view", layouts: ["desk"] },
   { prefix: "/customers/", permission: "customers.view", layouts: ["desk"] },
   { prefix: "/invoices/", permission: "finance.view", layouts: ["desk"] },
+  { prefix: "/quotes/", permission: "quotes.manage", layouts: ["desk"] },
   { prefix: "/gst/invoices/", permission: "gst.view", layouts: ["desk"] },
   { prefix: "/quality-queue/", permission: "qc.inspect", layouts: ["desk", "mobile"] },
   { prefix: "/my-jobs/", permission: "jobs.arrive", layouts: ["mobile"] },
