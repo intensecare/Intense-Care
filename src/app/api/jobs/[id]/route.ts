@@ -3,7 +3,9 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { cleanVisibility } from "@/lib/server/job-create";
-import { resolveQrToken } from "@/lib/server/qr-service";
+import { getSystemSettings } from "@/lib/server/settings";
+import { checkJobStart, logStartAttempt, startSummary, type StartCheck } from "@/lib/server/start-verification";
+import { START_MODES, START_MODE_INFO, effectiveStartMode, type StartMode } from "@/lib/start-verification";
 import { requireUser, authorizeJob, HttpError } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
@@ -53,24 +55,9 @@ const ArrivalSchema = z.object({
   lng: z.number().min(-180).max(180).optional(),
   accuracy: z.number().min(0).max(100000).optional(),
   bypassReason: z.string().min(5).max(300).optional(),
-  /** GPS unavailable? The Field Manager scans the customer's secure QR for this job / property. */
+  /** The customer's QR for this job (QR and QR + GPS modes). The server resolves it — the job it names is never taken from the client. */
   qrToken: z.string().min(16).max(200).optional(),
 });
-
-function geofenceMeters(): number {
-  const raw = Number.parseInt(process.env.ARRIVAL_GEOFENCE_METERS || "300", 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : 300;
-}
-
-function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(bLat - aLat);
-  const dLng = toRad(bLng - aLng);
-  const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
 
 const PatchSchema = z.object({
   status: z.string().min(1).max(32).optional(),
@@ -90,6 +77,8 @@ const PatchSchema = z.object({
     .optional(),
   customerNotes: z.string().max(2000).nullable().optional(),
   customerVisibility: z.record(z.string(), z.boolean()).nullable().optional(),
+  /** Admin: this job's start verification mode (null = company default). */
+  startVerificationMode: z.enum(START_MODES).nullable().optional(),
 });
 
 /**
@@ -236,7 +225,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     }
 
     /* ------------------------- location, customer notes, customer visibility */
-    if ((body.location !== undefined || body.customerNotes !== undefined || body.customerVisibility !== undefined) && !body.status) {
+    if ((body.location !== undefined || body.customerNotes !== undefined || body.customerVisibility !== undefined || body.startVerificationMode !== undefined) && !body.status) {
       // Desk settings of the job — the same authority as assigning it.
       const { user } = await authorizeJob(id, "jobs.assign");
       const data: Prisma.JobUpdateInput = { updatedAt: new Date() };
@@ -246,6 +235,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         data.locationAddress = body.location?.address || null;
       }
       if (body.customerNotes !== undefined) data.customerNotes = body.customerNotes?.trim() || null;
+      if (body.startVerificationMode !== undefined) {
+        const sv = (await getSystemSettings()).jobStartVerification;
+        if (body.startVerificationMode !== null && !sv.allowPerJobOverride) return fail("Per-job start verification is turned off in Settings.", 409);
+        const cur = await prisma.job.findUnique({ where: { id }, select: { status: true, startVerificationMode: true } });
+        if (cur && !["SCHEDULED", "ASSIGNED"].includes(cur.status)) return fail("The job has already started — its start verification can't be changed now.", 409);
+        data.startVerificationMode = body.startVerificationMode;
+        void recordAudit({ actor: user, action: "JOB_START_MODE_CHANGED", entityType: "job", entityId: id, jobId: id, previousState: cur?.startVerificationMode ?? "DEFAULT", newState: body.startVerificationMode ?? "DEFAULT", request });
+      }
       if (body.customerVisibility !== undefined) {
         const v = cleanVisibility(body.customerVisibility);
         data.customerVisibility = v ? (v as Prisma.InputJsonValue) : Prisma.DbNull;
@@ -290,50 +287,29 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const permission = verdict.permission ?? "jobs.update";
     if (!isOverride) await authorizeJob(id, permission);
 
-    // 3. GPS verification on arrival (field scope only; desk overrides are audited).
+    // 3. Job start verification (the "I'm here" step). The mode comes from the database, never the request.
     const data: Record<string, unknown> = { status, updatedAt: new Date() };
+    let start: { mode: StartMode; check: StartCheck; arrival: z.infer<typeof ArrivalSchema> } | null = null;
     if (status === "ARRIVED") {
       const arrival = body.arrival ?? {};
-      const hasCoords = typeof arrival.lat === "number" && typeof arrival.lng === "number";
-      // The job's own map pin first, else the property's.
-      const targetLat = existing.locationLat ?? existing.property?.lat ?? null;
-      const targetLng = existing.locationLng ?? existing.property?.lng ?? null;
+      const sv = (await getSystemSettings()).jobStartVerification;
+      const mode = effectiveStartMode(existing.startVerificationMode, sv);
       const fieldUser = scopeOf(user.role, "jobs.arrive") === "ASSIGNED";
-      let verification: "gps" | "qr" | "manual" | "admin_override" = "manual";
-      let distance: number | null = null;
-      if (hasCoords && targetLat !== null && targetLng !== null) {
-        distance = distanceMeters(arrival.lat!, arrival.lng!, targetLat, targetLng);
-        if (distance <= geofenceMeters() + (arrival.accuracy ?? 0)) verification = "gps";
+      const check = await checkJobStart({ job: existing, mode, settings: sv, arrival, fieldUser, userId: user.id });
+      if (!check.ok) {
+        await logStartAttempt({ jobId: id, user, mode, check, arrival, statusBefore: existing.status, statusAfter: existing.status });
+        void recordAudit({ actor: user, action: "JOB_START_VERIFICATION_FAILED", entityType: "job", entityId: id, jobId: id, previousState: existing.status, newState: existing.status, details: `mode=${mode} code=${check.code} distance=${check.distanceM ?? "n/a"} qr=${check.qrResult}`, request });
+        return NextResponse.json({ success: false, error: check.error, code: check.code, mode }, { status: check.status ?? 409 });
       }
-      if (verification !== "gps" && arrival.qrToken) {
-        // The secure QR proves presence only if it belongs to THIS job or this property.
-        const resolved = await resolveQrToken(arrival.qrToken);
-        const scanned = resolved.ok ? await prisma.job.findUnique({ where: { id: resolved.data.job.id }, select: { id: true, propertyId: true } }) : null;
-        if (!scanned || (scanned.id !== existing.id && scanned.propertyId !== existing.propertyId)) {
-          return fail("That QR code is not for this job's location. Scan the customer's QR for this service.", 409);
-        }
-        verification = "qr";
-      }
-      if (verification === "manual" && !fieldUser) {
-        if (!arrival.bypassReason) return fail("Give a reason for marking arrival on the Field Manager's behalf.", 400);
-        verification = "admin_override";
-      }
-      if (verification === "manual" && !arrival.bypassReason && fieldUser) {
-        return fail(
-          hasCoords && distance !== null
-            ? `You appear to be ${Math.round(distance)} m from the location. Move closer, scan the customer's QR, or give a reason.`
-            : "GPS couldn't verify your location. Scan the customer's QR, or give a reason to continue.",
-          409
-        );
-      }
+      start = { mode, check, arrival };
       Object.assign(data, {
         arrivedAt: new Date(),
         arrivalLat: arrival.lat ?? null,
         arrivalLng: arrival.lng ?? null,
         arrivalAccuracy: arrival.accuracy ?? null,
-        arrivalVerification: verification,
-        arrivalDistanceM: distance,
-        arrivalBypassReason: verification === "gps" || verification === "qr" ? null : arrival.bypassReason ?? null,
+        arrivalVerification: check.verification,
+        arrivalDistanceM: check.distanceM,
+        arrivalBypassReason: check.result === "OVERRIDE" ? arrival.bypassReason?.trim() ?? null : null,
       });
     }
     if (status === "IN_PROGRESS") data.startedAt = new Date();
@@ -350,7 +326,11 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     // Compare-and-set: only applies if nobody moved the job meanwhile (double taps, two devices).
     const moved = await prisma.job.updateMany({ where: { id, status: existing.status }, data });
-    if (moved.count === 0) return fail("This job was just updated by someone else. Refresh and try again.", 409);
+    if (moved.count === 0) {
+      if (start) await logStartAttempt({ jobId: id, user, mode: start.mode, check: { ...start.check, ok: false, result: "FAILED" }, arrival: start.arrival, statusBefore: existing.status, statusAfter: existing.status, failureReason: "Duplicate or out-of-date start request — the job had already changed." });
+      return fail("This job was just updated by someone else. Refresh and try again.", 409);
+    }
+    if (start) await logStartAttempt({ jobId: id, user, mode: start.mode, check: start.check, arrival: start.arrival, statusBefore: existing.status, statusAfter: status });
     const job = { status };
 
     const STATUS_EVENT_MESSAGES: Record<string, string> = {
@@ -367,16 +347,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       CLOSED: "Job closed and archived",
       CANCELLED: "Job cancelled",
     };
-    const gpsNote =
-      status === "ARRIVED"
-        ? data.arrivalVerification === "gps"
-          ? " (verified by GPS)"
-          : data.arrivalVerification === "qr"
-          ? " (verified by QR scan)"
-          : data.arrivalVerification === "admin_override"
-          ? ` (Admin override: ${data.arrivalBypassReason})`
-          : ` (not verified${data.arrivalBypassReason ? `: ${data.arrivalBypassReason}` : ""})`
-        : "";
+    const gpsNote = start ? startSummary(start.check, start.mode, start.arrival.bypassReason) : "";
     await recordActivity({
       jobId: id,
       type: "STATUS_CHANGED",
@@ -392,7 +363,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       previousState: existing.status,
       newState: status,
       reason: body.reason ?? (status === "ARRIVED" ? (data.arrivalBypassReason as string | null) : null),
-      details: status === "ARRIVED" ? `verification=${data.arrivalVerification} distance=${data.arrivalDistanceM ?? "n/a"}` : undefined,
+      details: start ? `mode=${start.mode} (${START_MODE_INFO[start.mode].label}) verification=${data.arrivalVerification} distance=${data.arrivalDistanceM ?? "n/a"} accuracy=${start.arrival.accuracy ?? "n/a"} qr=${start.check.qrResult}` : undefined,
       request,
     });
 

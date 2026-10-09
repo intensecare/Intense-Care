@@ -1,3 +1,4 @@
+import { isStartMode } from "@/lib/start-verification";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, requireUser } from "@/lib/server/authz";
@@ -128,6 +129,30 @@ export async function PATCH(request: Request) {
       }
       if (next.bonusType === "PERCENT" && next.bonusValue > 100) return bad("The bonus percentage (0–100)");
       patch.referralRules = next;
+    }
+
+    if (body.jobStartVerification && typeof body.jobStartVerification === "object") {
+      const v = body.jobStartVerification as Record<string, unknown>;
+      const next = { ...current.jobStartVerification };
+      const bad = (msg: string) => NextResponse.json({ success: false, error: msg }, { status: 400 });
+      if (v.defaultMode !== undefined) {
+        if (!isStartMode(v.defaultMode)) return bad("Choose one of the four job start verification modes.");
+        next.defaultMode = v.defaultMode;
+      }
+      const whole = (x: unknown, min: number, max: number) => typeof x === "number" && Number.isInteger(x) && x >= min && x <= max;
+      if (v.maxDistanceMeters !== undefined) {
+        if (!whole(v.maxDistanceMeters, 10, 5000)) return bad("The allowed distance must be between 10 and 5000 metres.");
+        next.maxDistanceMeters = v.maxDistanceMeters as number;
+      }
+      if (v.maxAccuracyMeters !== undefined) {
+        if (!whole(v.maxAccuracyMeters, 5, 1000)) return bad("The GPS accuracy limit must be between 5 and 1000 metres.");
+        next.maxAccuracyMeters = v.maxAccuracyMeters as number;
+      }
+      if (v.allowPerJobOverride !== undefined) {
+        if (typeof v.allowPerJobOverride !== "boolean") return bad("Invalid per-job override setting.");
+        next.allowPerJobOverride = v.allowPerJobOverride;
+      }
+      patch.jobStartVerification = next;
     }
 
     const updated = await updateSystemSettings(patch);

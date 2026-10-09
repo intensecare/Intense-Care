@@ -142,3 +142,24 @@ Before deploying:
 Smoke test: create an expense, add a staff member, assign them to a job, open Reports.
 
 Rollback: redeploy the previous build — the previous code ignores the new tables and columns (the migration only adds). If data must also be reverted, restore the backup taken in step 1. Do not drop the new tables unless you are restoring from that backup.
+
+## Addendum — job start verification modes
+
+Admin chooses how a Field Manager proves they are at the job before it starts: `DIRECT`, `QR`, `QR_GPS` or `GPS` (Settings → Job start verification; optional per-job mode before the job starts). This applies to the existing "arrived" step, which then waits for the customer's confirmation as before — the job workflow and its statuses are unchanged, and the existing customer QR link is reused (no new QR codes, no new roles).
+
+Behaviour changes from before:
+- A Field Manager can no longer continue with just a reason when verification fails; only Admin can override, with a reason.
+- A QR is accepted only if it is **this job's** customer QR (before, any QR from the same property was accepted).
+- GPS now requires both distance ≤ the limit and reported accuracy ≤ the limit (before, accuracy was added to the allowed distance). The default mode is `GPS`, which matches the previous GPS-first behaviour.
+
+Migration: `20261012000000_job_start_verification` (adds `Job.startVerificationMode` and the `JobStartVerification` log; additive, re-runnable; verified on an empty database and by re-running).
+
+Tests run (executed against a fresh database and production build):
+
+| Suite | Result |
+|---|---|
+| `scripts/start-verify.mjs` — every mode: valid, invalid QR, other job's QR, other property's QR, revoked QR, GPS missing, GPS inaccurate, GPS too far, no saved location, QR not accepted as a GPS substitute, request can't pick its own mode, 3 simultaneous starts → 1, duplicate start, other Field Manager / QC refused, Admin override with and without reason, company default vs per-job mode, per-job switch off, mode locked after start, logs and audit | 53 passed, 0 failed |
+| Mobile-browser run (Chromium, Pixel 7 profile): location permission blocked, at the property, far away, ±800 m reading, network offline then back online, QR scanner opens, QR+GPS takes GPS then opens the scanner | 14 passed, 0 failed |
+| Existing suites after the change: `e2e-verify` 122/0, `erp-verify` 79/0, `biz-verify` 187/0, `ai-verify` 32/0; unit tests 20/20 (`TZ=Asia/Kolkata`); lint and type-check clean; responsive sweep 154/154 | all passing |
+
+Not tested: a real camera decoding a printed QR on a physical phone (the scanner's decode path is the one already in use; the tests submit the token the scanner would produce), and real-world GPS drift on physical devices.

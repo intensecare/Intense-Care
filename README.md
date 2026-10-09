@@ -35,7 +35,20 @@ BOOKED → SCHEDULED → ASSIGNED → ARRIVED → CUSTOMER CONFIRMED → IN PROG
                        └→ REWORK REQUIRED → Field Manager fixes → SUBMIT FOR QC → REINSPECTION ┘
 ```
 
-Server-enforced: arrival is GPS-checked against the job's location (`ARRIVAL_GEOFENCE_METERS`), or verified by scanning the customer's QR, or continued with a recorded reason; work cannot start until the customer confirms on their link; required checklist items must be done before COMPLETE WORK; status changes are compare-and-set so double taps or two devices can't apply twice.
+Server-enforced: the job start ("arrived") step follows the **job start verification mode** (below); work cannot start until the customer confirms on their link; required checklist items must be done before COMPLETE WORK; status changes are compare-and-set so double taps or two devices can't apply twice.
+
+### Job start verification
+
+Admin picks one policy in **Settings → Job start verification** (and may set a different one on an individual job before it starts, from its details page):
+
+| Mode | Field Manager button | What the server requires |
+|---|---|---|
+| `DIRECT` | Start Job | Assigned Field Manager — nothing else |
+| `QR` | Scan QR to Start | The scanned token must resolve to **this job's** customer QR (not another job or property, not revoked) |
+| `QR_GPS` | Verify GPS + Scan QR | Both the QR check and the GPS check |
+| `GPS` | Verify GPS & Start Job | Device within the allowed distance of the saved job/property pin, with GPS accuracy at or better than the limit |
+
+Distance and accuracy limits are set in the same section (default 300 m, ±100 m). Nothing falls back silently: a failed check shows a retry message, and a Field Manager can't skip it by giving a reason. Only Admin can start a job on their behalf, with a reason (recorded as `ADMIN_OVERRIDE`). The mode is read from the database, never from the request. Every attempt — passed, failed or override — is stored in `JobStartVerification` (job, user, mode, GPS lat/lng, accuracy, distance, QR result, override reason, status before → after), summarised in the job activity log and the audit log, and listed under *Verification history* on the job page.
 
 ## One QR per job
 
@@ -132,5 +145,6 @@ npm test     # roles, permissions, routing, next action, state machine
 node scripts/e2e-verify.mjs   # five user types, the job journey, GST rules, security
 node scripts/erp-verify.mjs   # quotations, job location, visibility, QR arrival, settings, reviews
 node scripts/biz-verify.mjs   # expenses, referrals, HR, payroll, assignment, freelance payments, reports
+node scripts/start-verify.mjs # job start verification: DIRECT, QR, QR_GPS, GPS, overrides, duplicates
 # npm test needs TZ=Asia/Kolkata for one wall-clock assertion on non-IST machines
 ```

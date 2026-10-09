@@ -94,6 +94,8 @@ export interface SystemSettings {
   notifications: NotificationSettings;
   /** When a referral earns a bonus, and how much. Admin-only (never sent to other roles). */
   referralRules: import("./business").ReferralRules;
+  /** How a Field Manager proves they are at the job before it starts. */
+  jobStartVerification: import("./start-verification").StartVerificationSettings;
 }
 
 /** What a customer may see on their QR page. Internal data is never included. */
@@ -658,6 +660,8 @@ export interface Job {
   quoteId?: string;
   /** gps | qr | manual | admin_override */
   arrivalVerification?: string;
+  /** Admin's per-job start verification mode (null = company default). */
+  startVerificationMode?: string | null;
   qualityCheckId?: string;
   customerApprovalId?: string;
   feedbackId?: string;

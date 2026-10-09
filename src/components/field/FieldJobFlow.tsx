@@ -29,7 +29,6 @@ import {
 import { useApp } from "@/lib/app-context";
 import { MobileLayout, ProfilePanel } from "@/components/common/MobileLayout";
 import { StatusBadge } from "@/components/common/JobStatusBadge";
-import { PromptModal } from "@/components/common/PromptModal";
 import { TeamCard } from "@/components/job/TeamCard";
 import { FieldExpense } from "@/components/field/FieldExpense";
 import { QrScanner } from "@/components/common/QrScanner";
@@ -42,6 +41,7 @@ import { compressImageForUpload } from "@/lib/image-compress";
 import { formatTimeSlot, formatDate, cn } from "@/lib/utils";
 import { getNextAction } from "@/lib/rbac";
 import { REWORK_STATUSES } from "@/lib/status";
+import { START_MODE_INFO, effectiveStartMode } from "@/lib/start-verification";
 import type { Job, JobPhoto } from "@/lib/types";
 
 type FieldJob = Job & { customerName?: string; customerPhone?: string; propertyTitle?: string; service?: { name: string } };
@@ -95,14 +95,13 @@ function MiniJourney({ status }: { status: string }) {
 /* ========================================================================= */
 
 export function FieldJobFlow({ jobId }: { jobId: string }) {
-  const { jobs, checklistItems, photos, reworkTasks, qualityIssues, currentUser, loading, refreshJobs, refreshQuality, refreshPhotos, updateChecklistItem, addJobPhoto, deleteJobPhoto, completeReworkTask } = useApp();
+  const { systemSettings, jobs, checklistItems, photos, reworkTasks, qualityIssues, currentUser, loading, refreshJobs, refreshQuality, refreshPhotos, updateChecklistItem, addJobPhoto, deleteJobPhoto, completeReworkTask } = useApp();
   const job = jobs.find((j) => j.id === jobId) as FieldJob | undefined;
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [gps, setGps] = useState<"ready" | "searching" | "unavailable" | "verified">("ready");
-  const [bypassOpen, setBypassOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [screen, setScreen] = useState<"checklist" | "photos">("checklist");
@@ -163,50 +162,81 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
     return { ok: res.ok && json?.success, status: res.status, error: json?.error as string | undefined };
   };
 
-  const locate = (): Promise<{ lat: number; lng: number; accuracy: number } | null> =>
+  type Fix = { lat: number; lng: number; accuracy: number };
+  const locate = (): Promise<{ fix: Fix } | { problem: string }> =>
     new Promise((resolve) => {
       if (typeof navigator === "undefined" || !navigator.geolocation) {
         setGps("unavailable");
-        resolve(null);
+        resolve({ problem: "This browser can't share your location. Open the app in Chrome or Safari with location turned on." });
         return;
       }
       setGps("searching");
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           setGps("ready");
-          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+          resolve({ fix: { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy } });
         },
-        () => {
+        (err) => {
           setGps("unavailable");
-          resolve(null);
+          resolve({
+            problem:
+              err.code === 1
+                ? "Location permission is off. Allow location for this site in your browser settings (tap the lock icon by the address), then try again."
+                : err.code === 3
+                ? "Getting your location took too long. Step outside or near a window and try again."
+                : "Your phone couldn't find its location. Turn on GPS / Location and try again.",
+          });
         },
-        { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
       );
     });
 
   /**
-   * Arrival: GPS first. If GPS can't confirm it, the Field Manager scans the
-   * customer's secure QR; if that's impossible too, they continue with a
-   * reason. The method (GPS / QR / reason) is saved in the job's activity log.
+   * Job start — exactly what the selected mode requires (Settings → Job start
+   * verification, or the job's own setting). Nothing falls back to another method:
+   * if a check fails the Field Manager retries, or the office uses an Admin override.
    */
-  const arrive = async (opts: { bypassReason?: string; qrToken?: string } = {}) => {
+  const startMode = effectiveStartMode(job?.startVerificationMode, systemSettings.jobStartVerification);
+  const needsGps = startMode === "GPS" || startMode === "QR_GPS";
+  const pendingFix = useRef<Fix | null>(null);
+
+  const sendStart = async (arrival: Record<string, unknown>) => {
     setBusy(true);
     setError(null);
-    const coords = opts.bypassReason || opts.qrToken ? null : await locate();
-    const r = await patch({ status: "ARRIVED", arrival: { ...(coords ?? {}), ...(opts.bypassReason ? { bypassReason: opts.bypassReason } : {}), ...(opts.qrToken ? { qrToken: opts.qrToken } : {}) } });
+    const r = await patch({ status: "ARRIVED", arrival });
     setBusy(false);
+    pendingFix.current = null;
     if (!r.ok) {
-      if (r.status === 409 && !opts.bypassReason) {
-        setError(r.error ?? "We couldn't confirm your location.");
-        setVerifyOpen(true);
-        return;
-      }
-      setError(r.error ?? "Could not record your arrival.");
+      setError(r.error ?? "We couldn't start the job. Try again.");
+      setVerifyOpen(true);
       return;
     }
-    setGps(coords || opts.qrToken ? "verified" : "ready");
-    flash(opts.qrToken ? "Location verified by QR ✓ Arrival recorded." : "Arrival recorded ✓ The customer has been sent the link.");
+    setGps(needsGps ? "verified" : "ready");
+    flash("Arrival recorded ✓ The customer has been asked to confirm.");
     await refreshJobs();
+  };
+
+  const startJob = async () => {
+    setError(null);
+    if (startMode === "DIRECT") return sendStart({});
+    if (startMode === "QR") return setScanOpen(true);
+    setBusy(true);
+    const loc = await locate();
+    setBusy(false);
+    if ("problem" in loc) {
+      setError(loc.problem);
+      setVerifyOpen(true);
+      return;
+    }
+    if (loc.fix.accuracy > systemSettings.jobStartVerification.maxAccuracyMeters) {
+      setError(`Your GPS signal isn't accurate enough yet (±${Math.round(loc.fix.accuracy)} m; needs ±${systemSettings.jobStartVerification.maxAccuracyMeters} m). Wait a few seconds in the open and try again.`);
+      setVerifyOpen(true);
+      return;
+    }
+    if (startMode === "GPS") return sendStart(loc.fix);
+    // QR + GPS: location captured, now the QR.
+    pendingFix.current = loc.fix;
+    setScanOpen(true);
   };
 
   const transition = async (status: string, ok: string) => {
@@ -305,7 +335,11 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
   /* ------------------------------------------------ the ONE sticky action */
   const cta = (() => {
     if (job.status === "SCHEDULED" || job.status === "ASSIGNED") {
-      return <Button size="lg" className="w-full" loading={busy} onClick={() => void arrive()}><MapPin className="h-5 w-5" aria-hidden /> I&apos;M HERE</Button>;
+      return (
+        <Button size="lg" className="w-full" loading={busy} onClick={() => void startJob()}>
+          {startMode === "QR" || startMode === "QR_GPS" ? <ScanLine className="h-5 w-5" aria-hidden /> : startMode === "GPS" ? <MapPin className="h-5 w-5" aria-hidden /> : <Play className="h-5 w-5" aria-hidden />} {START_MODE_INFO[startMode].action.toUpperCase()}
+        </Button>
+      );
     }
     if (job.status === "ARRIVED" && !job.customerConfirmedAt) {
       return <Button size="lg" variant="secondary" className="w-full" disabled><Clock className="h-5 w-5 animate-pulse" aria-hidden /> WAITING FOR CUSTOMER</Button>;
@@ -342,9 +376,9 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
   /* ------------------------------------------------------- current step */
   const current = (() => {
     if (job.status === "SCHEDULED" || job.status === "ASSIGNED")
-      return { tone: "neutral", icon: <Navigation className="h-6 w-6" aria-hidden />, title: "Go to the property", body: "Tap Navigate. When you arrive, tap I'M HERE — we check your GPS location." };
+      return { tone: "neutral", icon: <Navigation className="h-6 w-6" aria-hidden />, title: "Go to the property", body: `Tap Navigate. When you arrive: ${START_MODE_INFO[startMode].needs}` };
     if (job.status === "ARRIVED" && !job.customerConfirmedAt)
-      return { tone: "waiting", icon: <Clock className="h-6 w-6 animate-pulse" aria-hidden />, title: "Customer confirmation", body: "GPS verified ✓ Waiting for the customer to confirm on their phone…" };
+      return { tone: "waiting", icon: <Clock className="h-6 w-6 animate-pulse" aria-hidden />, title: "Customer confirmation", body: "Arrival recorded ✓ Waiting for the customer to confirm on their phone…" };
     if (confirmed) return { tone: "success", icon: <ShieldCheck className="h-6 w-6" aria-hidden />, title: "Customer confirmed ✓", body: "You can start the service now." };
     if (["WORK_COMPLETED", "QUALITY_CHECK"].includes(job.status)) return { tone: "success", icon: <CheckCircle2 className="h-6 w-6" aria-hidden />, title: "Work completed ✓", body: "Waiting for QC. You'll be notified if anything needs fixing." };
     if (["REWORK_COMPLETED", "REINSPECTION"].includes(job.status) || (REWORK_STATUSES.includes(job.status) && openRework.length === 0))
@@ -543,42 +577,25 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
       <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Verify your location</DialogTitle>
-            <DialogDescription>{error ?? "GPS couldn't confirm you're at the property."}</DialogDescription>
+            <DialogTitle>{START_MODE_INFO[startMode].label}: not verified yet</DialogTitle>
+            <DialogDescription>{error ?? "We couldn't verify the start."}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Button size="lg" className="w-full" onClick={() => { setVerifyOpen(false); setScanOpen(true); }}>
-              <ScanLine className="h-5 w-5" aria-hidden /> Scan QR to Verify Location
+            <Button size="lg" className="w-full" loading={busy} onClick={() => { setVerifyOpen(false); void startJob(); }}>
+              {startMode === "QR" ? <ScanLine className="h-5 w-5" aria-hidden /> : <MapPin className="h-5 w-5" aria-hidden />} Try again — {START_MODE_INFO[startMode].action}
             </Button>
-            <Button size="lg" variant="outline" className="w-full" loading={busy} onClick={() => { setVerifyOpen(false); void arrive(); }}>
-              <MapPin className="h-5 w-5" aria-hidden /> Try GPS again
-            </Button>
-            <button type="button" onClick={() => { setVerifyOpen(false); setBypassOpen(true); }} className="w-full min-h-11 text-sm font-semibold text-zinc-600 underline underline-offset-4">
-              Can&apos;t scan? Continue with a reason
-            </button>
+            <p className="text-xs text-zinc-500 text-center">Still stuck? Call the office — only Admin can override this check.</p>
           </div>
         </DialogContent>
       </Dialog>
       <QrScanner
         open={scanOpen}
-        onClose={() => setScanOpen(false)}
+        onClose={() => { setScanOpen(false); pendingFix.current = null; }}
+        title={startMode === "QR_GPS" ? "Location captured ✓ Now scan the QR" : "Scan the customer's QR"}
         description="Ask the customer to show their service QR (on their phone or the printed card), then point the camera at it."
         onToken={(token) => {
           setScanOpen(false);
-          void arrive({ qrToken: token });
-        }}
-      />
-      <PromptModal
-        isOpen={bypassOpen}
-        onClose={() => setBypassOpen(false)}
-        title="We couldn't confirm your location"
-        description="Move closer to the property and try again — or tell the office why (for example: basement parking, no signal). This is saved on the job."
-        placeholder="Reason (at least 5 characters)"
-        confirmText="Record arrival"
-        onSubmit={(reason) => {
-          if (reason.length < 5) return;
-          setBypassOpen(false);
-          void arrive({ bypassReason: reason });
+          void sendStart({ ...(startMode === "QR_GPS" && pendingFix.current ? pendingFix.current : {}), qrToken: token });
         }}
       />
       <ConfirmModal

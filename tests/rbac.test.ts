@@ -88,7 +88,7 @@ test("state machine: Field Manager cannot pass QC; QC cannot complete field work
 
 test("Field Manager flow: I'm Here → wait → Start → checklist → photos → Complete → wait for QC → fix rework", () => {
   const ctx = { assignedManagerId: "u1", assignedStaffIds: [] as string[] };
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "ASSIGNED" })?.label, "I'm Here");
+  assert.equal(getNextAction("field_manager", { ...ctx, status: "ASSIGNED" })?.label, "Start Job");
   assert.equal(getNextAction("field_manager", { ...ctx, status: "ARRIVED" })?.waiting, true);
   assert.equal(getNextAction("field_manager", { ...ctx, status: "ARRIVED", customerConfirmedAt: "x" })?.target, "IN_PROGRESS");
   assert.equal(getNextAction("field_manager", { ...ctx, status: "IN_PROGRESS", checklistTotal: 3, checklistDone: 1 })?.kind, "checklist");

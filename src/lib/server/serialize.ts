@@ -179,6 +179,7 @@ export function serializeJob(
     customerVisibility: (j.customerVisibility as Job["customerVisibility"]) ?? undefined,
     quoteId: j.quoteId ?? undefined,
     arrivalVerification: j.arrivalVerification ?? undefined,
+    startVerificationMode: j.startVerificationMode ?? null,
     qualityCheckId: j.qualityCheckId ?? undefined,
     referralAttribution: undefined,
     arrivedAt: j.arrivedAt ? new Date(j.arrivedAt).toISOString() : undefined,

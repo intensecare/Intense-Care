@@ -159,7 +159,7 @@ export function getNextAction(roleRaw: Role | string, job: JobContext): NextActi
     switch (s) {
       case "SCHEDULED":
       case "ASSIGNED":
-        return { kind: "transition", target: "ARRIVED", label: "I'm Here", hint: "Navigate to the property, then tap I'm Here.", tone: "primary" };
+        return { kind: "transition", target: "ARRIVED", label: "Start Job", hint: "Go to the property, then open the job — it shows how to verify the start (GPS, QR, both, or none).", tone: "primary" };
       case "ARRIVED":
         return job.customerConfirmedAt
           ? { kind: "transition", target: "IN_PROGRESS", label: "Start Service", hint: "Customer verified ✓", tone: "primary" }
