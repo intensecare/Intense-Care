@@ -9,7 +9,7 @@ import { ErrorState, Skeleton } from "@/components/ui/states";
 import { useWorkspace, type WorkspaceAttentionItem } from "@/lib/use-workspace";
 import { useAuth } from "@/lib/auth-context";
 import { formatCurrency, formatDate, formatTimeSlot, cn } from "@/lib/utils";
-import { CalendarDays, Activity, ClipboardCheck, RotateCcw, CheckCircle2, ChevronRight, AlertTriangle, Plus, IndianRupee, Receipt, Star } from "lucide-react";
+import { CalendarDays, Activity, ClipboardCheck, RotateCcw, CheckCircle2, ChevronRight, AlertTriangle, Plus, IndianRupee, Receipt, Star, FileText, Wallet, Users, Gift, BarChart3 } from "lucide-react";
 
 const KINDS: [string, string][] = [["all", "All"], ["qc", "QC pending"], ["payment", "Payment pending"], ["rework", "Rework pending"], ["unassigned", "Unassigned"], ["upcoming", "Upcoming"], ["issue", "Customer issues"], ["other", "Other"]];
 import { useRouter } from "next/navigation";
@@ -25,7 +25,7 @@ function greeting(): string {
  */
 export default function OperationsDashboardPage() {
   const { data, error, loading, refresh } = useWorkspace(15000);
-  const { currentUser } = useAuth();
+  const { currentUser, can } = useAuth();
   const router = useRouter();
   const [kind, setKind] = useState<string>("all");
   const counts = data?.counts;
@@ -63,6 +63,28 @@ export default function OperationsDashboardPage() {
       </div>
 
       {error && <ErrorState className="mb-6" message="Something went wrong while loading today's operations." onRetry={() => void refresh()} />}
+
+      {/* Quick access */}
+      <nav aria-label="Quick access" className="mb-6 sm:mb-8">
+        <h2 className="text-sm font-semibold text-zinc-500 mb-2">Quick access</h2>
+        <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {([
+            { label: "New job", href: "/jobs/new", Icon: Plus, show: can("jobs.create") },
+            { label: "New quotation", href: "/quotations/new", Icon: FileText, show: can("quotes.manage") },
+            { label: "Add expense", href: "/expenses", Icon: Wallet, show: can("expenses.manage") },
+            { label: "Staff and HR", href: "/hr", Icon: Users, show: can("hr.manage") },
+            { label: "Referrals", href: "/referrals", Icon: Gift, show: can("referrals.view") },
+            { label: "Reports", href: "/reports", Icon: BarChart3, show: can("reports.view") },
+          ] as const).filter((q) => q.show).map(({ label, href, Icon }) => (
+            <li key={href}>
+              <Link href={href} className="flex items-center gap-3 min-h-14 rounded-2xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 hover:shadow-md transition-shadow">
+                <Icon className="h-5 w-5 text-rose-500 shrink-0" aria-hidden />
+                <span className="min-w-0 break-words">{label}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
       {/* Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 sm:mb-8">
