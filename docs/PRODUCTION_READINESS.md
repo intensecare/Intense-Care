@@ -116,7 +116,7 @@ Steps 5–14 were exercised through the API with real sessions; the field-app cl
 
 ### Responsive check (executed)
 
-A headless-Chromium sweep loads 22 pages at 320, 375, 390, 768, 1024, 1280 and 1440 px (154 page/width combinations, including the new Expenses, Referrals, HR, HR profile and Reports pages) and checks for horizontal overflow, clipped text and page errors. Last full run: 153/154 clean and no page errors; the one finding (the Referrals table 9–12 px too wide at 1280 px) was fixed by merging two columns, and the layout is re-checked after the fix before release.
+A headless-Chromium sweep loads 22 pages at 320, 375, 390, 768, 1024, 1280 and 1440 px (154 page/width combinations, including the new Expenses, Referrals, HR, HR profile and Reports pages) and checks for horizontal overflow, clipped text and page errors. Final run after the fixes: 154/154 clean, no page errors. (An earlier run found the Referrals table 9–12 px too wide at 1280 px; two columns were merged and the sweep was re-run.)
 
 ## 8. Remaining known issues
 
