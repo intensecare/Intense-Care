@@ -127,7 +127,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
       <aside className="print:hidden hidden lg:flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-white h-screen sticky top-0">
         <Link href={home} className="flex items-center gap-3 px-5 h-16 border-b border-zinc-100">
           <span className="h-9 w-9 rounded-xl bg-white border border-zinc-200 p-1.5 flex items-center justify-center overflow-hidden">
-            <img src="/logo.png" alt="" className="h-full w-full object-contain" />
+            <img src="/logo.svg" alt="" className="h-full w-full object-contain" />
           </span>
           <span className="leading-tight">
             <span className="block text-sm font-bold tracking-[0.14em] text-zinc-950">INTENSE CARE</span>
@@ -184,7 +184,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         <header className="print:hidden sticky top-0 z-30 h-16 bg-white/95 backdrop-blur border-b border-zinc-200 px-4 sm:px-6 flex items-center gap-3">
           <Link href={home} className="lg:hidden flex items-center gap-2 shrink-0" aria-label="Home">
             <span className="h-9 w-9 rounded-xl bg-white border border-zinc-200 p-1.5 flex items-center justify-center overflow-hidden">
-              <img src="/logo.png" alt="" className="h-full w-full object-contain" />
+              <img src="/logo.svg" alt="" className="h-full w-full object-contain" />
             </span>
           </Link>
           {canSearchJobs ? (

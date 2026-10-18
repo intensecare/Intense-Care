@@ -4,7 +4,20 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Receipt, FileText } from "lucide-react";
 import { PaymentStatusBadge } from "@/components/common/JobStatusBadge";
 import { QrImage } from "@/components/common/JobQr";
-import { DocHeader, DocFacts, DocParty, ItemsTable, TotalsTable, TotalsRow, DocTerms, DocSignature, type DocCompany } from "@/components/document/DocParts";
+import {
+  DocFrame,
+  DocCompanyMeta,
+  DocParty,
+  DocParties,
+  ItemsTable,
+  TotalsBand,
+  TotalsRow,
+  AmountInWordsBand,
+  DocTerms,
+  DocSignature,
+  TwoColRow,
+  type DocCompany,
+} from "@/components/document/DocParts";
 import { cn, formatDate, formatMoney } from "@/lib/utils";
 import type { Invoice, QuoteLine } from "@/lib/types";
 
@@ -53,10 +66,12 @@ export function InvoiceTypeBadge({ type, className }: { type: Invoice["invoiceTy
 }
 
 /**
- * The printable invoice: logo and company, Job ID, bill-to and service
- * address, the service table, totals, payment status and terms, notes and
- * the authorized signature. A GST invoice shows GSTINs and the CGST / SGST /
- * IGST breakdown; a Non-GST invoice shows NO GST fields at all.
+ * The printable invoice, in the classic ruled-ledger "tax invoice" format:
+ * a bordered sheet with the logo and company identity beside the invoice's
+ * key facts, bill-to and service address, an itemised service table, the GST
+ * breakup and totals ribbon, the amount in words, and the signed-off footer.
+ * A GST invoice shows both GSTINs and the CGST / SGST / IGST breakdown; a
+ * Non-GST invoice shows NO GST fields at all.
  */
 export function InvoiceDocument({ detail, qrUrl, showPayments = true }: { detail: InvoiceDetail; qrUrl?: string | null; showPayments?: boolean }) {
   const { invoice: inv, customer, company, job } = detail;
@@ -66,82 +81,80 @@ export function InvoiceDocument({ detail, qrUrl, showPayments = true }: { detail
     : [{ description: job.serviceName, quantity: 1, rate: inv.subtotal, amount: inv.subtotal, custom: false }];
 
   return (
-    <article className="invoice-doc rounded-2xl border border-zinc-200 bg-white p-5 sm:p-8 shadow-sm space-y-6 print:shadow-none print:border-0 print:p-0">
-      <DocHeader
-        company={company}
-        showGstin={gst}
+    <div className="space-y-3">
+      <DocFrame
         title={gst ? "TAX INVOICE" : "INVOICE"}
         chips={<><InvoiceTypeBadge type={inv.invoiceType} /><PaymentStatusBadge status={inv.status} /></>}
-      />
+      >
+        <DocCompanyMeta
+          company={company}
+          showGstin={gst}
+          meta={[
+            { label: "Invoice No.", value: inv.invoiceNumber, mono: true },
+            { label: "Invoice Date", value: formatDate(inv.issuedAt) },
+            { label: "Job ID", value: job.jobNumber, mono: true },
+            { label: "Service Date", value: formatDate(job.serviceDate) },
+          ]}
+        />
 
-      <DocFacts
-        facts={[
-          { label: "Invoice number", value: inv.invoiceNumber, mono: true },
-          { label: "Invoice date", value: formatDate(inv.issuedAt) },
-          { label: "Job ID", value: job.jobNumber, mono: true },
-        ]}
-      />
+        <DocParties>
+          <DocParty heading="Bill to">
+            <div className="text-base font-semibold text-zinc-950">{customer.name}</div>
+            {customer.address && <div>{customer.address}</div>}
+            {customer.phone && <div>{customer.phone}</div>}
+            {gst && <div className="text-zinc-900"><span className="text-zinc-500">GSTIN:</span> <span className="font-mono font-semibold">{customer.gstin || "Unregistered"}</span></div>}
+          </DocParty>
+          <DocParty heading="Service address">
+            {customer.serviceAddress && <div className="text-zinc-900">{customer.serviceAddress}</div>}
+            {gst && <div>Supply: {inv.interState ? "Inter-state (IGST)" : "Intra-state (CGST + SGST)"}</div>}
+          </DocParty>
+        </DocParties>
 
-      <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <DocParty heading="Bill to">
-          <div className="text-base font-semibold text-zinc-950">{customer.name}</div>
-          {customer.address && <div>{customer.address}</div>}
-          {customer.phone && <div>{customer.phone}</div>}
-          {gst && <div className="text-zinc-900"><span className="text-zinc-500">GSTIN:</span> <span className="font-mono font-semibold">{customer.gstin || "Unregistered"}</span></div>}
-        </DocParty>
-        <DocParty heading="Service address">
-          {customer.serviceAddress && <div className="text-zinc-900">{customer.serviceAddress}</div>}
-          <div>Service date: {formatDate(job.serviceDate)}</div>
-          {gst && company.sacCode && <div>SAC: {company.sacCode}</div>}
-          {gst && <div>Supply: {inv.interState ? "Inter-state (IGST)" : "Intra-state (CGST + SGST)"}</div>}
-        </DocParty>
-      </section>
+        <ItemsTable items={items} gst={gst} gstRate={inv.gstRate} sacCode={company.sacCode} />
 
-      <ItemsTable items={items} />
+        <TotalsBand
+          gst={gst}
+          subtotal={inv.subtotal}
+          discount={inv.discount}
+          gstRate={inv.gstRate}
+          interState={inv.interState}
+          cgst={inv.cgst}
+          sgst={inv.sgst}
+          igst={inv.igst}
+          tax={inv.tax}
+          total={inv.total}
+          extra={
+            showPayments ? (
+              <>
+                <TotalsRow label="Paid" value={formatMoney(inv.amountPaid)} />
+                <TotalsRow label="Balance due" value={formatMoney(inv.balanceDue)} />
+              </>
+            ) : null
+          }
+        />
 
-      <TotalsTable
-        gst={gst}
-        subtotal={inv.subtotal}
-        discount={inv.discount}
-        gstRate={inv.gstRate}
-        interState={inv.interState}
-        cgst={inv.cgst}
-        sgst={inv.sgst}
-        igst={inv.igst}
-        tax={inv.tax}
-        total={inv.total}
-        extra={
-          showPayments ? (
-            <>
-              <TotalsRow label="Paid" value={formatMoney(inv.amountPaid)} />
-              <TotalsRow label="Balance due" value={formatMoney(inv.balanceDue)} />
-            </>
-          ) : null
-        }
-      />
+        <AmountInWordsBand total={inv.total} />
 
-      <DocTerms
-        blocks={[
-          { heading: "Payment terms", text: inv.paymentTerms },
-          { heading: "Notes", text: inv.notes },
-        ]}
-      />
-
-      <DocSignature company={company} />
-
-      {qrUrl && (
-        <section className="flex items-center gap-4 rounded-xl border border-zinc-200 p-4 break-inside-avoid">
-          <QrImage value={qrUrl} size={112} label="QR code to view this service" />
-          <div className="min-w-0">
-            <div className="text-base font-semibold text-zinc-950">Scan QR to View Service</div>
-            <p className="text-sm text-zinc-600">Status, before/after photos, quality check, this invoice, approval and feedback — one secure page.</p>
+        {qrUrl && (
+          <div className="flex items-center gap-4 border-b-2 border-zinc-800 p-4">
+            <QrImage value={qrUrl} size={96} label="QR code to view this service" />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-zinc-950">Scan QR to View Service</div>
+              <p className="text-xs text-zinc-600">Status, before/after photos, quality check, this invoice, approval and feedback — one secure page.</p>
+            </div>
           </div>
-        </section>
-      )}
+        )}
 
-      <footer className="text-xs text-zinc-500">
+        <TwoColRow
+          last
+          left={<DocTerms blocks={[{ heading: "Payment terms", text: inv.paymentTerms }, { heading: "Notes", text: inv.notes }]} />}
+          right={<DocSignature company={company} />}
+        />
+      </DocFrame>
+
+      <p className="text-xs text-zinc-500 px-1">
         {gst ? "This is a computer-generated tax invoice." : "This is a computer-generated invoice. No GST is charged on this invoice."}
-      </footer>
-    </article>
+      </p>
+    </div>
   );
 }

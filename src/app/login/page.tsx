@@ -77,7 +77,7 @@ export default function LoginPage() {
       <div className="mx-auto w-full max-w-sm">
         <div className="text-center">
           <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-white p-3 shadow-sm border border-zinc-200 overflow-hidden">
-            <img src="/logo.png" alt="" className="h-full w-full object-contain" />
+            <img src="/logo.svg" alt="" className="h-full w-full object-contain" />
           </div>
           <h1 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-950">Intense Care</h1>
           <p className="mt-1 text-sm text-zinc-600">Sign in with your work account.</p>
