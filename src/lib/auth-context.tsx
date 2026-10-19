@@ -137,6 +137,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * page guard (src/middleware.ts) turns any Back navigation into /login.
    */
   const logout = useCallback(async () => {
+    // Photos waiting to upload stay saved on this phone (IndexedDB is not touched below). Say so before leaving.
+    try {
+      const { queueCounts } = await import("./mobile/upload-queue");
+      const q = await queueCounts();
+      if (q.pending + q.failed > 0 && !window.confirm(`${q.pending + q.failed} photo(s) are still waiting to upload. They stay saved on this phone and upload after you sign in again. Sign out now?`)) return;
+    } catch {}
+    try {
+      const { isNativeApp } = await import("./mobile/platform");
+      if (isNativeApp()) {
+        // Stop this account's push and background sync on this phone; unsent data is kept.
+        const [{ unregisterPush }, { ContactSync }] = await Promise.all([import("./mobile/push"), import("./mobile/contact-sync")]);
+        await unregisterPush();
+        await ContactSync.signedOut().catch(() => {});
+      }
+    } catch {}
     try {
       await fetch("/api/auth/session", { method: "DELETE", cache: "no-store", credentials: "same-origin" });
     } catch {

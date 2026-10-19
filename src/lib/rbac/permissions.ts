@@ -114,6 +114,23 @@ export const PERMISSIONS = [
   "leads.view",
   "leads.manage",
 
+  /**
+   * Phone contacts synced from the Android app. `contacts.sync` lets a phone
+   * upload its own contacts (the background worker's scoped token carries only
+   * this); view / manage are the directory in the ERP. Admin only — contacts of
+   * a personal phone are never shown to Field Managers, QC or the Tax Officer.
+   */
+  "contacts.sync",
+  "contacts.view",
+  "contacts.manage",
+
+  /** Media & Storage: browse uploaded files / delete them (protected media needs an explicit reason). */
+  "media.view",
+  "media.manage",
+
+  /** The Android app's own device screens (device storage, upload queue). */
+  "mobile.device",
+
   /** HR. `hr.view` is the staff directory (name, phone, skills, availability);
    *  `hr.sensitive` is compensation, address, emergency contact and documents. */
   "hr.view",
@@ -192,6 +209,7 @@ const ADMIN: PermissionGrant = Object.fromEntries(
  * customers, no other managers' jobs, no settings, users, reports or finance.
  */
 const FIELD_MANAGER: PermissionGrant = {
+  ...all("mobile.device"),
   ...assigned(
     "jobs.view",
     "jobs.update", // work notes only (server restricts fields)
@@ -219,6 +237,7 @@ const FIELD_MANAGER: PermissionGrant = {
 
 /** QC — inspects completed work; never touches money, users or settings. */
 const QC_INSPECTOR: PermissionGrant = {
+  ...all("mobile.device"),
   ...all(
     "jobs.view", // required data only — financial fields redacted server-side
     "checklist.view",

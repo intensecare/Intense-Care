@@ -2,7 +2,7 @@
  * Lead Management — shared definitions (used by the server and the app).
  */
 
-export const LEAD_SOURCES = ["PHONE_CALL", "GOOGLE_SEARCH", "GOOGLE_MAPS", "GOOGLE_ADS", "WEBSITE", "WHATSAPP", "REFERRAL", "WALK_IN", "OTHER"] as const;
+export const LEAD_SOURCES = ["PHONE_CALL", "GOOGLE_SEARCH", "GOOGLE_MAPS", "GOOGLE_ADS", "WEBSITE", "WHATSAPP", "REFERRAL", "WALK_IN", "PHONE_CONTACT", "OTHER"] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 export const LEAD_SOURCE_LABEL: Record<LeadSource, string> = {
   PHONE_CALL: "Phone Call",
@@ -13,6 +13,7 @@ export const LEAD_SOURCE_LABEL: Record<LeadSource, string> = {
   WHATSAPP: "WhatsApp",
   REFERRAL: "Referral",
   WALK_IN: "Walk-in",
+  PHONE_CONTACT: "Phone contact",
   OTHER: "Other",
 };
 

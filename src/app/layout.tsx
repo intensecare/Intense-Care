@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { AppProvider } from "@/lib/app-context";
 import { RouteGuard } from "@/components/common/RouteGuard";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { NativeBridge } from "@/components/mobile/NativeBridge";
 
 export const metadata: Metadata = {
   title: "Intense Care Deep Cleaning Operations ERP",
@@ -26,6 +27,7 @@ export default function RootLayout({
         <link rel="stylesheet" href="https://use.typekit.net/lxs5qvm.css" />
         <AuthProvider>
           <AppProvider>
+            <NativeBridge />
             <RouteGuard>
               <ErrorBoundary>
                 <div className="flex flex-col min-h-screen">

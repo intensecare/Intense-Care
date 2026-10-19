@@ -30,13 +30,21 @@ function ensureConfigured() {
   }
 }
 
-function client() {
+/**
+ * The configured SDK. CLOUDINARY_UPLOAD_PREFIX points the SDK at another API host
+ * (an egress proxy, or the fake provider used by the test suite).
+ */
+export function client() {
   ensureConfigured();
+  const prefix = process.env.CLOUDINARY_UPLOAD_PREFIX?.trim();
   cloudinary.config({
     cloud_name: CLOUD_NAME,
     api_key: API_KEY,
     api_secret: API_SECRET,
-    secure: true,
+    secure: !prefix || prefix.startsWith("https://"),
+    ...(prefix ? { upload_prefix: prefix } : {}),
+    // Optional custom delivery domain (a Cloudinary CNAME / private CDN): photo links are built on it.
+    ...(process.env.CLOUDINARY_DELIVERY_HOST ? { secure_distribution: process.env.CLOUDINARY_DELIVERY_HOST, private_cdn: true } : {}),
   });
   return cloudinary;
 }
@@ -52,6 +60,15 @@ const ALLOWED_IMAGE_TYPES = new Set([
 
 const MAX_BYTES = 15 * 1024 * 1024; // 15 MB
 
+/** JPEG / PNG / WebP / HEIC-HEIF by magic bytes. */
+export function sniffImage(b: Buffer): boolean {
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true;
+  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return true;
+  if (b.length >= 12 && b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP") return true;
+  if (b.length >= 12 && b.subarray(4, 8).toString("latin1") === "ftyp" && /^(heic|heix|hevc|hevx|mif1|msf1|heim|heis)/.test(b.subarray(8, 12).toString("latin1"))) return true;
+  return false;
+}
+
 export function validateImagePayload(dataUrl: string): { ok: true; mime: string } | { ok: false; error: string } {
   const match = /^data:([a-zA-Z0-9/+.-]+);base64,/.exec(dataUrl);
   if (!match) {
@@ -62,6 +79,9 @@ export function validateImagePayload(dataUrl: string): { ok: true; mime: string 
     return { ok: false, error: "Unsupported image format. Use JPEG, PNG, WebP or HEIC." };
   }
   const base64 = dataUrl.slice(match[0].length);
+  // The claimed type isn't trusted: the first bytes must be an image of an allowed kind.
+  const head = Buffer.from(base64.slice(0, 64), "base64");
+  if (!sniffImage(head)) return { ok: false, error: "That file isn't a valid image (JPEG, PNG, WebP or HEIC)." };
   const approxBytes = Math.floor((base64.length * 3) / 4);
   if (approxBytes <= 0) {
     return { ok: false, error: "Image payload is empty." };

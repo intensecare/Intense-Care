@@ -3,6 +3,7 @@ import { prisma } from "@/lib/server/prisma";
 import { resolveQrToken, clientIp, rateLimit } from "@/lib/server/qr-service";
 import { logger } from "@/lib/server/logger";
 import { getSystemSettings, resolveVisibility } from "@/lib/server/settings";
+import { fetchPhoto, imageResponse } from "@/lib/server/photo-delivery";
 
 /**
  * §36 — private evidence delivery. Photos are served through this proxy only
@@ -14,7 +15,7 @@ import { getSystemSettings, resolveVisibility } from "@/lib/server/settings";
  */
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   try {
-    const rl = rateLimit(`photo:${clientIp(request)}`, 120, 60 * 1000);
+    const rl = rateLimit(`photo:${clientIp(request)}`, 600, 60 * 1000);
     if (!rl.ok) return new NextResponse("Too many requests", { status: 429 });
 
     const { searchParams } = new URL(request.url);
@@ -41,16 +42,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
       return new NextResponse("Not found", { status: 404 });
     }
 
-    const source = photo.photoUrl;
-    const upstream = await fetch(source);
-    if (!upstream.ok || !upstream.body) {
-      logger.warn("secure_photo.upstream_failed", { photoId: photo.id, status: upstream.status });
-      return new NextResponse("Photo temporarily unavailable", { status: 502 });
-    }
-    const headers = new Headers();
-    headers.set("Content-Type", upstream.headers.get("content-type") || "image/jpeg");
-    headers.set("Cache-Control", "private, max-age=300");
-    return new NextResponse(upstream.body, { status: 200, headers });
+    const upstream = await fetchPhoto(photo, searchParams.get("s") === "thumb" ? "thumb" : "full");
+    if (!upstream) return new NextResponse("Photo temporarily unavailable", { status: 502 });
+    return imageResponse(upstream, 300) as NextResponse;
   } catch (err) {
     logger.error("secure_photo.route_error", { error: err instanceof Error ? err.message : String(err) });
     return new NextResponse("Photo delivery failed", { status: 500 });

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { Skeleton, ErrorState, Notice } from "@/components/ui/states";
 import { InvoiceDocument, InvoiceTypeBadge, useInvoiceDetail } from "@/components/invoice/InvoiceDocument";
+import { UpiReviewPanel } from "@/components/invoice/UpiReviewPanel";
 import { RecordPaymentDialog } from "@/components/invoice/RecordPaymentDialog";
 import { useCustomerLink } from "@/components/common/JobQr";
 import { useApp } from "@/lib/app-context";
@@ -213,6 +214,8 @@ export default function InvoiceDetailPage() {
           </ul>
         </section>
       )}
+
+      <UpiReviewPanel invoiceId={inv.id} balanceDue={inv.balanceDue} onChanged={() => void reload()} />
 
       <RecordPaymentDialog invoice={paying ? inv : null} onClose={() => setPaying(false)} onDone={() => void reload()} />
       <ConfirmModal

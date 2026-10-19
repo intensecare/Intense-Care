@@ -10,6 +10,12 @@ A simple service-management app for a deep-cleaning business. **Five user types,
 | **Tax Officer** | **GST** (desk, read-only) | GST Dashboard, GST Invoices (search, date and customer filters, GST breakdown, print / PDF), GST Reports (month-wise CGST / SGST / IGST, CSV). Never sees Non-GST invoices, jobs, customers, users or settings, and cannot change anything |
 | **Customer** | **My Service** (QR / secure link, no login, no app) | The page follows the job: Job ID, team, status → CONFIRM & START → progress → quality check → before / after photos → invoice → APPROVE SERVICE → star rating, Google review |
 
+## Android app, contact sync, media storage
+
+The ERP also ships as an **Android app** (Capacitor shell around the hosted ERP) with background phone-contact sync (Admin, opt-in), a **Media & Storage** screen (usage, safe cloud deletion with protected records), **Device storage** (cache, photos waiting to upload), native camera / QR / GPS, an offline photo queue and push notifications. Contacts and Media & Storage are Admin screens; nothing changes for the five roles.
+
+**Read [`docs/ANDROID.md`](docs/ANDROID.md)** — architecture, how to build the APK/AAB, configuration (`CRON_SECRET`, `FCM_SERVICE_ACCOUNT_JSON`, `CAP_SERVER_URL`), what needs a new build vs a web deploy, Google Play notes, and — importantly — *what was and wasn't tested* (the APK has not been built and background sync has not been tested on a real phone yet).
+
 ## Structure
 
 Sidebar — **Main:** Dashboard · Intense AI · Jobs · Customers · Leads · Quotations · Invoices · QC · Reports · Users. **More:** Schedule · Properties · Services · GST · Reviews & Feedback · Settings. QR, location, rework, approval, custom services, payment, field staff and job tracking are parts of the Job, not separate modules.

@@ -40,6 +40,17 @@ export async function DELETE(
       );
     }
 
+    // Evidence is locked once the work is handed to QC: from then on only the Media & Storage
+    // manager (which applies the retention and protection rules) can remove it.
+    const jobState = await prisma.job.findUnique({ where: { id: photo.jobId }, select: { status: true } });
+    const WORKING = ["SCHEDULED", "ASSIGNED", "ARRIVED", "CUSTOMER_VERIFIED", "IN_PROGRESS", "REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS", "DRAFT", "CANCELLED"];
+    if (jobState && !WORKING.includes(jobState.status)) {
+      return NextResponse.json(
+        { success: false, error: "These photos are now evidence for QC and the customer, so they can't be deleted here. Ask an Admin (Media & Storage)." },
+        { status: 409 }
+      );
+    }
+
     // Remove the binary asset first; a provider failure does not block
     // metadata cleanup, but we record it for ops follow-up.
     const assetDeleted = await deleteJobPhoto(photo.cloudinaryPublicId);

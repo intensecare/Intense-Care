@@ -1,5 +1,6 @@
 "use client";
 
+import { UpiPendingBanner } from "@/components/invoice/UpiPendingBanner";
 import React, { useState } from "react";
 import Link from "next/link";
 import { CreditCard } from "lucide-react";
@@ -27,6 +28,7 @@ export default function InvoicesPage() {
   return (
     <AdminLayout>
       <PageHeader title="Invoices" description="GST and Non-GST invoices, kept separate. Open one to print it or record a payment." />
+      <UpiPendingBanner />
 
       {summary && (
         <div className="grid grid-cols-3 gap-3 mb-6">

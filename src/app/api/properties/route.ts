@@ -19,6 +19,14 @@ function pinFrom(lat: number | null | undefined, lng: number | null | undefined)
   return { ok: true, pin };
 }
 
+/** The pasted map link, kept only if it is a plain https/http web link (never javascript:, data:, …). */
+const mapLinkField = z
+  .string()
+  .max(2000)
+  .nullable()
+  .optional()
+  .refine((v) => !v || /^https?:\/\/[^\s]+$/i.test(v.trim()), "The map link must be a web link (https://…).");
+
 const CreateSchema = z.object({
   customerId: z.string().min(1).max(64),
   title: z.string().min(1).max(200),
@@ -45,6 +53,7 @@ const CreateSchema = z.object({
   country: z.string().max(80).nullable().optional(),
   locationNotes: z.string().max(1000).nullable().optional(),
   locationSource: z.enum(LOCATION_SOURCES).nullable().optional(),
+  mapLink: mapLinkField,
   /** PATCH only: remove the saved pin on purpose (null lat/lng alone never clears it). */
   clearLocation: z.boolean().optional(),
 });
@@ -73,6 +82,7 @@ const UpdateSchema = z.object({
   country: z.string().max(80).nullable().optional(),
   locationNotes: z.string().max(1000).nullable().optional(),
   locationSource: z.enum(LOCATION_SOURCES).nullable().optional(),
+  mapLink: mapLinkField,
   /** PATCH only: remove the saved pin on purpose (null lat/lng alone never clears it). */
   clearLocation: z.boolean().optional(),
 });
@@ -128,6 +138,7 @@ export async function POST(request: Request) {
         state: blank(d.state),
         country: blank(d.country),
         locationNotes: blank(d.locationNotes),
+        mapLink: blank(d.mapLink),
         bedrooms: d.bedrooms,
         bathrooms: d.bathrooms,
         areaSqFt: d.carpetAreaSqFt,

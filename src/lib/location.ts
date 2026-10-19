@@ -110,7 +110,7 @@ export function navigateUrl(v: { lat?: number | null; lng?: number | null; addre
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
 }
 
-export const LOCATION_SOURCES = ["SEARCH", "MAP_PIN", "DEVICE_GPS", "MANUAL", "IMPORTED"] as const;
+export const LOCATION_SOURCES = ["SEARCH", "MAP_PIN", "DEVICE_GPS", "MANUAL", "IMPORTED", "MAP_LINK"] as const;
 export type PropertyLocationSource = (typeof LOCATION_SOURCES)[number];
 export const LOCATION_SOURCE_LABEL: Record<PropertyLocationSource, string> = {
   SEARCH: "Address search",
@@ -118,6 +118,7 @@ export const LOCATION_SOURCE_LABEL: Record<PropertyLocationSource, string> = {
   DEVICE_GPS: "Device location at the property",
   MANUAL: "Coordinates typed in",
   IMPORTED: "Existing record",
+  MAP_LINK: "Pasted map link",
 };
 
 /** Great-circle distance in metres. */

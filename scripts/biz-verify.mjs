@@ -93,7 +93,10 @@ const vr = await admin(`/api/expenses/${dup2.json.data.id}`, { method: "POST", b
 ok(vr.status === 400, "voiding needs a reason");
 ok((await admin(`/api/expenses/${dup2.json.data.id}`, { method: "POST", body: { action: "void", reason: "Entered twice" } })).status === 200, "Admin voids an expense with a reason");
 ok((await admin(`/api/expenses/${dup2.json.data.id}`, { method: "POST", body: { action: "void", reason: "again please" } })).status === 409, "voiding twice is refused");
-ok((await admin(`/api/expenses/${dup2.json.data.id}`, { method: "DELETE" })).status >= 400, "expenses cannot be hard-deleted");
+// The Expenses module (merged from main) lets an Admin delete a manually entered expense; automatic payroll /
+// freelance / referral expenses are refused by the route. A voided one is removed here.
+ok((await admin(`/api/expenses/${dup2.json.data.id}`, { method: "DELETE" })).status === 200, "Admin can remove a manually entered (voided) expense");
+ok((await admin(`/api/expenses/${dup2.json.data.id}`)).status === 404, "the removed expense is gone");
 ok(sql(`select count(*) from "AuditLog" where "entityId"='${dup2.json.data.id}' and action='EXPENSE_VOIDED'`) === "1", "void is in the audit trail");
 rep = (await admin(`/api/reports/business?from=${today}&to=${today}`)).json?.data;
 ok(rep.costs.byCategory.find((c) => c.category === "CLEANING_SUPPLIES")?.total === 1180, "voided expense is not in the totals (cleaning supplies = 1180 once)");

@@ -85,6 +85,8 @@ model Property {
   lat                 Float?
   lng                 Float?
   locationNotes       String?
+  /// The Google Maps / location link the Admin pasted to set the pin (kept so the pin can be re-checked). https only.
+  mapLink             String?
   /// How the pin was set: SEARCH | MAP_PIN | DEVICE_GPS | MANUAL | IMPORTED
   locationSource      String?
   locationUpdatedAt   DateTime?
@@ -435,9 +437,13 @@ model JobPhoto {
   uploadedByUserId   String
   uploadedByName     String
   uploadedAt         DateTime @default(now())
+  /// Client-generated id of the upload attempt: a retry of the same photo (flaky
+  /// network, app restart) returns this row instead of storing a second copy.
+  clientUploadId     String?
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
+  @@unique([jobId, clientUploadId])
   @@index([jobId])
 }
 
@@ -1008,6 +1014,168 @@ model LeadActivity {
   @@index([leadId, createdAt])
 }
 
+/// A phone running the Android app, signed in as a user. Holds the scoped token
+/// the background contact worker uses (SHA-256 only — never the token) and the
+/// push registration. Revoking the row cuts both off at once.
+model MobileDevice {
+  id                   String    @id @default(cuid())
+  userId               String
+  /// Random id the app generates once per install.
+  deviceId             String
+  label                String?
+  platform             String    @default("android")
+  appVersion           String?
+  syncTokenHash        String?   @unique
+  syncTokenIssuedAt    DateTime?
+  /// Contact sync switched off by the user on this phone (the server then refuses uploads).
+  syncPaused           Boolean   @default(false)
+  pushToken            String?
+  pushTokenUpdatedAt   DateTime?
+  notificationsEnabled Boolean   @default(true)
+  lastSeenAt           DateTime?
+  revokedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @default(now()) @updatedAt
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+  @@index([pushToken])
+}
+
+/// One contact from a phone. This row IS the mapping between the device's
+/// contact id and the ERP: `customerId` / `leadId` say what it was matched to
+/// or imported as. Removing a contact from the phone marks it REMOVED here; it
+/// never deletes a customer or lead.
+model PhoneContact {
+  id              String               @id @default(cuid())
+  deviceRowId     String
+  ownerUserId     String
+  deviceContactId String
+  displayName     String
+  emails          String[]             @default([])
+  /// Hash of the fields we store — an unchanged contact is recognised without comparing fields.
+  contentHash     String
+  deviceUpdatedAt DateTime?
+  /// ACTIVE | REMOVED
+  status          String               @default("ACTIVE")
+  removedAt       DateTime?
+  /// Set only when exactly ONE ERP customer has one of this contact's numbers.
+  customerId      String?
+  leadId          String?
+  /// NONE | LEAD (imported as a lead) | IGNORED (staff chose not to import)
+  importState     String               @default("NONE")
+  dupDismissedAt  DateTime?
+  firstSyncedAt   DateTime             @default(now())
+  lastSyncedAt    DateTime             @default(now())
+  numbers         PhoneContactNumber[]
+
+  @@unique([deviceRowId, deviceContactId])
+  @@index([ownerUserId])
+  @@index([status])
+  @@index([customerId])
+  @@index([leadId])
+}
+
+/// Normalised phone numbers of a contact (one contact may have several; one number may be on several contacts).
+model PhoneContactNumber {
+  id        String       @id @default(cuid())
+  contactId String
+  /// Digits of the number in international form, e.g. +919845012345.
+  e164      String
+  /// Last 10 digits — what customers and leads are matched on.
+  phoneKey  String
+  contact   PhoneContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, phoneKey])
+  @@index([phoneKey])
+}
+
+/// One synchronisation run of one phone. Counts only — no names or numbers.
+model ContactSyncRun {
+  id          String    @id @default(cuid())
+  deviceRowId String
+  ownerUserId String
+  /// The id the phone generated for this run (batches of the same run share it).
+  clientRunId String
+  /// INITIAL | APP_OPEN | RESUME | MANUAL | SCHEDULED | CATCH_UP | RETRY
+  trigger     String
+  /// RUNNING | COMPLETED | PARTIAL | FAILED
+  status      String    @default("RUNNING")
+  scanned     Int       @default(0)
+  added       Int       @default(0)
+  updated     Int       @default(0)
+  unchanged   Int       @default(0)
+  removed     Int       @default(0)
+  skipped     Int       @default(0)
+  failed      Int       @default(0)
+  duplicates  Int       @default(0)
+  /// Short machine code, never personal data.
+  errorCode   String?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  @@unique([deviceRowId, clientRunId])
+  @@index([deviceRowId, startedAt])
+}
+
+/// Replay protection: a batch the server already processed answers with its stored result.
+model ContactSyncBatch {
+  id             String   @id @default(cuid())
+  deviceRowId    String
+  idempotencyKey String
+  result         Json
+  createdAt      DateTime @default(now())
+
+  @@unique([deviceRowId, idempotencyKey])
+  @@index([createdAt])
+}
+
+/// Push notifications sent (or skipped) per user and event. The unique
+/// (userId, dedupeKey) is what stops the same event notifying twice.
+model PushNotification {
+  id        String   @id @default(cuid())
+  userId    String
+  dedupeKey String
+  type      String
+  title     String
+  body      String
+  /// App route opened when tapped — a path only, never personal data.
+  route     String?
+  /// QUEUED | SENT | FAILED | SKIPPED
+  status    String   @default("QUEUED")
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([createdAt])
+}
+
+/// Permanent record of a file removed through Media & Storage: what it was, who
+/// removed it, why, and whether it was protected business media (override).
+model MediaDeletion {
+  id                String   @id @default(cuid())
+  /// JOB_PHOTO | EXPENSE_RECEIPT | CLOUD_ORPHAN
+  assetKind         String
+  assetId           String
+  category          String
+  fileName          String
+  mimeType          String?
+  bytes             Int?
+  jobId             String?
+  jobSerial         String?
+  uploadedBy        String?
+  uploadedAt        DateTime?
+  protectedOverride Boolean  @default(false)
+  reason            String?
+  remoteDeleted     Boolean  @default(false)
+  deletedBy         String
+  deletedByName     String
+  deletedAt         DateTime @default(now())
+
+  @@index([deletedAt])
+  @@index([jobId])
+}
+
 /// Sessions revoked by signing out (kept until the cookie would expire).
 model RevokedSession {
   jti       String   @id
@@ -1149,4 +1317,54 @@ model AmcVisit {
 
   @@index([contractId, scheduledDate])
   @@index([status])
+}
+
+/// One customer attempt to pay an invoice by UPI. Opening a UPI app proves nothing: an attempt only becomes money
+/// when an authorised Admin verifies it (status VERIFIED → a Payment row is created, once). The amount is fixed by the
+/// server from the invoice's outstanding balance when the attempt is created; the customer never supplies it.
+model UpiPaymentAttempt {
+  id               String    @id @default(cuid())
+  invoiceId        String
+  jobId            String
+  customerId       String
+  /// The `tr` sent to the UPI app — unique per attempt.
+  reference        String    @unique
+  amount           Float
+  /// Snapshot of where the money was asked to go (the Admin may change the UPI ID later).
+  payeeVpa         String
+  payeeName        String
+  /// INITIATED | SUBMITTED (customer gave a UTR → review) | VERIFIED | REJECTED | CANCELLED
+  status           String    @default("INITIATED")
+  /// UTR / UPI reference the customer (or Admin) entered. Globally unique among live attempts.
+  utr              String?
+  payerNote        String?
+  createdAt        DateTime  @default(now())
+  submittedAt      DateTime?
+  reviewedAt       DateTime?
+  reviewedBy       String?
+  reviewedByName   String?
+  reviewNote       String?
+  /// The ledger Payment created when verified.
+  paymentId        String?
+  events           UpiPaymentEvent[]
+
+  @@index([invoiceId, status])
+  @@index([status, submittedAt])
+}
+
+/// Audit trail: every status change of an attempt, who did it and when.
+model UpiPaymentEvent {
+  id          String   @id @default(cuid())
+  attemptId   String
+  at          DateTime @default(now())
+  fromStatus  String?
+  toStatus    String
+  /// CUSTOMER | ADMIN | SYSTEM
+  actorType   String
+  actorName   String?
+  note        String?
+
+  attempt UpiPaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId, at])
 }

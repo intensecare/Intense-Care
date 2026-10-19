@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Intense Care</string>
+    <string name="title_activity_main">Intense Care</string>
+    <string name="package_name">com.intensecare.erp</string>
+    <string name="custom_url_scheme">com.intensecare.erp</string>
+    <string name="notification_channel_name">Jobs and updates</string>
+    <string name="notification_channel_desc">New and changed jobs, reminders, QC and rework. Messages never include customer names, addresses or amounts.</string>
+</resources>

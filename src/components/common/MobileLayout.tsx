@@ -156,6 +156,9 @@ export function ProfilePanel() {
           </div>
         )}
       </section>
+      <Link href="/device-storage" className="w-full h-12 rounded-xl border border-zinc-300 bg-white text-base font-semibold text-zinc-800 inline-flex items-center justify-center">
+        Device storage &amp; notifications
+      </Link>
       <button onClick={logout} className="w-full h-12 rounded-xl border border-zinc-300 bg-white text-base font-semibold text-zinc-800">
         Sign out
       </button>

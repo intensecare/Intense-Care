@@ -192,6 +192,15 @@ export function afterJobCreated(jobId: string, user: { id: string; name: string 
       await syncJobEvent(jobId);
     } catch {}
     try {
+      // A job created already assigned: the Field Manager's phone hears about it.
+      const j = await prisma.job.findUnique({ where: { id: jobId }, select: { assignedManagerId: true, assignedStaffIds: true } });
+      const crew = Array.from(new Set([...(j?.assignedManagerId ? [j.assignedManagerId] : []), ...(j?.assignedStaffIds ?? [])]));
+      if (crew.length) {
+        const { pushToUsers, messages, bucket } = await import("./push");
+        await pushToUsers(crew, messages.jobAssigned(jobId), (u) => `job-assigned:${jobId}:${u}:${bucket()}`);
+      }
+    } catch {}
+    try {
       const { ensureCustomerLink } = await import("./qr-service");
       await ensureCustomerLink(jobId, { id: user.id, name: user.name });
     } catch {}

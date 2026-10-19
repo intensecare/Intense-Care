@@ -1,5 +1,8 @@
 import { isStartMode } from "@/lib/start-verification";
+import { CONTACT_LEAD_POLICIES } from "@/lib/contacts";
 import { NextResponse } from "next/server";
+import { recordAudit } from "@/lib/server/audit";
+import { isValidPayeeName, isValidVpa, maskVpa, upiProblem, UPI_PROBLEM_TEXT } from "@/lib/payments";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, requireUser } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
@@ -38,7 +41,7 @@ export async function GET() {
 export async function PATCH(request: Request) {
   try {
     // Critical configuration is Super Admin only (approval authority §17).
-    await requirePermission("settings.manage");
+    const auth = await requirePermission("settings.manage");
     const body = await readJson(request);
     if (!body) {
       return NextResponse.json({ success: false, error: "Invalid settings payload." }, { status: 400 });
@@ -153,6 +156,67 @@ export async function PATCH(request: Request) {
         next.allowPerJobOverride = v.allowPerJobOverride;
       }
       patch.jobStartVerification = next;
+    }
+
+    if (body.upi && typeof body.upi === "object") {
+      const v = body.upi as Record<string, unknown>;
+      const next = { ...current.upi };
+      const bad = (msg: string) => NextResponse.json({ success: false, error: msg }, { status: 400 });
+      if (v.vpa !== undefined) {
+        if (typeof v.vpa !== "string") return bad("Invalid UPI ID.");
+        const t = v.vpa.trim();
+        if (t && !isValidVpa(t)) return bad(UPI_PROBLEM_TEXT.BAD_VPA);
+        next.vpa = t;
+      }
+      if (v.payeeName !== undefined) {
+        if (typeof v.payeeName !== "string") return bad("Invalid payee name.");
+        const t = v.payeeName.trim();
+        if (t && !isValidPayeeName(t)) return bad(UPI_PROBLEM_TEXT.BAD_NAME);
+        next.payeeName = t;
+      }
+      if (v.description !== undefined) {
+        if (typeof v.description !== "string" || v.description.length > 40 || /[^\w .#/-]/.test(v.description)) return bad("The payment description can be up to 40 letters, numbers and spaces.");
+        next.description = v.description.trim();
+      }
+      if (v.enabled !== undefined) {
+        if (typeof v.enabled !== "boolean") return bad("Invalid setting.");
+        next.enabled = v.enabled;
+      }
+      // Never switch payments on with an incomplete or invalid configuration.
+      if (next.enabled) {
+        const problem = upiProblem({ ...next, enabled: true });
+        if (problem) return bad(`UPI payments can't be switched on yet: ${UPI_PROBLEM_TEXT[problem]}`);
+      }
+      patch.upi = next;
+      // The payee account is where customers' money goes — every change is recorded.
+      if (next.vpa !== current.upi.vpa || next.payeeName !== current.upi.payeeName || next.enabled !== current.upi.enabled) {
+        void recordAudit({ actor: auth.user, action: "UPI_SETTINGS_CHANGED", entityType: "settings", entityId: "upi", previousState: `${current.upi.enabled ? "on" : "off"} ${current.upi.vpa ? maskVpa(current.upi.vpa) : "(none)"}`, newState: `${next.enabled ? "on" : "off"} ${next.vpa ? maskVpa(next.vpa) : "(none)"}`, request });
+      }
+    }
+
+    if (body.contactSync && typeof body.contactSync === "object") {
+      const v = body.contactSync as Record<string, unknown>;
+      const next = { ...current.contactSync };
+      const bad = (msg: string) => NextResponse.json({ success: false, error: msg }, { status: 400 });
+      if (v.leadPolicy !== undefined) {
+        if (!(CONTACT_LEAD_POLICIES as readonly string[]).includes(v.leadPolicy as string)) return bad("Choose how synced contacts are handled.");
+        if (v.leadPolicy === "AUTO_NEW_CONTACTS" && next.leadPolicy !== "AUTO_NEW_CONTACTS") {
+          // Turning on automatic leads is a business decision: it needs an explicit confirmation, which is recorded.
+          if (v.confirmAutoLeads !== true) return bad("Confirm that new phone contacts should automatically become leads.");
+          next.autoLeadApprovedBy = auth.user.name;
+          next.autoLeadApprovedAt = new Date().toISOString();
+        }
+        if (v.leadPolicy === "DIRECTORY_ONLY") {
+          next.autoLeadApprovedBy = null;
+          next.autoLeadApprovedAt = null;
+        }
+        next.leadPolicy = v.leadPolicy as typeof next.leadPolicy;
+      }
+      if (v.removedRetentionDays !== undefined) {
+        if (typeof v.removedRetentionDays !== "number" || !Number.isInteger(v.removedRetentionDays) || v.removedRetentionDays < 7 || v.removedRetentionDays > 3650) return bad("Keep removed contacts for 7 to 3650 days.");
+        next.removedRetentionDays = v.removedRetentionDays;
+      }
+      patch.contactSync = next;
     }
 
     const updated = await updateSystemSettings(patch);

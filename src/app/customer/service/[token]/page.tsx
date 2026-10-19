@@ -1,5 +1,7 @@
 "use client";
 
+import { PayPanel, type CustomerPayment } from "@/components/customer/PayPanel";
+import { PhotoGallery } from "@/components/common/PhotoGallery";
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import {
@@ -66,7 +68,7 @@ interface CustomerPayload {
   customer: { name: string; phoneMasked: string };
   team: string[];
   checklist: { id: string; area: string; task: string; completed: boolean }[];
-  photos: { id: string; area: string; photoType: string; url: string; uploadedAt: string }[];
+  photos: { id: string; area: string; photoType: string; url: string; thumbUrl?: string; caption?: string | null; uploadedAt: string }[];
   qualityCheck: { passed: boolean } | null;
   /** Customer-facing QC result: checking → (improving) → passed. */
   qualityResult: "checking" | "improving" | "passed" | null;
@@ -101,6 +103,7 @@ interface CustomerInvoice {
   balanceDue?: number;
   status?: string;
   paymentTerms?: string;
+  payment?: CustomerPayment;
   companyName: string;
   companyAddress: string;
 }
@@ -378,6 +381,9 @@ export default function CustomerServicePage() {
                     <button onClick={() => go("reports")} className="min-h-10 font-semibold text-rose-600 inline-flex items-center gap-1">
                       {formatInr(data.invoice.total)} · View
                     </button>
+                    {data.invoice.payment?.canPay && (
+                      <button onClick={() => go("reports")} className="ml-3 min-h-10 px-3 rounded-lg bg-emerald-600 text-white text-sm font-semibold">Pay now</button>
+                    )}
                   </dd>
                 </div>
               )}
@@ -531,7 +537,7 @@ export default function CustomerServicePage() {
           {(vis.beforePhotos !== false || vis.afterPhotos !== false) && (
             <div className="print:hidden">
               <Panel title={vis.beforePhotos === false ? "After photos" : vis.afterPhotos === false ? "Before photos" : "Before / After"}>
-                <BeforeAfter photos={data.photos} areas={areas} />
+                <PhotoGallery photos={data.photos} />
               </Panel>
             </div>
           )}
@@ -545,6 +551,7 @@ export default function CustomerServicePage() {
             </a>
           )}
           {data.invoice && <InvoicePanel invoice={data.invoice} customerName={data.customer.name} jobId={job.id} serviceName={job.serviceName} />}
+          {data.invoice?.payment && (data.invoice.balanceDue !== undefined) && <PayPanel token={token} invoiceNumber={data.invoice.invoiceNumber} jobId={job.id} total={data.invoice.total} amountPaid={data.invoice.amountPaid ?? 0} payment={data.invoice.payment} onChanged={() => void load()} />}
           {stage === "approve" && (
             <button onClick={() => go("home")} className="h-12 w-full rounded-2xl bg-emerald-600 text-white text-base font-semibold">Back to approve</button>
           )}
@@ -799,37 +806,6 @@ function Detail({ icon, label, value }: { icon: React.ReactNode; label: string; 
         <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">{label}</div>
         <div className="text-base text-zinc-900 break-words">{value}</div>
       </div>
-    </div>
-  );
-}
-
-function BeforeAfter({ photos, areas }: { photos: CustomerPayload["photos"]; areas: string[] }) {
-  const withPhotos = areas.filter((a) => photos.some((p) => p.area === a));
-  if (withPhotos.length === 0) return <p className="py-3 text-base text-zinc-500">Before and after photos appear here once the work is done.</p>;
-  return (
-    <div className="space-y-4 pt-2">
-      {withPhotos.map((a) => {
-        const b = photos.find((p) => p.area === a && p.photoType === "before");
-        const af = photos.find((p) => p.area === a && p.photoType === "after");
-        return (
-          <div key={a} className="pt-2">
-            <div className="text-sm font-semibold text-zinc-900 mb-2 uppercase tracking-wide">{a}</div>
-            <div className="grid grid-cols-2 gap-2">
-              {[{ label: "BEFORE", p: b }, { label: "AFTER", p: af }].map(({ label, p }) => (
-                <div key={label} className="relative aspect-[4/3] rounded-xl overflow-hidden bg-zinc-100">
-                  {p ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={p.url} alt={`${a} ${label.toLowerCase()}`} className="h-full w-full object-cover" loading="lazy" decoding="async" />
-                  ) : (
-                    <div className="h-full w-full flex items-center justify-center text-sm text-zinc-400">No photo</div>
-                  )}
-                  <span className={cn("absolute top-2 left-2 px-2 py-0.5 rounded-md text-xs font-bold text-white", label === "BEFORE" ? "bg-zinc-900/80" : "bg-emerald-600")}>{label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }

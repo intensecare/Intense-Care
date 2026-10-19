@@ -4,6 +4,7 @@ import { prisma } from "./prisma";
 import { logger, maskPhone } from "./logger";
 import { deepLinkFor, ROLES, scopeOf, type Permission } from "@/lib/rbac";
 import { resolveBaseUrl } from "./policy";
+import { bucket, messages, pushToUser, pushToUsers, userIdsWithRole } from "./push";
 
 /**
  * §24/§26 — outbound notifications with ROLE-SPECIFIC DEEP LINKS.
@@ -164,6 +165,8 @@ export async function notifyCustomerCompleted(jobId: string, link: string): Prom
   if (!(await notificationOn("customerCompleted"))) return { queued: false, provider: "none", reason: "disabled_in_settings" };
   const job = await prisma.job.findUnique({ where: { id: jobId }, include: { customer: true } });
   if (!job?.customer) return { queued: false, provider: "none", reason: "no_customer" };
+  // QC passed and the customer was asked to approve: tell the office (no customer details in the push).
+  void userIdsWithRole(["admin"]).then((ids) => pushToUsers(ids, messages.approvalRequired(jobId), (u) => `approval:${jobId}:${u}:${bucket()}`));
   if (await recentlySent(jobId, "CUSTOMER_COMPLETED")) return { queued: false, provider: "deduped" };
   const dl = deepLinkFor("customer", "qc_passed", { jobId, customerLink: link });
   const body = `${company()}: ${dl.message} ${dl.cta}: ${dl.path}`;
@@ -182,6 +185,8 @@ export async function notifyJobAssigned(jobId: string): Promise<NotifyResult> {
   const crewIds = Array.from(new Set([...(job.assignedManagerId ? [job.assignedManagerId] : []), ...job.assignedStaffIds]));
   if (crewIds.length === 0) return { queued: false, provider: "none", reason: "no_crew" };
   const crew = await prisma.user.findMany({ where: { id: { in: crewIds }, active: true }, select: { id: true, phone: true, role: true } });
+  // The Android app: a push with no customer details (the same Settings switch governs it).
+  void pushToUsers(crew.map((c) => c.id), messages.jobAssigned(jobId), (u) => `job-assigned:${jobId}:${u}:${bucket()}`);
   let last: NotifyResult = { queued: false, provider: "none", reason: "no_crew" };
   for (const member of crew) {
     const dl = deepLinkFor(member.role, "job_assigned", { jobId });
@@ -199,6 +204,7 @@ export async function notifyReworkAssigned(jobId: string, link?: string): Promis
   if (!lead) return { queued: false, provider: "none", reason: "no_lead" };
   const staff = await prisma.user.findUnique({ where: { id: lead } });
   if (!staff) return { queued: false, provider: "none", reason: "no_staff" };
+  void pushToUser(staff.id, messages.reworkAssigned(jobId), `rework:${jobId}:${staff.id}:${bucket()}`);
   if (await recentlySent(jobId, "REWORK_ASSIGNED")) return { queued: false, provider: "deduped" };
   const dl = deepLinkFor(staff.role, "rework_assigned", { jobId });
   const body = `${company()}: ${dl.message} ${dl.cta}: ${link ?? absolute(dl.path)}`;
@@ -217,6 +223,7 @@ export async function notifyQcReady(jobId: string, link?: string, mode: "inspect
   if (await recentlySent(jobId, purpose)) return { queued: false, provider: "deduped" };
   const inspectors = await usersWith("qc.inspect");
   if (inspectors.length === 0) return { queued: false, provider: "none", reason: "no_inspector" };
+  void pushToUsers(inspectors.map((i) => i.id), messages.qcPending(jobId, mode === "reinspection"), (u) => `qc:${mode}:${jobId}:${u}:${bucket()}`);
   let last: NotifyResult = { queued: false, provider: "none" };
   for (const inspector of inspectors) {
     const dl = deepLinkFor(inspector.role, "qc_ready", { jobId });

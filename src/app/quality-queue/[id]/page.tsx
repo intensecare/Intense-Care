@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/common/JobStatusBadge";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/lib/auth-context";
 import { compressImageForUpload } from "@/lib/image-compress";
+import { nativePhoto } from "@/lib/mobile/camera";
 import { cn, formatDate, formatDateTime, formatTimeSlot } from "@/lib/utils";
 import { CheckCircle2, AlertTriangle, Plus, X, Loader2, ShieldCheck, Camera, RotateCcw, MapPin, ClipboardList, Check } from "lucide-react";
 import type { Job, JobPhoto } from "@/lib/types";
@@ -46,6 +47,7 @@ function QualityInspect() {
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -84,21 +86,34 @@ function QualityInspect() {
   const reinspect = ["REWORK_COMPLETED", "REINSPECTION"].includes(job.status);
   const inspectable = INSPECTABLE.includes(job.status) && can("qc.inspect");
 
+  const uploadQcPhoto = async (raw: string) => {
+    setUploading(true);
+    setError(null);
+    const prepared = await compressImageForUpload(raw);
+    const r = await addJobPhoto({ jobId, area: draft.area || "General", photoType: "qc", imageDataUrl: prepared.dataUrl, caption: draft.issue || undefined });
+    setUploading(false);
+    if (!r.success || !r.photo) setError(r.message);
+    else setDraft((d) => ({ ...d, photo: r.photo }));
+  };
+
   const onPhotoPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    setUploading(true);
-    setError(null);
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const prepared = await compressImageForUpload(String(ev.target?.result ?? ""));
-      const r = await addJobPhoto({ jobId, area: draft.area || "General", photoType: "qc", imageDataUrl: prepared.dataUrl, caption: draft.issue || undefined });
-      setUploading(false);
-      if (!r.success || !r.photo) setError(r.message);
-      else setDraft((d) => ({ ...d, photo: r.photo }));
-    };
+    reader.onload = (ev) => void uploadQcPhoto(String(ev.target?.result ?? ""));
     reader.readAsDataURL(file);
+  };
+
+  /** Android app: native camera / gallery. Browser: the file inputs. */
+  const takePhoto = async (source: "camera" | "gallery") => {
+    try {
+      const native = await nativePhoto(source);
+      if (native === "unsupported") (source === "camera" ? cameraRef : galleryRef).current?.click();
+      else if (native) await uploadQcPhoto(native);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The camera couldn't be opened.");
+    }
   };
 
   const addDraft = () => {
@@ -166,6 +181,7 @@ function QualityInspect() {
   return (
     <QualityShell title={job.customerName ?? job.id} subtitle={reinspect ? "Reinspection" : "Quality Check"} backHref="/quality-queue" action={action}>
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhotoPicked} />
+      <input ref={galleryRef} type="file" accept="image/*" className="hidden" onChange={onPhotoPicked} />
 
       {error && (
         <div className="rounded-2xl bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-3 flex items-start gap-2">
@@ -255,9 +271,12 @@ function QualityInspect() {
                   <button onClick={() => setDraft({ ...draft, photo: undefined })} className="text-sm text-slate-500 underline">Remove</button>
                 </div>
               ) : (
-                <button type="button" disabled={uploading} onClick={() => cameraRef.current?.click()} className="h-12 w-full rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm font-semibold text-slate-700 inline-flex items-center justify-center gap-2">
-                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} ADD PHOTO
-                </button>
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <button type="button" disabled={uploading} onClick={() => void takePhoto("camera")} className="h-12 w-full rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm font-semibold text-slate-700 inline-flex items-center justify-center gap-2">
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} ADD PHOTO
+                  </button>
+                  <button type="button" disabled={uploading} onClick={() => void takePhoto("gallery")} className="h-12 px-4 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700">GALLERY</button>
+                </div>
               )}
             </div>
             <div className="space-y-1.5">

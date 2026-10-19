@@ -96,6 +96,10 @@ export interface SystemSettings {
   referralRules: import("./business").ReferralRules;
   /** How a Field Manager proves they are at the job before it starts. */
   jobStartVerification: import("./start-verification").StartVerificationSettings;
+  /** What happens to contacts synced from the Android app (Contacts directory vs. leads). */
+  contactSync: import("./contacts").ContactSyncSettings;
+  /** UPI payment configuration (Admin). Empty and switched off until configured. */
+  upi: import("./payments").UpiSettings;
 }
 
 /** What a customer may see on their QR page. Internal data is never included. */
@@ -280,6 +284,8 @@ export interface Property {
   lat?: number | null;
   lng?: number | null;
   locationNotes?: string;
+  /** The map link pasted to set the pin. */
+  mapLink?: string;
   /** SEARCH | MAP_PIN | DEVICE_GPS | MANUAL | IMPORTED */
   locationSource?: string;
   locationUpdatedAt?: string;

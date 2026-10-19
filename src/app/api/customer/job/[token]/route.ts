@@ -1,3 +1,4 @@
+import { paymentBlock } from "@/lib/server/payments";
 import { NextResponse } from "next/server";
 import { resolveServiceLocation } from "@/lib/location";
 import { z } from "zod";
@@ -98,6 +99,7 @@ export async function GET(request: Request, { params }: { params: { token: strin
       getSystemSettings(),
     ]);
     const isGst = invoiceRow?.invoiceType === "GST";
+    const payBlock = invoiceRow ? await paymentBlock(invoiceRow) : null;
     const where = jobRow ? resolveServiceLocation(jobRow, jobRow.property) : null;
     const QC_PENDING = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"];
     const QC_REWORK = ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
@@ -146,6 +148,7 @@ export async function GET(request: Request, { params }: { params: { token: strin
           area: p.area,
           photoType: p.photoType,
           url: `/api/secure-photo/${p.id}?t=${encodeURIComponent(params.token)}`,
+          thumbUrl: `/api/secure-photo/${p.id}?t=${encodeURIComponent(params.token)}&s=thumb`,
           caption: p.caption,
           uploadedAt: p.uploadedAt.toISOString(),
         })),
@@ -187,6 +190,7 @@ export async function GET(request: Request, { params }: { params: { token: strin
                   : {}),
                 total: invoiceRow.total,
                 ...(vis.paymentStatus ? { amountPaid: invoiceRow.amountPaid, balanceDue: invoiceRow.balanceDue, status: invoiceRow.status } : {}),
+                payment: payBlock ?? undefined,
                 companyName: settings.companyName,
                 companyAddress: settings.companyAddress,
                 paymentTerms: invoiceRow.paymentTerms ?? undefined,

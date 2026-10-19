@@ -39,6 +39,8 @@ export interface PropertyFormPayload {
   lng: number | null;
   locationNotes: string;
   locationSource?: LocationValue["source"];
+  /** The pasted map link (empty clears it). */
+  mapLink?: string;
   /** Edit only: the user removed the saved pin on purpose. */
   clearLocation?: boolean;
 }
@@ -118,7 +120,7 @@ export function PropertyFormDialog({
     setPreferredTime(editing?.preferredTime ?? "");
     setRecurring(editing?.recurringService ?? false);
     setRecurringFrequency(editing?.recurringFrequency ?? "monthly");
-    setLoc({ lat: editing?.lat ?? null, lng: editing?.lng ?? null, address: editing?.address ?? "" });
+    setLoc({ lat: editing?.lat ?? null, lng: editing?.lng ?? null, address: editing?.address ?? "", mapLink: editing?.mapLink ?? "" });
   }, [open, editing, defaultCustomerId, customers]);
 
   const customerOptions = customers.map((c) => ({
@@ -145,6 +147,8 @@ export function PropertyFormDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !address || !customerId) return;
+    const link = (loc.mapLink ?? "").trim();
+    if (link && !/^https?:\/\/\S+$/i.test(link)) return setError("The map link must be a web link starting with https:// — paste it from Google Maps → Share, or clear the box.");
     if (halfPin) return setError("The map location needs both latitude and longitude. Finish it or remove the pin.");
     setIsSubmitting(true);
     setError("");
@@ -172,6 +176,7 @@ export function PropertyFormDialog({
       lng: loc.lng,
       locationNotes: locationNotes.trim(),
       locationSource: loc.source,
+      mapLink: (loc.mapLink ?? "").trim(),
       clearLocation: isEditing && typeof editing?.lat === "number" && loc.lat === null && loc.lng === null,
     });
 
