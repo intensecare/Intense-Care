@@ -25,7 +25,7 @@ const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: proc
 async function main() {
   const ids: Record<string, string> = {};
   for (const a of DEMO_ACCOUNTS) {
-    const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("base64url"), 12);
+    const passwordHash = await bcrypt.hash("intense123", 12);
     const u = await prisma.user.upsert({
       where: { email: a.email },
       create: { name: a.name, email: a.email, phone: "", role: a.role, passwordHash, active: true },
