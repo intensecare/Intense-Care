@@ -286,6 +286,18 @@ export default function SettingsPage() {
           </Link>
         </section>
 
+        <section id="s-mobile" className={section} aria-labelledby="s-mobile-h">
+          <Head id="s-mobile" title="Android app, contacts & storage" hint="Phone contact sync, cloud photo storage, and what this device keeps." />
+          <div className="space-y-2">
+            {([["/contacts", "Contacts & contact sync"], ["/media", "Media & Storage"], ["/device-storage", "Device storage & notifications"]] as const).map(([href, label]) => (
+              <Link key={href} href={href} className="flex items-center gap-3 rounded-xl border border-zinc-200 px-4 py-3 hover:bg-zinc-50">
+                <span className="flex-1 text-sm font-semibold text-zinc-900">{label}</span>
+                <ChevronRight className="h-4 w-4 text-zinc-400" aria-hidden />
+              </Link>
+            ))}
+          </div>
+        </section>
+
         <section id="s-start" className={section} aria-labelledby="s-start-h">
           <Head id="s-start" title="Job start verification" hint="What a Field Manager must do at the property before the job starts. Checked by the server — the app can't skip it. Phone GPS is an estimate, not proof; choose GPS + QR where you need stronger assurance." />
           <fieldset className="space-y-2">

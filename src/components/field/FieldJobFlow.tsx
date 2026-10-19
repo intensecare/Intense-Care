@@ -25,6 +25,7 @@ import {
   Sparkles,
   User,
   ScanLine,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { MobileLayout, ProfilePanel } from "@/components/common/MobileLayout";
@@ -38,6 +39,8 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Notice, SkeletonList, Skeleton } from "@/components/ui/states";
 import { compressImageForUpload } from "@/lib/image-compress";
+import { nativePhoto } from "@/lib/mobile/camera";
+import { currentFix } from "@/lib/mobile/geolocation";
 import { formatTimeSlot, formatDate, cn } from "@/lib/utils";
 import { getNextAction } from "@/lib/rbac";
 import { REWORK_STATUSES } from "@/lib/status";
@@ -116,6 +119,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
   const [notes, setNotes] = useState<string | null>(null);
   const [fixed, setFixed] = useState<Record<string, boolean>>({});
   const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
 
   // Live: the customer confirming or QC deciding shows up within seconds.
   useEffect(() => {
@@ -168,38 +172,12 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
   };
 
   type Fix = { lat: number; lng: number; accuracy: number };
-  const locate = (): Promise<{ fix: Fix } | { problem: string }> =>
-    new Promise((resolve) => {
-      if (typeof window !== "undefined" && !window.isSecureContext) {
-        setGps("unavailable");
-        resolve({ problem: "Location only works on the secure (https) address of the app. Ask the office for the correct link." });
-        return;
-      }
-      if (typeof navigator === "undefined" || !navigator.geolocation) {
-        setGps("unavailable");
-        resolve({ problem: "This browser can't share your location. Open the app in Chrome or Safari with location turned on." });
-        return;
-      }
-      setGps("searching");
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setGps("ready");
-          resolve({ fix: { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy } });
-        },
-        (err) => {
-          setGps("unavailable");
-          resolve({
-            problem:
-              err.code === 1
-                ? "Location permission is off. Allow location for this site in your browser settings (tap the lock icon by the address), then try again."
-                : err.code === 3
-                ? "Getting your location took too long. Step outside or near a window and try again."
-                : "Your phone couldn't find its location. Turn on GPS / Location and try again.",
-          });
-        },
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
-      );
-    });
+  const locate = async (): Promise<{ fix: Fix } | { problem: string }> => {
+    setGps("searching");
+    const r = await currentFix();
+    setGps("fix" in r ? "ready" : "unavailable");
+    return r;
+  };
 
   /**
    * Job start — exactly what the selected mode requires (Settings → Job start
@@ -314,25 +292,39 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
     if (!r.success) setError(r.message);
   };
 
-  const camera = (area: string, type: JobPhoto["photoType"]) => {
-    setTarget({ area, type });
-    cameraRef.current?.click();
+  const uploadPhoto = async (rawDataUrl: string, t: { area: string; type: JobPhoto["photoType"] }) => {
+    if (!job) return;
+    setUploading(true);
+    setError(null);
+    const prepared = await compressImageForUpload(rawDataUrl);
+    const r = await addJobPhoto({ jobId: job.id, area: t.area, photoType: t.type, imageDataUrl: prepared.dataUrl });
+    setUploading(false);
+    if (!r.success) setError(r.message);
+    else flash(`Photo saved ✓ ${t.area}`);
   };
+
+  /** Camera or gallery: the Android app uses the native pickers, a browser uses the file inputs. */
+  const pick = async (area: string, type: JobPhoto["photoType"], source: "camera" | "gallery") => {
+    const t = { area, type };
+    setTarget(t);
+    try {
+      const native = await nativePhoto(source);
+      if (native === "unsupported") (source === "camera" ? cameraRef : galleryRef).current?.click();
+      else if (native) await uploadPhoto(native, t);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The camera couldn't be opened.");
+    }
+  };
+  const camera = (area: string, type: JobPhoto["photoType"]) => void pick(area, type, "camera");
+  const gallery = (area: string, type: JobPhoto["photoType"]) => void pick(area, type, "gallery");
 
   const onPhotoPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !job || !target) return;
-    setUploading(true);
-    setError(null);
+    const t = target;
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const prepared = await compressImageForUpload(String(ev.target?.result ?? ""));
-      const r = await addJobPhoto({ jobId: job.id, area: target.area, photoType: target.type, imageDataUrl: prepared.dataUrl });
-      setUploading(false);
-      if (!r.success) setError(r.message);
-      else flash(`Photo saved ✓ ${target.area}`);
-    };
+    reader.onload = (ev) => void uploadPhoto(String(ev.target?.result ?? ""), t);
     reader.readAsDataURL(file);
   };
 
@@ -438,6 +430,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
   return (
     <MobileLayout title={job.jobNumber ?? "Job"} subtitle="My Jobs" backHref="/my-jobs" gps={step === 0 ? gps : step === 1 ? "verified" : undefined} action={cta}>
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhotoPicked} aria-hidden tabIndex={-1} />
+      <input ref={galleryRef} type="file" accept="image/*" className="hidden" onChange={onPhotoPicked} aria-hidden tabIndex={-1} />
 
       {toast && <Notice tone="success">{toast}</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
@@ -594,6 +587,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
                   photos={jobPhotos.filter((p) => p.area === area && p.photoType === type)}
                   busy={uploading && target?.area === area && target?.type === type}
                   onTake={() => camera(area, type)}
+                  onGallery={() => gallery(area, type)}
                   onRemove={canEditPhotos ? (p) => setRemovePhoto(p) : undefined}
                   mine={(p) => p.uploadedBy === currentUser.name}
                 />
@@ -637,7 +631,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
                     ))}
                   </div>
                 )}
-                <PhotoRow label="Fixed photo" photos={jobPhotos.filter((p) => p.photoType === "rework" && p.area === area)} busy={uploading && target?.area === area && target?.type === "rework"} onTake={() => camera(area, "rework")} onRemove={(p) => setRemovePhoto(p)} mine={(p) => p.uploadedBy === currentUser.name} />
+                <PhotoRow label="Fixed photo" photos={jobPhotos.filter((p) => p.photoType === "rework" && p.area === area)} busy={uploading && target?.area === area && target?.type === "rework"} onTake={() => camera(area, "rework")} onGallery={() => gallery(area, "rework")} onRemove={(p) => setRemovePhoto(p)} mine={(p) => p.uploadedBy === currentUser.name} />
                 <button onClick={() => setFixed((f) => ({ ...f, [t.id]: !f[t.id] }))} role="checkbox" aria-checked={done} className={cn("w-full h-12 rounded-xl text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors", done ? "bg-emerald-600 text-white" : "bg-zinc-100 text-zinc-800")}>
                   <Check className="h-5 w-5" aria-hidden /> {done ? "Fixed ✓" : "Mark as fixed"}
                 </button>
@@ -712,7 +706,7 @@ function Row({ icon, label, value, strong }: { icon: React.ReactNode; label: str
 }
 
 /** One "BEFORE / AFTER" row: big camera button + thumbnails. */
-function PhotoRow({ label, photos, busy, onTake, onRemove, mine }: { label: string; photos: JobPhoto[]; busy: boolean; onTake: () => void; onRemove?: (p: JobPhoto) => void; mine: (p: JobPhoto) => boolean }) {
+function PhotoRow({ label, photos, busy, onTake, onGallery, onRemove, mine }: { label: string; photos: JobPhoto[]; busy: boolean; onTake: () => void; onGallery?: () => void; onRemove?: (p: JobPhoto) => void; mine: (p: JobPhoto) => boolean }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
@@ -723,6 +717,11 @@ function PhotoRow({ label, photos, busy, onTake, onRemove, mine }: { label: stri
         <button onClick={onTake} disabled={busy} className="h-20 min-w-[5.5rem] px-3 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 text-zinc-700 text-xs font-semibold flex flex-col items-center justify-center gap-1 shrink-0 active:scale-[0.97] transition-transform" aria-label={`Take ${label.toLowerCase()} photo`}>
           {busy ? <Loader2 className="h-6 w-6 animate-spin" aria-hidden /> : <><Plus className="h-6 w-6" aria-hidden />{photos.length ? "Add" : "Take photo"}</>}
         </button>
+        {onGallery && (
+          <button onClick={onGallery} disabled={busy} className="h-20 min-w-[4.5rem] px-3 rounded-xl border border-zinc-300 bg-white text-zinc-700 text-xs font-semibold flex flex-col items-center justify-center gap-1 shrink-0 active:scale-[0.97] transition-transform" aria-label={`Choose ${label.toLowerCase()} photo from gallery`}>
+            <ImageIcon className="h-5 w-5" aria-hidden />Gallery
+          </button>
+        )}
         {photos.map((p) => (
           <div key={p.id} className="relative shrink-0">
             <a href={p.photoUrl} target="_blank" rel="noreferrer">

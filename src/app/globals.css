@@ -159,3 +159,12 @@ html.font-scale-xl {
   body:has(.qr-print-area) [role="dialog"] { position: static !important; transform: none !important; box-shadow: none !important; max-height: none !important; }
   body:has(.qr-print-area) [role="dialog"] > *:not(.qr-print-area):not(:has(.qr-print-area)) { display: none !important; }
 }
+
+/* Inside the Android app (class added by NativeBridge): no pull-to-refresh bounce, no grey tap flash. */
+html.native-app {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+html.native-app body {
+  overscroll-behavior: none;
+}

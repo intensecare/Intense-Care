@@ -1,5 +1,6 @@
 "use client";
 
+import { nativeScanQr } from "@/lib/mobile/camera";
 import React, { useEffect, useRef, useState } from "react";
 import { Camera, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -36,6 +37,17 @@ export function QrScanner({ open, onClose, onToken, title = "Scan QR to Verify L
     setStarting(true);
 
     (async () => {
+      // Android app: Google's code scanner (works without a camera permission prompt). null = cancelled.
+      const native = await nativeScanQr();
+      if (stopped) return;
+      if (native !== "unsupported") {
+        stopped = true;
+        if (native === null) return onClose();
+        const token = tokenFromQr(native);
+        if (token) return onToken(token);
+        setStarting(false);
+        return setError("That QR isn't an Intense Care service QR. Scan the customer's QR for this job.");
+      }
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
       } catch {

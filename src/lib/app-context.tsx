@@ -110,7 +110,7 @@ interface AppContextType {
     photoType: "before" | "after" | "qc" | "rework";
     imageDataUrl: string;
     caption?: string;
-  }) => Promise<{ success: boolean; message: string; photo?: JobPhoto }>;
+  }) => Promise<{ success: boolean; message: string; photo?: JobPhoto; queued?: boolean }>;
 
   deleteJobPhoto: (photoId: string) => Promise<{ success: boolean; message: string }>;
 
@@ -452,6 +452,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, [authUser]);
 
+  // Photos that were waiting for the network and have now been confirmed by the server.
+  useEffect(() => {
+    const onUploaded = (e: Event) => {
+      const saved = (e as CustomEvent).detail as JobPhoto | undefined;
+      if (saved?.id) setPhotos((prev) => [saved, ...prev.filter((p) => p.id !== saved.id)]);
+    };
+    window.addEventListener("ic:photo-uploaded", onUploaded);
+    return () => window.removeEventListener("ic:photo-uploaded", onUploaded);
+  }, []);
+
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
@@ -678,21 +688,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     photoType: "before" | "after" | "qc" | "rework";
     imageDataUrl: string;
     caption?: string;
-  }): Promise<{ success: boolean; message: string; photo?: JobPhoto }> => {
-    const r = await api<JobPhoto>("/api/photos", {
-      method: "POST",
-      body: JSON.stringify({
-        jobId: photo.jobId,
-        area: photo.area,
-        photoType: photo.photoType,
-        image: photo.imageDataUrl,
-        caption: photo.caption,
-      }),
-    });
-    if (!r.ok || !r.data) return { success: false, message: r.error || "Photo upload failed." };
-    setPhotos((prev) => [r.data as JobPhoto, ...prev]);
-    await logAudit("job", photo.jobId, "PHOTO_UPLOADED", `${photo.photoType.toUpperCase()} photo for ${photo.area}`);
-    return { success: true, message: "Photo uploaded.", photo: r.data };
+  }): Promise<{ success: boolean; message: string; photo?: JobPhoto; queued?: boolean }> => {
+    const { newUploadId, sendPhoto, enqueuePhoto, dataUrlToBlob } = await import("./mobile/upload-queue");
+    const id = newUploadId();
+    const meta = { id, jobId: photo.jobId, area: photo.area, photoType: photo.photoType, caption: photo.caption };
+    const r = await sendPhoto(meta, photo.imageDataUrl);
+    if (r.ok) {
+      const saved = r.photo as JobPhoto;
+      setPhotos((prev) => [saved, ...prev.filter((p) => p.id !== saved.id)]);
+      await logAudit("job", photo.jobId, "PHOTO_UPLOADED", `${photo.photoType.toUpperCase()} photo for ${photo.area}`);
+      return { success: true, message: "Photo uploaded.", photo: saved };
+    }
+    if (r.retry) {
+      // No network / server busy: keep the photo on this phone (original quality) and send it later.
+      // It is NOT reported as uploaded — the server hasn't confirmed it.
+      try {
+        await enqueuePhoto({ ...meta, image: await dataUrlToBlob(photo.imageDataUrl) });
+        return { success: false, queued: true, message: "No connection. The photo is saved on this phone and will upload automatically. It is not on the server yet." };
+      } catch {
+        return { success: false, message: r.error || "Photo upload failed." };
+      }
+    }
+    return { success: false, message: r.error || "Photo upload failed." };
   };
 
   const deleteJobPhoto = async (photoId: string): Promise<{ success: boolean; message: string }> => {
