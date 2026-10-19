@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Intense Care</string>
+    <string name="title_activity_main">Intense Care</string>
+    <string name="package_name">com.intensecare.erp</string>
+    <string name="custom_url_scheme">com.intensecare.erp</string>
+</resources>

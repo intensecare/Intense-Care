@@ -1,4 +1,5 @@
 import { isStartMode } from "@/lib/start-verification";
+import { CONTACT_LEAD_POLICIES } from "@/lib/contacts";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, requireUser } from "@/lib/server/authz";
@@ -38,7 +39,7 @@ export async function GET() {
 export async function PATCH(request: Request) {
   try {
     // Critical configuration is Super Admin only (approval authority §17).
-    await requirePermission("settings.manage");
+    const auth = await requirePermission("settings.manage");
     const body = await readJson(request);
     if (!body) {
       return NextResponse.json({ success: false, error: "Invalid settings payload." }, { status: 400 });
@@ -153,6 +154,31 @@ export async function PATCH(request: Request) {
         next.allowPerJobOverride = v.allowPerJobOverride;
       }
       patch.jobStartVerification = next;
+    }
+
+    if (body.contactSync && typeof body.contactSync === "object") {
+      const v = body.contactSync as Record<string, unknown>;
+      const next = { ...current.contactSync };
+      const bad = (msg: string) => NextResponse.json({ success: false, error: msg }, { status: 400 });
+      if (v.leadPolicy !== undefined) {
+        if (!(CONTACT_LEAD_POLICIES as readonly string[]).includes(v.leadPolicy as string)) return bad("Choose how synced contacts are handled.");
+        if (v.leadPolicy === "AUTO_NEW_CONTACTS" && next.leadPolicy !== "AUTO_NEW_CONTACTS") {
+          // Turning on automatic leads is a business decision: it needs an explicit confirmation, which is recorded.
+          if (v.confirmAutoLeads !== true) return bad("Confirm that new phone contacts should automatically become leads.");
+          next.autoLeadApprovedBy = auth.user.name;
+          next.autoLeadApprovedAt = new Date().toISOString();
+        }
+        if (v.leadPolicy === "DIRECTORY_ONLY") {
+          next.autoLeadApprovedBy = null;
+          next.autoLeadApprovedAt = null;
+        }
+        next.leadPolicy = v.leadPolicy as typeof next.leadPolicy;
+      }
+      if (v.removedRetentionDays !== undefined) {
+        if (typeof v.removedRetentionDays !== "number" || !Number.isInteger(v.removedRetentionDays) || v.removedRetentionDays < 7 || v.removedRetentionDays > 3650) return bad("Keep removed contacts for 7 to 3650 days.");
+        next.removedRetentionDays = v.removedRetentionDays;
+      }
+      patch.contactSync = next;
     }
 
     const updated = await updateSystemSettings(patch);

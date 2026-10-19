@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, authorizeJob, visibleJobIds } from "@/lib/server/authz";
 import { recordAudit } from "@/lib/server/audit";
-import { uploadJobPhoto, validateImagePayload } from "@/lib/server/cloudinary";
+import { uploadJobPhoto, validateImagePayload, deleteJobPhoto } from "@/lib/server/cloudinary";
+import { Prisma } from "@prisma/client";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { recordActivity } from "@/lib/server/activity";
@@ -16,6 +17,8 @@ const BodySchema = z.object({
   photoType: z.enum(["before", "after", "qc", "rework"]),
   image: z.string().min(64), // base64 data URL; strict shape validated below
   caption: z.string().max(300).optional(),
+  /** Id the app generated for this upload attempt: sending the same photo again (flaky network, app restart) returns the saved one. */
+  clientUploadId: z.string().min(8).max(80).regex(/^[A-Za-z0-9_-]+$/).optional(),
 });
 
 /**
@@ -65,7 +68,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { jobId, area, photoType, image, caption } = parsed.data;
+    const { jobId, area, photoType, image, caption, clientUploadId } = parsed.data;
 
     // Pre-validate payload shape before authorization to fail fast on junk.
     const valid = validateImagePayload(image);
@@ -86,6 +89,23 @@ export async function POST(request: Request) {
       );
     }
 
+    // A retry of an upload that already succeeded: answer with the saved photo, store nothing twice.
+    const serializePhoto = (p: { id: string; jobId: string; area: string; photoType: string; photoUrl: string; thumbnailUrl: string | null; caption: string | null; uploadedByName: string; uploadedAt: Date }) => ({
+      id: p.id,
+      jobId: p.jobId,
+      area: p.area,
+      photoType: p.photoType as "before" | "after" | "qc" | "rework",
+      photoUrl: p.photoUrl,
+      thumbnailUrl: p.thumbnailUrl,
+      caption: p.caption,
+      uploadedBy: p.uploadedByName,
+      uploadedAt: p.uploadedAt.toISOString(),
+    });
+    if (clientUploadId) {
+      const again = await prisma.jobPhoto.findUnique({ where: { jobId_clientUploadId: { jobId, clientUploadId } } });
+      if (again) return NextResponse.json({ success: true, replayed: true, data: serializePhoto(again) });
+    }
+
     const upload = await uploadJobPhoto(image, jobId, photoType);
     if (!upload.ok) {
       const status = upload.error.includes("not configured") ? 503 : 502;
@@ -95,8 +115,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const photo = await prisma.jobPhoto.create({
+    let photo;
+    try {
+      photo = await prisma.jobPhoto.create({
       data: {
+        clientUploadId: clientUploadId ?? null,
         jobId,
         area: area.trim(),
         photoType,
@@ -111,7 +134,16 @@ export async function POST(request: Request) {
         uploadedByUserId: user.id,
         uploadedByName: user.name,
       },
-    });
+      });
+    } catch (e) {
+      // The same upload id arrived twice at once: keep the first photo, drop this copy from cloud storage.
+      if (clientUploadId && e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        void deleteJobPhoto(upload.data.publicId);
+        const first = await prisma.jobPhoto.findUnique({ where: { jobId_clientUploadId: { jobId, clientUploadId } } });
+        if (first) return NextResponse.json({ success: true, replayed: true, data: serializePhoto(first) });
+      }
+      throw e;
+    }
 
     logger.info("photo.uploaded", {
       photoId: photo.id,
@@ -130,20 +162,7 @@ export async function POST(request: Request) {
       actor: { id: user.id, name: user.name, role: user.role },
     });
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        id: photo.id,
-        jobId: photo.jobId,
-        area: photo.area,
-        photoType: photo.photoType as "before" | "after" | "qc" | "rework",
-        photoUrl: photo.photoUrl,
-        thumbnailUrl: photo.thumbnailUrl,
-        caption: photo.caption,
-        uploadedBy: photo.uploadedByName,
-        uploadedAt: photo.uploadedAt.toISOString(),
-      },
-    });
+    return NextResponse.json({ success: true, data: serializePhoto(photo) });
   } catch (err) {
     return errorResponse(err, "photos.post.route_error");
   }

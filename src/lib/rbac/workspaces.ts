@@ -64,6 +64,8 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
       { label: "Expenses", href: "/expenses", permission: "expenses.manage", secondary: true },
       { label: "Referrals", href: "/referrals", permission: "referrals.approve", secondary: true },
       { label: "HR", href: "/hr", permission: "hr.manage", secondary: true },
+      { label: "Contacts", href: "/contacts", permission: "contacts.view", secondary: true },
+      { label: "Media & Storage", href: "/media", permission: "media.view", secondary: true },
       { label: "Reviews & Feedback", href: "/reviews", permission: "feedback.view", secondary: true },
       { label: "Settings", href: "/settings", permission: "settings.manage", secondary: true },
     ],
@@ -125,6 +127,7 @@ const ROUTE_PERMISSIONS: { prefix: string; permission: Permission; layouts: Work
   { prefix: "/gst/invoices/", permission: "gst.view", layouts: ["desk"] },
   { prefix: "/quality-queue/", permission: "qc.inspect", layouts: ["desk", "mobile"] },
   { prefix: "/my-jobs/", permission: "jobs.arrive", layouts: ["mobile"] },
+  { prefix: "/device-storage", permission: "mobile.device", layouts: ["desk", "mobile"] },
 ];
 
 /** Paths that need no sign-in (login and the customer's secure links). */

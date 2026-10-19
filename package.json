@@ -11,9 +11,21 @@
     "lint": "next lint",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:demo": "tsx prisma/seed-demo.ts",
-    "test": "tsx --test tests/rbac.test.ts tests/visibility.test.ts tests/markdown.test.tsx tests/location-leads.test.ts && tsx tests/ops-visibility.test.ts"
+    "test": "tsx --test tests/rbac.test.ts tests/visibility.test.ts tests/markdown.test.tsx tests/location-leads.test.ts tests/mobile.test.ts && tsx tests/ops-visibility.test.ts"
   },
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.1",
+    "@capacitor-mlkit/barcode-scanning": "^8.2.1",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/camera": "^8.2.6",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/geolocation": "^8.2.4",
+    "@capacitor/keyboard": "^8.0.6",
+    "@capacitor/network": "^8.0.1",
+    "@capacitor/push-notifications": "^8.1.3",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.4",
     "@prisma/adapter-pg": "^7.10.0",
     "@radix-ui/react-avatar": "^1.2.6",
     "@radix-ui/react-dialog": "^1.1.23",
@@ -37,6 +49,8 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
     "@prisma/client": "^7.10.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/leaflet": "^1.9.12",

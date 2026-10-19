@@ -18,6 +18,7 @@ import { recordActivity } from "@/lib/server/activity";
 import { recordAudit } from "@/lib/server/audit";
 import { ACTIVE_ASSIGNMENT, conflictsForMany, crewClash, logAssignment } from "@/lib/server/assignments";
 import { notifyStaffAssignment } from "@/lib/server/notify";
+import { bucket, messages, pushToUsers } from "@/lib/server/push";
 import { userNames } from "@/lib/server/biz";
 import { syncJobEvent, cancelJobEvent } from "@/lib/server/google-calendar";
 import { ASSIGNABLE_ROLES, can, scopeOf, type JobStatus } from "@/lib/rbac";
@@ -158,6 +159,15 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       if (managerId !== existing.assignedManagerId) {
         const names = await userNames([existing.assignedManagerId, managerId]);
         await logAssignment({ jobId: id, action: "MANAGER_CHANGED", actor: { id: user.id, name: user.name }, detail: `${existing.assignedManagerId ? names.get(existing.assignedManagerId) ?? "—" : "none"} → ${managerId ? names.get(managerId) ?? "—" : "none"}` }).catch(() => {});
+      }
+      // Android push: people newly on the job hear about it, people taken off it are told it moved.
+      {
+        const before = new Set([existing.assignedManagerId, ...existing.assignedStaffIds].filter((x): x is string => !!x));
+        const now = new Set(crew);
+        const added = crew.filter((x) => !before.has(x));
+        const removed = Array.from(before).filter((x) => !now.has(x));
+        if (added.length) void pushToUsers(added, messages.jobAssigned(id), (u) => `job-assigned:${id}:${u}:${bucket()}`);
+        if (removed.length) void pushToUsers(removed, messages.jobReassigned(), (u) => `job-reassigned:${id}:${u}:${bucket()}`);
       }
       logger.info("jobs.assignment_updated", { jobId: id, count: crew.length, by: user.id });
       await recordActivity({

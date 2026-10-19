@@ -1,3 +1,4 @@
+import { DEFAULT_CONTACT_SYNC } from "./contacts";
 import { DEFAULT_START_VERIFICATION } from "./start-verification";
 import type { SystemSettings } from "./types";
 
@@ -39,6 +40,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
     paymentStatus: true, serviceNotes: true, feedback: true,
   },
   jobStartVerification: { ...DEFAULT_START_VERIFICATION },
+  contactSync: { ...DEFAULT_CONTACT_SYNC },
   referralRules: { enabled: true, bonusType: "FIXED", bonusValue: 500, minJobValue: 2000, requirePaid: true, eligibilityDays: 90, maxBonus: 0 },
   notifications: { customerArrived: true, customerCompleted: true, fieldManagerAssigned: true, reworkAssigned: true, qcReady: true },
 };
