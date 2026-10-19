@@ -1,4 +1,9 @@
-package com.intensecare.erp.sync;
+package com.intensecare.erp.sync.android;
+
+import com.intensecare.erp.sync.Codes;
+import com.intensecare.erp.sync.SyncEngine;
+import com.intensecare.erp.sync.SyncException;
+import com.intensecare.erp.sync.ContactRecord;
 
 import android.Manifest;
 import android.content.ContentResolver;

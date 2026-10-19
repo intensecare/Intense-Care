@@ -12,13 +12,13 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
-import com.intensecare.erp.sync.AndroidContactSource;
+import com.intensecare.erp.sync.android.AndroidContactSource;
 import com.intensecare.erp.sync.HttpUploader;
 import com.intensecare.erp.sync.RunSummary;
 import com.intensecare.erp.sync.StateStore;
-import com.intensecare.erp.sync.SyncRunner;
-import com.intensecare.erp.sync.SyncScheduler;
-import com.intensecare.erp.sync.SyncSettings;
+import com.intensecare.erp.sync.android.SyncRunner;
+import com.intensecare.erp.sync.android.SyncScheduler;
+import com.intensecare.erp.sync.android.SyncSettings;
 
 /**
  * Bridge between the web app (src/lib/mobile/contact-sync.ts) and the native sync. All the work happens in

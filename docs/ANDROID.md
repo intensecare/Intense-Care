@@ -68,8 +68,8 @@ in a WebView (`server.url` in `capacitor.config.ts`), plus a small amount of nat
 |---|---|---|
 | Server: devices, tokens, contact sync, dedupe, lead policy, retention, disconnect, push (fake FCM), media + deletion rules (fake Cloudinary) | `scripts/mobile-verify.mjs` against the **real built server and a real PostgreSQL** | 118 checks pass (117 without the optional `SERVER_LOG` PII check) |
 | Android sync engine (Java): phone-number normalisation vs the *same vectors as the server*, change detection, batching, idempotency keys, resume after a dropped connection, mass-removal guard, throttling, pause/auth/permission handling, encrypted state, HTTPS-only, redirects not followed | JUnit on a plain JVM (`android/app/src/test/…`, 29 tests) | pass |
-| Java client ⇄ real server wire compatibility | `ServerWireIT` (the Java engine + `HttpUploader` syncing 231 contacts into the running server; repeat = no changes; rename = update; removal) | pass |
-| Android-specific Java (`AndroidContactSource`, `KeystoreKeyProvider`, `SyncSettings`, plugins, worker, scheduler, `MainActivity`) | **Compiles** against the real Android 16 (API 36) framework jar, with hand-written stubs for Capacitor and WorkManager | compiles; **not executed** |
+| Java client ⇄ real server wire compatibility | `ServerWireIT` via `scripts/mobile-wire-check.sh` (the Java engine + `HttpUploader` syncing 231 contacts into the running server; repeat = no changes; rename = update; removal) | pass |
+| Android-specific Java (`sync/android/*`: `AndroidContactSource`, `KeystoreKeyProvider`, `SyncSettings`, `SyncRunner`, `SyncScheduler`, `ContactSyncWorker`; plus the two plugins and `MainActivity`) | **Compiles** against the real Android 16 (API 36) framework jar, with hand-written stubs for Capacitor and WorkManager | compiles; **not executed** |
 | Web screens (Contacts / Contact sync, Media & Storage, Device storage) inside a *mock* Android bridge, real server | `scripts/mobile-ui-verify.mjs` (Playwright/Chromium, 390 px phone viewport) | 60 checks pass |
 | Photo upload queue (offline → retry → confirmed, FAILED not retried forever, no double send) | `tests/upload-queue.test.ts` (fake IndexedDB + scripted XHR) | 8 tests pass |
 | Existing ERP suites after the changes | `npm test`, `e2e-verify`, `erp-verify`, `biz-verify`, `start-verify`, `location-verify`, `lead-verify`, `ai-verify`, `tsc`, `lint`, `next build` | all pass |
@@ -363,7 +363,7 @@ lead source `PHONE_CONTACT` allowed; `Customer_phone10_idx`). Apply with the nor
 | `GET|POST /api/cron/maintenance` | `CRON_SECRET` | reminders, follow-ups, retention |
 
 **Where things are:** server `src/lib/server/{devices,contact-sync,contacts-directory,media,media-provider,push,maintenance}.ts`, shared rules `src/lib/{phone,contacts,contact-clean,media,media-policy,push-messages}.ts`;
-web `src/app/{contacts,media,device-storage}`, `src/lib/mobile/*`, `src/components/mobile/*`; native `android/app/src/main/java/com/intensecare/erp/` (`sync/` = engine, `ContactSyncPlugin`, `DeviceStoragePlugin`);
+web `src/app/{contacts,media,device-storage}`, `src/lib/mobile/*`, `src/components/mobile/*`; native `android/app/src/main/java/com/intensecare/erp/` (`sync/` = pure-Java engine, `sync/android/` = Android glue: reader, Keystore, WorkManager, `ContactSyncPlugin`, `DeviceStoragePlugin`);
 tests `tests/mobile.test.ts`, `tests/upload-queue.test.ts`, `android/app/src/test/…`, `scripts/mobile-verify.mjs`, `scripts/mobile-ui-verify.mjs`, `scripts/fake-providers.mjs`.
 
 **Re-running the checks** (fresh database, server started with the fake providers):

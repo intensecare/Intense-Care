@@ -1,4 +1,10 @@
-package com.intensecare.erp.sync;
+package com.intensecare.erp.sync.android;
+
+import com.intensecare.erp.sync.Codes;
+import com.intensecare.erp.sync.HttpUploader;
+import com.intensecare.erp.sync.RunSummary;
+import com.intensecare.erp.sync.SyncEngine;
+import com.intensecare.erp.sync.SyncException;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;

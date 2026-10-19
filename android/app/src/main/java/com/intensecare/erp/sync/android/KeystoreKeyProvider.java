@@ -1,4 +1,6 @@
-package com.intensecare.erp.sync;
+package com.intensecare.erp.sync.android;
+
+import com.intensecare.erp.sync.AesGcmBox;
 
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;

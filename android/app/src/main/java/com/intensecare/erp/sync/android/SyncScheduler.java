@@ -1,4 +1,6 @@
-package com.intensecare.erp.sync;
+package com.intensecare.erp.sync.android;
+
+import com.intensecare.erp.sync.StateStore;
 
 import android.content.Context;
 import androidx.work.BackoffPolicy;

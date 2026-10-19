@@ -1,4 +1,8 @@
-package com.intensecare.erp.sync;
+package com.intensecare.erp.sync.android;
+
+import com.intensecare.erp.sync.AesGcmBox;
+import com.intensecare.erp.sync.FileStateStore;
+import com.intensecare.erp.sync.SecretBox;
 
 import android.content.Context;
 import android.content.SharedPreferences;
