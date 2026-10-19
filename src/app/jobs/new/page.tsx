@@ -9,6 +9,7 @@ import { CustomerFormDialog, type CustomerFormPayload } from "@/components/commo
 import { PropertyFormDialog, type PropertyFormPayload } from "@/components/common/PropertyFormDialog";
 import { LocationPicker, type LocationValue } from "@/components/common/LocationPicker";
 import { VisibilityEditor } from "@/components/common/VisibilityEditor";
+import { VerificationModeCards } from "@/components/job/VerificationModeCards";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
@@ -18,6 +19,7 @@ import { onDutyWorkerIds } from "@/lib/staff-availability";
 import { cn, formatCurrency } from "@/lib/utils";
 import type { CustomerVisibility } from "@/lib/types";
 import { formatAddress, hasCoords } from "@/lib/location";
+import { START_MODE_INFO, type StartMode } from "@/lib/start-verification";
 
 const today = () => new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);
 
@@ -57,12 +59,15 @@ function NewJobPage() {
   const [customerNotes, setCustomerNotes] = useState("");
   const [visibility, setVisibility] = useState<CustomerVisibility>(systemSettings.customerVisibility);
   const [customVis, setCustomVis] = useState(false);
+  const [customStartMode, setCustomStartMode] = useState(false);
+  const [startMode, setStartMode] = useState<StartMode>(systemSettings.jobStartVerification.defaultMode);
   const [customerDialog, setCustomerDialog] = useState(false);
   const [propertyDialog, setPropertyDialog] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => setVisibility(systemSettings.customerVisibility), [systemSettings.customerVisibility]);
+  useEffect(() => setStartMode(systemSettings.jobStartVerification.defaultMode), [systemSettings.jobStartVerification.defaultMode]);
 
   const customerProps = useMemo(() => properties.filter((p) => p.customerId === customerId), [properties, customerId]);
   const property = customerProps.find((p) => p.id === propertyId);
@@ -124,6 +129,7 @@ function NewJobPage() {
           customerVisibility: customVis ? visibility : undefined,
           invoiceType,
           interState: invoiceType === "GST" ? interState : false,
+          startVerificationMode: customStartMode ? startMode : undefined,
         }),
       });
       const json = await res.json().catch(() => null);
@@ -262,7 +268,21 @@ function NewJobPage() {
           </Field>
         </Step>
 
-        <Step n={8} title="Customer visibility" hint="What the customer sees when they scan the QR.">
+        <Step n={8} title="Start verification" hint="What the Field Manager must do on site before this job starts.">
+          {systemSettings.jobStartVerification.allowPerJobOverride ? (
+            <>
+              <label className="flex items-center gap-3 text-sm text-zinc-800 min-h-11">
+                <input type="checkbox" checked={customStartMode} onChange={(e) => setCustomStartMode(e.target.checked)} className="h-5 w-5 accent-rose-500" />
+                Override for this job <span className="text-zinc-500">(otherwise the company default: {START_MODE_INFO[systemSettings.jobStartVerification.defaultMode].label})</span>
+              </label>
+              {customStartMode && <VerificationModeCards name="nj-start-mode" value={startMode} onChange={setStartMode} />}
+            </>
+          ) : (
+            <p className="text-sm text-zinc-600">Company default: <strong className="text-zinc-900">{START_MODE_INFO[systemSettings.jobStartVerification.defaultMode].label}</strong> <span className="text-zinc-500">— per-job overrides are off in Settings.</span></p>
+          )}
+        </Step>
+
+        <Step n={9} title="Customer visibility" hint="What the customer sees when they scan the QR.">
           <label className="flex items-center gap-3 text-sm text-zinc-800 min-h-11">
             <input type="checkbox" checked={customVis} onChange={(e) => { setCustomVis(e.target.checked); if (!e.target.checked) setVisibility(systemSettings.customerVisibility); }} className="h-5 w-5 accent-rose-500" />
             Customise for this job <span className="text-zinc-500">(otherwise the company default from Settings)</span>

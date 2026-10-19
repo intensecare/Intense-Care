@@ -10,6 +10,7 @@ import type { QuoteLine, SystemSettings, CustomerVisibility } from "@/lib/types"
 import { CUSTOMER_VISIBILITY_KEYS } from "@/lib/types";
 import { formatAddress, normalizeCoords } from "@/lib/location";
 import { syncOpenJobsToProperty } from "./locations";
+import type { StartMode } from "@/lib/start-verification";
 
 /**
  * Creating a job — ONE implementation used by "New job" and by converting a
@@ -72,6 +73,8 @@ export interface NewJob {
   /** Also save the job's pin on its property when the property has none yet. */
   saveLocationToProperty?: boolean;
   customerVisibility?: Partial<CustomerVisibility> | null;
+  /** Per-job override of the company's job-start verification mode (null = follow the company default). */
+  startVerificationMode?: StartMode | null;
   status?: string;
   quoteId?: string | null;
   invoice: {
@@ -145,6 +148,7 @@ export async function createJobWithInvoice(input: NewJob, settings: SystemSettin
         locationSource,
         customerVisibility: (input.customerVisibility ?? undefined) as Prisma.InputJsonValue | undefined,
         quoteId: input.quoteId ?? null,
+        startVerificationMode: input.startVerificationMode ?? null,
       },
     });
     const rubric = [primary, ...extra].flatMap((s) => s.checklistTemplate.map((c) => ({ jobId: job.id, area: c.area, task: c.task, critical: c.critical })));

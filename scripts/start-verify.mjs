@@ -1,4 +1,4 @@
-// Job start verification modes: DIRECT, GPS, GPS_QR — enforced by the API.
+// Job start verification modes: DIRECT, GPS, QR, GPS_QR — enforced by the API.
 // Run AFTER scripts/e2e-verify.mjs (reuses its users) against the same server and DB:
 //   DATABASE_URL=… BASE_URL=http://localhost:3100 node scripts/start-verify.mjs
 import { execSync } from "node:child_process";
@@ -70,7 +70,7 @@ ok(statusOf(jd.id) === "ARRIVED", "…and the job is unchanged");
 
 /* ------------------------------------------------------------ GPS + QR */
 console.log("--- GPS_QR");
-ok((await admin(`/api/jobs/${jd.id}`, { method: "PATCH", body: { startVerificationMode: "QR" } })).status === 400 && (await admin(`/api/jobs/${jd.id}`, { method: "PATCH", body: { startVerificationMode: "QR_GPS" } })).status === 400, "the retired QR / QR_GPS modes can't be chosen");
+ok((await admin(`/api/jobs/${jd.id}`, { method: "PATCH", body: { startVerificationMode: "QR_GPS" } })).status === 400, "the retired QR_GPS spelling can't be chosen (QR itself can — tested below)");
 const jq = await mkJob("GPS_QR");
 const jqOther = await mkJob("GPS_QR");
 const jqFar = await mkJob("GPS_QR", prop2);
@@ -140,10 +140,50 @@ const jn = await mkJob("GPS", noPin);
 r = await start(fmc, jn.id, { ...NEAR });
 ok(r.status === 409 && r.json?.code === "NO_SAVED_LOCATION", "GPS: a job without a saved location can't be GPS-verified (clear message)");
 
+/* ------------------------------------------------------------ QR only */
+console.log("--- QR (QR-only, no GPS)");
+const jqo = await mkJob("QR");
+const jqoOther = await mkJob("QR");
+const jqoFar = await mkJob("QR", prop2);
+const tqo = await token(jqo.id), tqoOther = await token(jqoOther.id), tqoFar = await token(jqoFar.id);
+ok((await fmc(`/api/jobs/${jqo.id}`)).json?.data?.startVerificationMode === "QR", "QR: the job's mode is visible to its Field Manager");
+r = await start(fmc, jqo.id, {});
+ok(r.status === 409 && r.json?.code === "QR_MISSING" && r.json?.verification?.gps?.result === "NOT_REQUIRED", "QR: no QR scanned → refused; GPS is reported NOT_REQUIRED (never asked for)");
+r = await start(fmc, jqo.id, { ...FAR }); // GPS data sent anyway (e.g. a stale fix) must not matter
+ok(r.status === 409 && r.json?.code === "QR_MISSING" && r.json?.verification?.gps?.result === "NOT_REQUIRED", "QR: GPS coordinates present but far away don't block or get checked — only the QR matters");
+r = await start(fmc, jqo.id, { qrToken: "x".repeat(43) });
+ok(r.status === 409 && r.json?.code === "QR_INVALID", "QR: made-up QR → refused (QR_INVALID)");
+r = await start(fmc, jqo.id, { qrToken: tqoOther });
+ok(r.status === 409 && r.json?.code === "QR_OTHER_JOB", "QR: QR of another job at the same property → refused");
+r = await start(fmc, jqo.id, { qrToken: tqoFar });
+ok(r.status === 409 && r.json?.code === "QR_OTHER_PROPERTY", "QR: QR of another property → refused");
+r = await start(fmc, jqo.id, { bypassReason: "scanner broken" });
+ok(r.status === 403 && r.json?.code === "OVERRIDE_NOT_ALLOWED", "QR: a Field Manager cannot skip the check with a reason");
+ok([403, 404].includes((await start(fm2c, jqo.id, { qrToken: tqo })).status), "QR: another Field Manager cannot start this job even with its QR");
+ok(statusOf(jqo.id) === "ASSIGNED", "QR: failed attempts leave the job unstarted");
+r = await start(fmc, jqo.id, { qrToken: `https://example.test/customer/service/${tqo}` });
+ok(r.status === 200 && methodOf(jqo.id) === "QR" && statusOf(jqo.id) === "ARRIVED", "QR: a valid QR alone starts the job (QR) — no GPS required at all");
+const qrow = sql(`select lat is null, lng is null, accuracy is null, "distanceM" is null, "qrResult", "gpsResult" from "JobStartVerification" where "jobId"='${jqo.id}' and result='PASSED'`).split("|");
+ok(qrow.join("|") === "t|t|t|t|VALID|NOT_REQUIRED", "QR: the passed attempt logs no GPS fields at all, qrResult VALID, gpsResult NOT_REQUIRED");
+ok((await start(fmc, jqo.id, { qrToken: tqo })).status === 409, "QR: a second Start Job request is refused");
+// revoked and expired QR, same as GPS_QR
+await admin("/api/qr-links", { method: "POST", body: { action: "purge-job", jobId: jqoOther.id } });
+r = await start(fmc, jqoOther.id, { qrToken: tqoOther });
+ok(r.status === 409 && ["QR_REVOKED", "QR_INVALID"].includes(r.json?.code), `QR: a revoked QR is refused (${r.json?.code})`);
+sql(`update "QrToken" set "expiresAt" = now() - interval '1 day' where "jobId"='${jqoFar.id}'`);
+r = await start(fmc, jqoFar.id, { qrToken: tqoFar });
+ok(r.status === 409 && r.json?.code === "QR_EXPIRED", "QR: an expired QR is refused (QR_EXPIRED)");
+// Admin override still needs a reason, same as every other mode
+const jqoAdmin = await mkJob("QR");
+r = await start(admin, jqoAdmin.id, { bypassReason: "Customer confirmed by phone, scanner not working" });
+ok(r.status === 200 && methodOf(jqoAdmin.id) === "ADMIN_OVERRIDE", "QR: Admin override still works (ADMIN_OVERRIDE)");
+// default mode can be QR too
+ok((await admin("/api/settings", { method: "PATCH", body: { jobStartVerification: { defaultMode: "QR" } } })).status === 200, "QR can be set as the company default");
+await admin("/api/settings", { method: "PATCH", body: { jobStartVerification: { defaultMode: "GPS" } } });
+
 /* ------------------------------------------------------------ defaults + per-job policy */
 console.log("--- Policy");
 const jdef = await mkJob(null);
-ok((await admin("/api/settings", { method: "PATCH", body: { jobStartVerification: { defaultMode: "QR" } } })).status === 400, "the retired QR default is refused");
 ok((await admin("/api/settings", { method: "PATCH", body: { jobStartVerification: { defaultMode: "GPS_QR" } } })).status === 200, "Admin sets the company default to GPS_QR");
 r = await start(fmc, jdef.id, { ...NEAR });
 ok(r.status === 409 && r.json?.code === "QR_MISSING", "a job with no own mode follows the company default (GPS_QR)");

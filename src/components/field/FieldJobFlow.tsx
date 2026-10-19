@@ -223,6 +223,13 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
     if (busy) return; // no double submits
     setError(null);
     if (startMode === "DIRECT") return sendStart({});
+    if (needsQr && !needsGps) {
+      // QR-only: no GPS is requested at all — straight to the scanner.
+      setGpsCheck({ status: "idle" });
+      setQrCheck({ status: "waiting", message: "Scan the customer's QR for this job." });
+      setScanOpen(true);
+      return;
+    }
     setQrCheck({ status: needsQr ? "idle" : "idle" });
     setGpsCheck({ status: "checking", message: "Getting your GPS location…" });
     setBusy(true);
@@ -486,7 +493,7 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
           {(needsGps || needsQr) && (
             <ul className="space-y-2" aria-label="Verification progress">
               {needsGps && <CheckRow label="1. GPS location" state={gpsCheck} />}
-              {needsQr && <CheckRow label="2. Customer's QR" state={qrCheck} />}
+              {needsQr && <CheckRow label={needsGps ? "2. Customer's QR" : "1. Customer's QR"} state={qrCheck} />}
             </ul>
           )}
         </section>
@@ -658,8 +665,8 @@ export function FieldJobFlow({ jobId }: { jobId: string }) {
       <QrScanner
         open={scanOpen}
         onClose={() => { setScanOpen(false); pendingFix.current = null; setQrCheck({ status: "failed", message: "QR scan cancelled. Tap the button to verify again." }); }}
-        title="GPS captured ✓ Now scan the customer's QR"
-        description="Ask the customer to show their service QR (on their phone or the printed card), then point the camera at it."
+        title={needsGps ? "GPS captured ✓ Now scan the customer's QR" : "Scan the customer's QR"}
+        description={needsGps ? "Ask the customer to show their service QR (on their phone or the printed card), then point the camera at it." : "Ask the customer to show their service QR (on their phone or the printed card), then point the camera at it. No GPS is needed for this job."}
         onToken={(token) => {
           setScanOpen(false);
           setQrCheck({ status: "checking", message: "Checking the QR…" });

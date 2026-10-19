@@ -251,8 +251,8 @@ Retention defaults: finished-job evidence 365 days, financial documents 2190 day
   A photo the server rejects is marked **Failed** with the reason (not retried forever, not silently dropped). Server validation: type sniffing, size cap, role/job authorisation.
 - **QR:** the Android app uses Google's ML Kit code scanner (`@capacitor-mlkit/barcode-scanning`); if it's unavailable it falls back to the web camera scanner.
   The token is sent to the server, which decides whether it matches the job.
-- **GPS:** `@capacitor/geolocation` (asks Android's location permission only when a job start needs it). The three start modes
-  (**DIRECT / GPS / GPS + QR**) are unchanged and enforced by the server (`/api/jobs/[id]` arrival checks, `scripts/start-verify.mjs`).
+- **GPS:** `@capacitor/geolocation` (asks Android's location permission only when a job start needs it). The four start modes
+  (**No Verification / Location / QR / QR + Location** — `DIRECT` / `GPS` / `QR` / `GPS_QR`) are unchanged and enforced by the server (`/api/jobs/[id]` arrival checks, `scripts/start-verify.mjs`).
 
 ## 9. Push notifications
 
@@ -323,7 +323,7 @@ Actions: edit a name, add a number, delete a contact, merge two contacts on the 
 
 *Media/camera* — take photo (camera), choose from gallery, large 12–50 MP photos, airplane mode then reconnect, kill app mid-upload, upload failure (server refuses), delete unreferenced / protected / locked media, quota warning, clear device cache while photos are pending.
 
-*App* — login/logout, role redirects, back button (root vs nested), keyboard over forms, rotation, status/navigation bar overlap (edge-to-edge), offline page, deep link from a push, notification permission flows (Android 13+), GPS on/off/denied, QR scan (all three start modes), WebView after app update.
+*App* — login/logout, role redirects, back button (root vs nested), keyboard over forms, rotation, status/navigation bar overlap (edge-to-edge), offline page, deep link from a push, notification permission flows (Android 13+), GPS on/off/denied, QR scan (all four start modes), WebView after app update.
 
 | Date | Device / Android | Tester | Passed | Notes |
 |---|---|---|---|---|
