@@ -14,12 +14,10 @@
     "test": "tsx --test tests/rbac.test.ts tests/visibility.test.ts tests/markdown.test.tsx tests/location-leads.test.ts tests/mobile.test.ts && tsx tests/ops-visibility.test.ts"
   },
   "dependencies": {
-    "@aparajita/capacitor-secure-storage": "^8.0.1",
     "@capacitor-mlkit/barcode-scanning": "^8.2.1",
     "@capacitor/app": "^8.1.2",
     "@capacitor/camera": "^8.2.6",
     "@capacitor/core": "^8.5.3",
-    "@capacitor/filesystem": "^8.1.5",
     "@capacitor/geolocation": "^8.2.4",
     "@capacitor/keyboard": "^8.0.6",
     "@capacitor/network": "^8.0.1",

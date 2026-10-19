@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Small notification icon: Android shows it as a white silhouette. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:fillColor="#FFFFFF" android:pathData="M12,8.5a3.5,3.5 0,1 0,0.001 0zM12,2l2.5,4.5L12,5.8L9.5,6.5zM20.2,7l-1,5.1l-2.3,-2.4zM20.2,17l-4.9,1.6l1.7,-3zM12,22l-2.5,-4.5L12,18.2l2.5,-0.7zM3.8,17l1,-5.1l2.3,2.4zM3.8,7l4.9,-1.6l-1.7,3z"/>
+</vector>
