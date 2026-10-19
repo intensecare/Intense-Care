@@ -181,6 +181,9 @@ export default function PropertiesPage() {
                       {detailProperty.locationVerifiedAt ? ` · confirmed on site ${formatDateTime(detailProperty.locationVerifiedAt)}` : ""}
                     </p>
                   )}
+                  {detailProperty.mapLink && /^https?:\/\//i.test(detailProperty.mapLink) && (
+                    <p className="text-sm"><a href={detailProperty.mapLink} target="_blank" rel="noreferrer noopener" className="font-semibold text-rose-600 underline">Open the saved map link</a></p>
+                  )}
                   {detailProperty.locationNotes && <p className="rounded-xl bg-zinc-50 px-4 py-3 text-sm"><span className="font-semibold text-zinc-900">Location notes: </span><span className="text-zinc-700">{detailProperty.locationNotes}</span></p>}
                 </section>
                 {(() => {

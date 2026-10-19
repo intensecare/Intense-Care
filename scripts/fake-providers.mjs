@@ -18,7 +18,7 @@ import { randomBytes } from "node:crypto";
 
 const PORT = Number(process.env.FAKE_PORT || 3998);
 const state = { assets: new Map(), control: {}, fcm: [], fcmCalls: new Map() };
-const resetState = () => { state.assets.clear(); state.control = {}; state.fcm = []; state.fcmCalls.clear(); };
+const resetState = () => { state.hits = []; state.assets.clear(); state.control = {}; state.fcm = []; state.fcmCalls.clear(); };
 
 function json(res, code, body) { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); }
 async function body(req) { const c = []; for await (const x of req) c.push(x); return Buffer.concat(c); }
@@ -45,7 +45,37 @@ const handler = async (req, res) => {
     if (p === "/__reset") { resetState(); return json(res, 200, { ok: true }); }
     if (p === "/__control") { Object.assign(state.control, JSON.parse((await body(req)).toString() || "{}")); return json(res, 200, state.control); }
     if (p === "/__seed") { const b = JSON.parse((await body(req)).toString()); state.assets.set(b.publicId, { public_id: b.publicId, bytes: b.bytes ?? 1000, format: "jpg", created_at: b.createdAt ?? new Date().toISOString(), secure_url: `http://localhost:${PORT}/img/${b.publicId}` }); return json(res, 200, { ok: true }); }
-    if (p === "/__state") return json(res, 200, { assets: Array.from(state.assets.values()), control: state.control });
+    if (p === "/__state") return json(res, 200, { assets: Array.from(state.assets.values()), control: state.control, hits: state.hits || [] });
+
+    // Google short links + address search, for the property map-link tests.
+    if (p.startsWith("/short/")) {
+      const name = p.slice(7);
+      const to = state.control.short?.[name];
+      if (to === undefined) { res.writeHead(404); return res.end("dead"); }
+      res.writeHead(302, { Location: to }); return res.end();
+    }
+    if (p === "/nominatim/search") {
+      const q = (url.searchParams.get("q") || "").toLowerCase();
+      const hit = (state.control.places || []).filter((x) => q.includes(x.match));
+      return json(res, 200, hit.map((x) => ({ lat: String(x.lat), lon: String(x.lon), display_name: x.name, address: x.address || {} })));
+    }
+    // Private delivery domain (CLOUDINARY_DELIVERY_HOST): only SIGNED urls (…/s--sig--/…) are served.
+    if (p.startsWith("/image/upload/")) {
+      state.hits = state.hits || []; state.hits.push(p);
+      if (state.control.imgStatus) { res.writeHead(state.control.imgStatus); return res.end("denied"); }
+      if (!/\/s--[^/]+--\//.test(p)) { res.writeHead(401); return res.end("unsigned"); }
+      const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+      res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length }); return res.end(png);
+    }
+    // Delivery URLs (secure_url): a tiny valid PNG, so the ERP's photo proxy has something real to stream.
+    if (p.startsWith("/img/")) {
+      state.hits = state.hits || []; state.hits.push(p);
+      if (state.control.requireSig) { res.writeHead(401); return res.end("private"); }
+      if (state.control.imgStatus) { res.writeHead(state.control.imgStatus); return res.end("denied"); }
+      const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+      res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
+      return res.end(png);
+    }
 
     // ---------------------------------------------------------------- Cloudinary: /cloud/v1_1/<cloud>/…
     const c = /^\/cloud\/v1_1\/[^/]+\/(.+)$/.exec(p);

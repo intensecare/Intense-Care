@@ -72,6 +72,7 @@ export function serializeProperty(p: Prisma.PropertyGetPayload<object>): Propert
     lat: coords?.lat ?? null,
     lng: coords?.lng ?? null,
     locationNotes: p.locationNotes ?? undefined,
+    mapLink: p.mapLink ?? undefined,
     locationSource: p.locationSource ?? undefined,
     locationUpdatedAt: p.locationUpdatedAt ? p.locationUpdatedAt.toISOString() : undefined,
     locationVerifiedAt: p.locationVerifiedAt ? p.locationVerifiedAt.toISOString() : undefined,

@@ -19,6 +19,7 @@ import { getTaxRate, computeInvoiceFigures, GSTIN_PATTERN } from "@/lib/tax";
 import { getSystemSettings } from "@/lib/server/settings";
 import { logger } from "@/lib/server/logger";
 import { recordAudit } from "@/lib/server/audit";
+import { applyPayment } from "@/lib/server/payments";
 import { recordActivity } from "@/lib/server/activity";
 import { can, canApprove, refundNeedsApproval, discountNeedsApproval } from "@/lib/rbac";
 
@@ -119,42 +120,14 @@ export async function POST(request: Request) {
 
       const invoice = await prisma.invoice.findUnique({ where: { id: d.invoiceId } });
       if (!invoice) return fail("Invoice not found.", 404);
-      if (invoice.status === "CANCELLED") return fail("This invoice is cancelled.", 409);
 
-      // Idempotency: the same reference on the same invoice is the same payment.
-      const duplicate = await prisma.payment.findFirst({ where: { invoiceId: d.invoiceId, transactionReference: d.reference } });
-      if (duplicate) return ok({ ...serializePayment(duplicate), duplicate: true });
+      // One shared, row-locked routine (also used when an Admin verifies a customer's UPI payment): it refuses
+      // a cancelled invoice and an overpayment, and the same reference on the same invoice is the same payment.
+      const applied = await prisma.$transaction((tx) => applyPayment(tx, { invoiceId: d.invoiceId, amount: d.amount, method: d.paymentMethod, reference: d.reference }));
+      if (applied.duplicate) return ok({ ...serializePayment(applied.payment), duplicate: true });
+      const { payment, status } = applied;
 
-      if (d.amount - invoice.balanceDue > 0.005) {
-        return fail(
-          `Payment amount (₹${d.amount.toFixed(2)}) exceeds the outstanding balance (₹${invoice.balanceDue.toFixed(2)}).`,
-          400
-        );
-      }
-
-      const { payment, lifetimeRevenue, status } = await prisma.$transaction(async (tx) => {
-        const created = await tx.payment.create({
-          data: {
-            invoiceId: d.invoiceId,
-            jobId: invoice.jobId,
-            customerId: invoice.customerId,
-            amount: d.amount,
-            paymentMethod: d.paymentMethod,
-            transactionReference: d.reference,
-          },
-        });
-        const amountPaid = invoice.amountPaid + d.amount;
-        const balanceDue = Math.max(0, invoice.total - amountPaid);
-        const status = balanceDue === 0 ? "PAID" : amountPaid > 0 ? "PARTIAL" : "UNPAID";
-        await tx.invoice.update({ where: { id: d.invoiceId }, data: { amountPaid, balanceDue, status } });
-        await tx.job.update({ where: { id: invoice.jobId }, data: { paymentStatus: status } });
-        const agg = await tx.payment.aggregate({ where: { customerId: invoice.customerId }, _sum: { amount: true } });
-        const revenue = agg._sum.amount ?? 0;
-        await tx.customer.update({ where: { id: invoice.customerId }, data: { lifetimeRevenue: revenue } });
-        return { payment: created, lifetimeRevenue: revenue, status };
-      });
-
-      logger.info("finance.payment_recorded", { invoiceId: d.invoiceId, amount: d.amount, customerLifetimeRevenue: lifetimeRevenue, by: user.id });
+      logger.info("finance.payment_recorded", { invoiceId: d.invoiceId, amount: d.amount, by: user.id });
       void recordAudit({ actor: user, action: "PAYMENT_RECORDED", entityType: "payment", entityId: payment.id, jobId: invoice.jobId, previousState: invoice.status, newState: status, details: `₹${d.amount} via ${d.paymentMethod} ref ${d.reference}`, request });
       return ok(serializePayment(payment), 201);
     }

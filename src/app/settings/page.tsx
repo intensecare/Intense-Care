@@ -1,5 +1,6 @@
 "use client";
 
+import { isValidVpa, upiProblem, UPI_PROBLEM_TEXT, type UpiSettings } from "@/lib/payments";
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Save, CheckCircle2, CalendarDays, Upload, Trash2, Users, ChevronRight } from "lucide-react";
@@ -130,6 +131,7 @@ export default function SettingsPage() {
   const [googleReviewUrl, setGoogleReviewUrl] = useState(s.googleBusinessReviewUrl || "");
   const [visibility, setVisibility] = useState<CustomerVisibility>(s.customerVisibility);
   const [notifications, setNotifications] = useState<NotificationSettings>(s.notifications);
+  const [upi, setUpi] = useState<UpiSettings>(s.upi);
   const [startV, setStartV] = useState<StartVerificationSettings>(s.jobStartVerification);
   const [startDist, setStartDist] = useState(String(s.jobStartVerification.maxDistanceMeters));
   const [startAcc, setStartAcc] = useState(String(s.jobStartVerification.maxAccuracyMeters));
@@ -162,6 +164,7 @@ export default function SettingsPage() {
     setGoogleReviewUrl(s.googleBusinessReviewUrl || "");
     setVisibility(s.customerVisibility);
     setNotifications(s.notifications);
+    setUpi(s.upi);
     setStartV(s.jobStartVerification);
     setStartDist(String(s.jobStartVerification.maxDistanceMeters));
     setStartAcc(String(s.jobStartVerification.maxAccuracyMeters));
@@ -185,9 +188,12 @@ export default function SettingsPage() {
     const dist = Number(startDist), acc = Number(startAcc);
     if (!Number.isInteger(dist) || dist < 10 || dist > 5000) return setError("Job start: the allowed distance must be a whole number from 10 to 5000 metres.");
     if (!Number.isInteger(acc) || acc < 5 || acc > 1000) return setError("Job start: the GPS accuracy limit must be a whole number from 5 to 1000 metres.");
+    const upiIssue = upi.enabled ? upiProblem(upi) : upi.vpa.trim() && !isValidVpa(upi.vpa) ? "BAD_VPA" : null;
+    if (upiIssue) return setError(`UPI payment: ${UPI_PROBLEM_TEXT[upiIssue]}`);
     setIsSaving(true);
     setError(null);
     const r = await updateSystemSettings({
+      upi: { ...upi, vpa: upi.vpa.trim(), payeeName: upi.payeeName.trim(), description: upi.description.trim() },
       companyName: companyName.trim(),
       companyTagline: companyTagline.trim(),
       companyAddress: companyAddress.trim(),
@@ -296,6 +302,28 @@ export default function SettingsPage() {
               </Link>
             ))}
           </div>
+        </section>
+
+        <section id="s-upi" className={section} aria-labelledby="s-upi-h">
+          <Head id="s-upi" title="UPI payment" hint="Lets customers pay an invoice from their invoice page with Google Pay, PhonePe, Paytm or any UPI app. Money goes straight to the account below; an Admin confirms each payment after checking the bank — nothing is marked paid automatically. Job completion never waits for payment." />
+          {(() => {
+            const problem = upiProblem({ ...upi, enabled: true });
+            return (
+              <p role="status" className={cn("rounded-xl border px-3 py-2 text-sm", upi.enabled && !problem ? "border-emerald-200 bg-emerald-50 text-emerald-900" : problem ? "border-amber-200 bg-amber-50 text-amber-900" : "border-zinc-200 bg-zinc-50 text-zinc-700")}>
+                {upi.enabled && !problem ? "UPI payment is ON. Customers see Pay now on their invoice." : upi.enabled ? `Not ready: ${UPI_PROBLEM_TEXT[problem!]}` : problem ? `Not configured yet. ${UPI_PROBLEM_TEXT[problem]}` : "Configured but switched off."}
+              </p>
+            );
+          })()}
+          <label className="flex items-center gap-3 text-sm font-medium text-zinc-900"><input type="checkbox" className="h-5 w-5" checked={upi.enabled} onChange={(e) => setUpi({ ...upi, enabled: e.target.checked })} /> Enable UPI payment</label>
+          <Field label="Business UPI ID (VPA)" htmlFor="st-upi-vpa" hint="For example shop@okhdfcbank. Double-check it — customers' money goes here.">
+            <Input id="st-upi-vpa" value={upi.vpa} onChange={(e) => setUpi({ ...upi, vpa: e.target.value })} placeholder="yourbusiness@bank" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+          </Field>
+          <Field label="Payee name" htmlFor="st-upi-name" hint="Shown in the customer's UPI app. Use the account holder's name.">
+            <Input id="st-upi-name" value={upi.payeeName} onChange={(e) => setUpi({ ...upi, payeeName: e.target.value })} placeholder="Intense Care Deep Cleaning" maxLength={60} />
+          </Field>
+          <Field label="Payment description (optional)" htmlFor="st-upi-desc" hint="Added to the payment note with the invoice number. Up to 40 characters.">
+            <Input id="st-upi-desc" value={upi.description} onChange={(e) => setUpi({ ...upi, description: e.target.value })} placeholder="Deep cleaning service" maxLength={40} />
+          </Field>
         </section>
 
         <section id="s-start" className={section} aria-labelledby="s-start-h">

@@ -85,6 +85,8 @@ model Property {
   lat                 Float?
   lng                 Float?
   locationNotes       String?
+  /// The Google Maps / location link the Admin pasted to set the pin (kept so the pin can be re-checked). https only.
+  mapLink             String?
   /// How the pin was set: SEARCH | MAP_PIN | DEVICE_GPS | MANUAL | IMPORTED
   locationSource      String?
   locationUpdatedAt   DateTime?
@@ -1315,4 +1317,54 @@ model AmcVisit {
 
   @@index([contractId, scheduledDate])
   @@index([status])
+}
+
+/// One customer attempt to pay an invoice by UPI. Opening a UPI app proves nothing: an attempt only becomes money
+/// when an authorised Admin verifies it (status VERIFIED → a Payment row is created, once). The amount is fixed by the
+/// server from the invoice's outstanding balance when the attempt is created; the customer never supplies it.
+model UpiPaymentAttempt {
+  id               String    @id @default(cuid())
+  invoiceId        String
+  jobId            String
+  customerId       String
+  /// The `tr` sent to the UPI app — unique per attempt.
+  reference        String    @unique
+  amount           Float
+  /// Snapshot of where the money was asked to go (the Admin may change the UPI ID later).
+  payeeVpa         String
+  payeeName        String
+  /// INITIATED | SUBMITTED (customer gave a UTR → review) | VERIFIED | REJECTED | CANCELLED
+  status           String    @default("INITIATED")
+  /// UTR / UPI reference the customer (or Admin) entered. Globally unique among live attempts.
+  utr              String?
+  payerNote        String?
+  createdAt        DateTime  @default(now())
+  submittedAt      DateTime?
+  reviewedAt       DateTime?
+  reviewedBy       String?
+  reviewedByName   String?
+  reviewNote       String?
+  /// The ledger Payment created when verified.
+  paymentId        String?
+  events           UpiPaymentEvent[]
+
+  @@index([invoiceId, status])
+  @@index([status, submittedAt])
+}
+
+/// Audit trail: every status change of an attempt, who did it and when.
+model UpiPaymentEvent {
+  id          String   @id @default(cuid())
+  attemptId   String
+  at          DateTime @default(now())
+  fromStatus  String?
+  toStatus    String
+  /// CUSTOMER | ADMIN | SYSTEM
+  actorType   String
+  actorName   String?
+  note        String?
+
+  attempt UpiPaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId, at])
 }

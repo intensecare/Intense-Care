@@ -27,6 +27,8 @@ export interface LocationValue {
   source?: PropertyLocationSource;
   /** Address parts from the last search pick or pin lookup (the form decides whether to use them). */
   found?: AddressFound | null;
+  /** The map link pasted to set the pin (saved on the property). */
+  mapLink?: string;
 }
 
 /** Map tiles — OpenStreetMap by default; set NEXT_PUBLIC_MAP_TILE_URL to use another provider. */
@@ -130,6 +132,11 @@ export function LocationPicker({
   const [note, setNote] = useState<string | null>(null);
   const [tilesFailed, setTilesFailed] = useState(false);
   const [suggest, setSuggest] = useState<AddressFound | null>(null);
+  // "Paste a map link → Extract location"
+  const [linkText, setLinkText] = useState(value.mapLink ?? "");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkMsg, setLinkMsg] = useState<{ tone: "ok" | "warn" | "error"; text: string } | null>(null);
+  const [alternatives, setAlternatives] = useState<{ lat: number; lng: number; address: string }[]>([]);
   // Typed coordinates stay as text while editing (e.g. "-", "12.").
   const [latText, setLatText] = useState(value.lat?.toString() ?? "");
   const [lngText, setLngText] = useState(value.lng?.toString() ?? "");
@@ -243,6 +250,51 @@ export function LocationPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pin?.lat, pin?.lng]);
 
+  /**
+   * Asks the server to read the pasted link. On success the pin and map move (still unsaved — the form's Save does that);
+   * on ANY failure nothing about the current location changes and the user is told why.
+   */
+  const extractLink = async () => {
+    const link = linkText.trim();
+    if (!link) return setLinkMsg({ tone: "error", text: "Paste a Google Maps link first." });
+    setLinkBusy(true);
+    setLinkMsg(null);
+    setAlternatives([]);
+    try {
+      const res = await fetch("/api/location/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link }) });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        return setLinkMsg({ tone: "error", text: json?.error || (res.status === 403 ? "Your role can't look up map links." : "The link couldn't be checked right now. Try again, or drop the pin on the map.") });
+      }
+      const r = json.data as { ok: boolean; message?: string; lat?: number; lng?: number; note?: string; precision?: string; address?: string; found?: AddressFound; outsideServiceArea?: boolean; maybeSwapped?: boolean; alternatives?: { lat: number; lng: number; address: string }[] };
+      if (!r.ok || typeof r.lat !== "number" || typeof r.lng !== "number" || !normalizeCoords(r.lat, r.lng)) {
+        // Failure: the saved / current location is NOT touched.
+        return setLinkMsg({ tone: "error", text: `${r.message ?? "No location could be read from that link."} The current location was not changed — drop the pin on the map or type the coordinates.` });
+      }
+      placePin(r.lat, r.lng);
+      lookupSeq.current++;
+      const patch: Partial<LocationValue> = { lat: r.lat, lng: r.lng, source: "MAP_LINK", mapLink: link };
+      if (r.found && r.address) {
+        if (!valueRef.current.address.trim()) Object.assign(patch, { address: r.address, found: r.found });
+        else {
+          patch.found = r.found;
+          if (r.address !== valueRef.current.address) setSuggest(r.found);
+        }
+        set(patch);
+      } else {
+        set(patch);
+        void resolveAddressAt(r.lat, r.lng);
+      }
+      const warn = r.outsideServiceArea ? " The point is outside India — check it's the right place." : r.maybeSwapped ? " These coordinates may be latitude/longitude swapped." : "";
+      setLinkMsg({ tone: r.precision === "EXACT" && !warn ? "ok" : "warn", text: `${r.note ?? "Location found."}${warn} Drag the pin to adjust it, then save.` });
+      setAlternatives(r.alternatives ?? []);
+    } catch {
+      setLinkMsg({ tone: "error", text: "Couldn't reach the server to read the link. The current location was not changed." });
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
   const search = async () => {
     const q = query.trim() || value.address.trim();
     if (!q) return setNote("Type an address, area, city or postal code to search.");
@@ -342,6 +394,41 @@ export function LocationPicker({
 
   return (
     <div className="space-y-3">
+      {!readOnly && (
+        <div className="space-y-1.5">
+          <label htmlFor={`${idPrefix}-link`} className="text-sm font-medium text-zinc-800">Google Maps link / location link</label>
+          <div className="flex gap-2">
+            <Input
+              id={`${idPrefix}-link`}
+              value={linkText}
+              onChange={(e) => {
+                setLinkText(e.target.value);
+                set({ mapLink: e.target.value.trim() || undefined });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void extractLink();
+                }
+              }}
+              placeholder="Paste the Google Maps share link for the property"
+              inputMode="url"
+              autoComplete="off"
+            />
+            <Button type="button" variant="outline" onClick={() => void extractLink()} loading={linkBusy} className="shrink-0">Extract Location</Button>
+          </div>
+          {linkMsg && (
+            <p role={linkMsg.tone === "error" ? "alert" : "status"} className={cn("text-sm", linkMsg.tone === "error" ? "text-red-700" : linkMsg.tone === "warn" ? "text-amber-800" : "text-emerald-700")}>{linkMsg.text}</p>
+          )}
+          {alternatives.length > 0 && (
+            <div className="text-sm text-zinc-700">Other matches:{" "}
+              {alternatives.map((a, i) => (
+                <button key={i} type="button" className="underline mr-2" onClick={() => { placePin(a.lat, a.lng); set({ lat: a.lat, lng: a.lng, source: "MAP_LINK" }); void resolveAddressAt(a.lat, a.lng); }}>{a.address.split(",").slice(0, 3).join(",")}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {!readOnly && (
         <div className="flex gap-2">
           <div className="relative flex-1 min-w-0">

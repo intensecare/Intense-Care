@@ -1,6 +1,8 @@
 import { isStartMode } from "@/lib/start-verification";
 import { CONTACT_LEAD_POLICIES } from "@/lib/contacts";
 import { NextResponse } from "next/server";
+import { recordAudit } from "@/lib/server/audit";
+import { isValidPayeeName, isValidVpa, maskVpa, upiProblem, UPI_PROBLEM_TEXT } from "@/lib/payments";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, requireUser } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
@@ -154,6 +156,42 @@ export async function PATCH(request: Request) {
         next.allowPerJobOverride = v.allowPerJobOverride;
       }
       patch.jobStartVerification = next;
+    }
+
+    if (body.upi && typeof body.upi === "object") {
+      const v = body.upi as Record<string, unknown>;
+      const next = { ...current.upi };
+      const bad = (msg: string) => NextResponse.json({ success: false, error: msg }, { status: 400 });
+      if (v.vpa !== undefined) {
+        if (typeof v.vpa !== "string") return bad("Invalid UPI ID.");
+        const t = v.vpa.trim();
+        if (t && !isValidVpa(t)) return bad(UPI_PROBLEM_TEXT.BAD_VPA);
+        next.vpa = t;
+      }
+      if (v.payeeName !== undefined) {
+        if (typeof v.payeeName !== "string") return bad("Invalid payee name.");
+        const t = v.payeeName.trim();
+        if (t && !isValidPayeeName(t)) return bad(UPI_PROBLEM_TEXT.BAD_NAME);
+        next.payeeName = t;
+      }
+      if (v.description !== undefined) {
+        if (typeof v.description !== "string" || v.description.length > 40 || /[^\w .#/-]/.test(v.description)) return bad("The payment description can be up to 40 letters, numbers and spaces.");
+        next.description = v.description.trim();
+      }
+      if (v.enabled !== undefined) {
+        if (typeof v.enabled !== "boolean") return bad("Invalid setting.");
+        next.enabled = v.enabled;
+      }
+      // Never switch payments on with an incomplete or invalid configuration.
+      if (next.enabled) {
+        const problem = upiProblem({ ...next, enabled: true });
+        if (problem) return bad(`UPI payments can't be switched on yet: ${UPI_PROBLEM_TEXT[problem]}`);
+      }
+      patch.upi = next;
+      // The payee account is where customers' money goes — every change is recorded.
+      if (next.vpa !== current.upi.vpa || next.payeeName !== current.upi.payeeName || next.enabled !== current.upi.enabled) {
+        void recordAudit({ actor: auth.user, action: "UPI_SETTINGS_CHANGED", entityType: "settings", entityId: "upi", previousState: `${current.upi.enabled ? "on" : "off"} ${current.upi.vpa ? maskVpa(current.upi.vpa) : "(none)"}`, newState: `${next.enabled ? "on" : "off"} ${next.vpa ? maskVpa(next.vpa) : "(none)"}`, request });
+      }
     }
 
     if (body.contactSync && typeof body.contactSync === "object") {

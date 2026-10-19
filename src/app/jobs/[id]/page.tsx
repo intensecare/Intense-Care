@@ -1,5 +1,6 @@
 "use client";
 
+import { PhotoGallery } from "@/components/common/PhotoGallery";
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -300,22 +301,11 @@ export default function JobPage() {
             {/* Photos / evidence */}
             <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-4">
               <h2 className="text-base font-semibold text-zinc-900">Photos</h2>
-              {jobPhotos.length === 0 ? (
-                <p className="text-sm text-zinc-500">No photos yet. The Field Manager adds before / after photos on site.</p>
-              ) : (
-                areas.map((a) => {
-                  const list = jobPhotos.filter((p) => p.area === a);
-                  if (list.length === 0) return null;
-                  return (
-                    <div key={a} className="space-y-2">
-                      <div className="text-sm font-semibold text-zinc-700">{a}</div>
-                      <div className="flex gap-2 overflow-x-auto pb-1">
-                        {list.map((p) => <PhotoThumb key={p.id} photo={p} />)}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
+              <PhotoGallery
+                order={["before", "after", "qc", "rework"]}
+                empty="No photos yet. The Field Manager adds before / after photos on site."
+                photos={jobPhotos.map((p) => ({ id: p.id, url: p.photoUrl, thumbUrl: p.thumbnailUrl || p.photoUrl, area: p.area, photoType: p.photoType, caption: p.caption, uploadedAt: p.uploadedAt }))}
+              />
             </section>
 
             {/* Activity timeline */}

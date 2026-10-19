@@ -1086,6 +1086,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         state: propertyData.state,
         country: propertyData.country,
         locationNotes: propertyData.locationNotes,
+        mapLink: propertyData.mapLink || undefined,
         locationSource: propertyData.lat != null ? propertyData.locationSource : undefined,
         bedrooms: propertyData.bedrooms,
         bathrooms: propertyData.bathrooms,

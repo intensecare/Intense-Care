@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import { errorResponse } from "@/lib/server/http";
 import { logger } from "@/lib/server/logger";
 import { recordActivity } from "@/lib/server/activity";
+import { staffPhotoView } from "@/lib/server/photo-delivery";
 
 const PHOTO_LABEL = { before: "Before", after: "After", qc: "QC evidence", rework: "Rework" } as const;
 
@@ -37,7 +38,7 @@ export async function GET(request: Request) {
     if (jobId) {
       await authorizeJob(jobId, "photos.view");
       const photos = await prisma.jobPhoto.findMany({ where: { jobId }, orderBy: { uploadedAt: "desc" } });
-      return NextResponse.json({ success: true, data: photos });
+      return NextResponse.json({ success: true, data: photos.map(staffPhotoView) });
     }
 
     const ids = await visibleJobIds(user, "photos.view");
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
       orderBy: { uploadedAt: "desc" },
       take: 500,
     });
-    return NextResponse.json({ success: true, data: photos });
+    return NextResponse.json({ success: true, data: photos.map(staffPhotoView) });
   } catch (err) {
     return errorResponse(err, "photos.get.route_error");
   }
@@ -95,8 +96,8 @@ export async function POST(request: Request) {
       jobId: p.jobId,
       area: p.area,
       photoType: p.photoType as "before" | "after" | "qc" | "rework",
-      photoUrl: p.photoUrl,
-      thumbnailUrl: p.thumbnailUrl,
+      photoUrl: `/api/photos/${p.id}/image`,
+      thumbnailUrl: `/api/photos/${p.id}/image?s=thumb`,
       caption: p.caption,
       uploadedBy: p.uploadedByName,
       uploadedAt: p.uploadedAt.toISOString(),

@@ -43,6 +43,8 @@ export function client() {
     api_secret: API_SECRET,
     secure: !prefix || prefix.startsWith("https://"),
     ...(prefix ? { upload_prefix: prefix } : {}),
+    // Optional custom delivery domain (a Cloudinary CNAME / private CDN): photo links are built on it.
+    ...(process.env.CLOUDINARY_DELIVERY_HOST ? { secure_distribution: process.env.CLOUDINARY_DELIVERY_HOST, private_cdn: true } : {}),
   });
   return cloudinary;
 }
