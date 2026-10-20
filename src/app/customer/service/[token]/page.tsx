@@ -302,7 +302,7 @@ export default function CustomerServicePage() {
   })();
 
   return (
-    <Shell action={primary} tab={tab} onTab={go}>
+    <Shell jobId={job.id} action={primary} tab={tab} onTab={go}>
       {success && (
         <div role="status" className="rounded-2xl bg-emerald-600 text-white text-base font-semibold px-4 py-3 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden /> {success}
@@ -637,21 +637,20 @@ const TABS: { key: Tab; label: string; Icon: React.ElementType }[] = [
   { key: "profile", label: "Profile", Icon: User },
 ];
 
-function Shell({ jobId, action, tab, onTab, children }: { jobId?: string; action?: React.ReactNode; tab?: Tab; onTab?: (t: Tab) => void; children: React.ReactNode }) {
+function Shell({ jobId, action, tab, onTab, children }: { jobId?: string | null; action?: React.ReactNode; tab?: Tab; onTab?: (t: Tab) => void; children: React.ReactNode }) {
   return (
     <div className={cn("min-h-screen bg-zinc-50 text-zinc-900", tab ? (action ? "pb-48" : "pb-28") : "pb-10")}>
       <header className="print:hidden bg-white/95 backdrop-blur border-b border-zinc-200 sticky top-0 z-30">
         <div className="max-w-lg mx-auto h-16 px-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="h-10 w-10 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0">
-              <Sparkles className="h-5 w-5" aria-hidden />
-            </div>
-            <div className="min-w-0">
-              <div className="text-base font-semibold text-zinc-950 leading-tight">My Service</div>
-              <div className="text-xs text-zinc-500 flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5 text-emerald-600" aria-hidden /> Secure link</div>
-            </div>
+          <div className="flex items-center min-w-0">
+            <img src="/intense-logo-black.png" alt="Intense Care" className="h-8 w-auto max-w-[180px] object-contain" />
           </div>
-          {jobId && <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-700 whitespace-nowrap">{jobId}</span>}
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-zinc-500 flex items-center gap-1 font-medium">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" aria-hidden /> Secure link
+            </span>
+            {jobId && <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-700 whitespace-nowrap">{jobId}</span>}
+          </div>
         </div>
       </header>
       <main className="max-w-lg mx-auto px-4 py-5 space-y-4">{children}</main>

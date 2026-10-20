@@ -21,7 +21,7 @@ export interface DocCompany {
 }
 
 /** Shown until Settings has a logo uploaded — the app's own mark, never a blank slot. */
-const FALLBACK_LOGO = "/logo.svg";
+const FALLBACK_LOGO = "/intense-logo-black.png";
 
 /** The ruled lines of the printed sheet — a classic bordered tax-invoice look. */
 const RULE = "border-zinc-800";
@@ -62,7 +62,7 @@ export function DocCompanyMeta({
     <div className={cn("grid grid-cols-1 divide-y border-b-2 sm:grid-cols-[1fr_auto] sm:divide-x sm:divide-y-0", RULE, SUBRULE)}>
       <div className="flex items-start gap-3 p-4 min-w-0">
         {/* eslint-disable-next-line @next/next/no-img-element -- data URL from Settings, or the app's own mark */}
-        <img src={company.logo || FALLBACK_LOGO} alt="" className="h-14 w-20 shrink-0 object-contain object-left" />
+        <img src={company.logo || FALLBACK_LOGO} alt="" className="h-14 max-w-[140px] w-auto shrink-0 object-contain object-left" />
         <div className="min-w-0">
           <div className="text-lg font-semibold text-zinc-950">{company.name || "Intense Care"}</div>
           {company.tagline && <div className="text-sm text-zinc-500">{company.tagline}</div>}
