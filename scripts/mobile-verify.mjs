@@ -59,7 +59,10 @@ ok((await admin("/api/mobile/contacts/sync", { method: "POST", headers: bearer("
 
 /* ------------------------------ B. contact sync ------------------------------ */
 // A customer that already exists: its number must be recognised, never duplicated.
-const cust = (await admin("/api/customers", { method: "POST", body: { name: "Asha Rao", phone: "+919812345678" } })).data;
+// (A different fixture than e2e-verify.mjs's "Asha Rao" / +919812345678 — this script runs
+// on the same database right after it, and two customers sharing a phone number would make
+// the "which customer did this contact link to" check below ambiguous by design.)
+const cust = (await admin("/api/customers", { method: "POST", body: { name: "Deepa Iyer", phone: "+919812345679" } })).data;
 const custCountBefore = sql(`select count(*) from "Customer"`);
 const leadCountBefore = sql(`select count(*) from "Lead"`);
 
@@ -67,13 +70,13 @@ const batch = (over = {}) => ({ runId: "run-" + uid().slice(0, 10), trigger: "IN
 const sync = (b, token = TOKEN) => admin("/api/mobile/contacts/sync", { method: "POST", headers: bearer(token), body: b });
 
 const contacts = [
-  { id: "c1", name: "Asha Rao", phones: ["098123 45678"], updatedAt: 1000 },        // existing customer, different format
+  { id: "c1", name: "Deepa Iyer", phones: ["098123 45679"], updatedAt: 1000 },       // existing customer, different format
   { id: "c2", name: "Vikram Shah", phones: ["+91 99887 76655", "99887-76655"] },     // same number twice
   { id: "c3", name: "Meera (work)", phones: ["+919988776655"] },                    // duplicate number with c2 (different name)
   { id: "c4", name: "No Number", phones: [] },                                       // skipped
   { id: "c5", name: "Bad", phones: ["abc"] },                                        // skipped (no usable number)
   { id: "c6", name: "Intl", phones: ["+14155550123"] },
-  { id: "c1", name: "Asha Rao", phones: ["098123 45678"] },                          // same id twice in a batch
+  { id: "c1", name: "Deepa Iyer", phones: ["098123 45679"] },                         // same id twice in a batch
 ];
 const r1 = await sync(batch({ runId: "run-initial-1", scannedTotal: contacts.length, contacts }));
 ok(r1.status === 200 && r1.data?.added === 4, `initial import adds 4 usable contacts (got ${JSON.stringify(r1.data)})`);
@@ -191,7 +194,7 @@ ok(sql(`select count(*) from "Lead" where source='PHONE_CONTACT'`) === "2", "lea
 // logs carry no PII — check the server log if provided
 if (process.env.SERVER_LOG) {
   const log = execSync(`cat ${process.env.SERVER_LOG}`).toString();
-  ok(!/Vikram Shah|99887|Asha Rao.*contact_sync/.test(log.split("\n").filter((l) => l.includes("contact_sync")).join("\n")), "contact_sync log lines contain no names or numbers");
+  ok(!/Vikram Shah|99887|Deepa Iyer.*contact_sync/.test(log.split("\n").filter((l) => l.includes("contact_sync")).join("\n")), "contact_sync log lines contain no names or numbers");
 }
 
 
