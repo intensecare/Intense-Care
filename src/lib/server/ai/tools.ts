@@ -2,7 +2,6 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { jobWhereFor, authorizeJob, HttpError } from "@/lib/server/authz";
 import { invoiceWhereFor, istDayStart } from "@/lib/server/invoices";
-import { getSystemSettings, resolveVisibility } from "@/lib/server/settings";
 import type { SessionUser } from "@/lib/server/session";
 import { can, scopeOf, type Permission } from "@/lib/rbac";
 
@@ -11,19 +10,18 @@ import { can, scopeOf, type Permission } from "@/lib/rbac";
  *
  * Security model (never relies on the prompt):
  *   1. A tool is offered to the model only if the signed-in user holds the
- *      tool's permission (`toolsFor`).
+ *      tool's permission (`toolsFor`), which also requires `ai.use`.
  *   2. Every call is re-checked before it runs (`runTool`) — a model asking
  *      for a tool it was not offered gets "not permitted".
  *   3. Every query is scoped with the same helpers the normal APIs use
  *      (jobWhereFor / authorizeJob / invoiceWhereFor), and money fields are
  *      only included for users with finance.view. So the assistant can never
  *      see more than the user could see in the app.
- * Customers (no login) get one tool, scoped to the job of their QR token.
+ * Intense AI is internal-only — customers never get a principal at all; the
+ * API route refuses any request that isn't a signed-in user with `ai.use`.
  */
 
-export type AiPrincipal =
-  | { kind: "user"; user: SessionUser }
-  | { kind: "customer"; jobId: string; customerName: string };
+export type AiPrincipal = { kind: "user"; user: SessionUser };
 
 type Args = Record<string, unknown>;
 type Schema = { type: string; description?: string; enum?: string[]; properties?: Record<string, Schema>; items?: Schema; required?: string[] };
@@ -34,7 +32,7 @@ interface AiTool {
   parameters?: Schema;
   /** What the user sees while it runs, e.g. "Checking revenue". */
   status: string;
-  permission: Permission | "customer";
+  permission: Permission;
   run: (p: AiPrincipal, args: Args) => Promise<unknown>;
 }
 
@@ -54,7 +52,6 @@ const num = (v: unknown, def: number, min: number, max: number) => {
 };
 
 function userOf(p: AiPrincipal): SessionUser {
-  if (p.kind !== "user") throw new HttpError(403, "Not permitted.");
   return p.user;
 }
 const money = (u: SessionUser) => can(u, "finance.view");
@@ -443,6 +440,72 @@ const TOOLS: AiTool[] = [
     },
   },
   {
+    name: "get_leads",
+    status: "Checking leads",
+    permission: "leads.view",
+    description:
+      "Sales leads / enquiries created in the period: counts by status, the win rate (WON vs decided leads) and the conversion rate (WON vs all leads), and the individual leads. segment: all | due_followup (open leads whose next follow-up date has arrived or passed) | open (not yet WON or LOST) | won | lost.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        segment: { type: "STRING", enum: ["all", "due_followup", "open", "won", "lost"] },
+        period: PERIOD_PARAM,
+        ...DATE_PARAMS,
+        limit: { type: "INTEGER", description: "Max lead rows returned (default 20, max 50)." },
+      },
+    },
+    run: async (p, a) => {
+      const u = userOf(p);
+      const r = resolveRange(a, "this_month");
+      const leads = await prisma.lead.findMany({
+        where: { createdAt: dt(r) },
+        select: {
+          leadNumber: true, customerName: true, source: true, status: true, serviceInterest: true,
+          estimatedValue: true, assignedUserId: true, nextFollowUpDate: true, lastContactedAt: true,
+          lostReason: true, createdAt: true, convertedAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      const today = istToday();
+      const byStatus: Record<string, number> = {};
+      for (const l of leads) byStatus[l.status] = (byStatus[l.status] ?? 0) + 1;
+      const won = byStatus.WON ?? 0;
+      const lost = byStatus.LOST ?? 0;
+      const decided = won + lost;
+      const nm = await names(leads.map((l) => l.assignedUserId));
+      let rows = leads.map((l) => ({
+        leadId: l.leadNumber,
+        customer: l.customerName,
+        source: l.source,
+        status: l.status,
+        serviceInterest: l.serviceInterest ?? null,
+        assignedTo: l.assignedUserId ? nm.get(l.assignedUserId) ?? null : null,
+        nextFollowUpDate: l.nextFollowUpDate ?? null,
+        daysSinceCreated: Math.max(0, Math.round((Date.parse(today) - l.createdAt.getTime()) / 86400000)),
+        ...(money(u) && l.estimatedValue != null ? { estimatedValue: r2(l.estimatedValue) } : {}),
+        ...(l.status === "LOST" && l.lostReason ? { lostReason: l.lostReason } : {}),
+      }));
+      const open = (status: string) => status !== "WON" && status !== "LOST";
+      const seg = str(a.segment, 20) || "all";
+      if (seg === "due_followup") rows = rows.filter((l) => open(l.status) && l.nextFollowUpDate !== null && l.nextFollowUpDate <= today);
+      if (seg === "open") rows = rows.filter((l) => open(l.status));
+      if (seg === "won") rows = rows.filter((l) => l.status === "WON");
+      if (seg === "lost") rows = rows.filter((l) => l.status === "LOST");
+      rows.sort((x, y) => (x.nextFollowUpDate ?? "9999") < (y.nextFollowUpDate ?? "9999") ? -1 : 1);
+      return {
+        period: r.label,
+        segment: seg,
+        totalLeads: leads.length,
+        byStatus,
+        winRatePercent: pct(won, decided),
+        winRateNote: "WON as a share of leads already decided (WON + LOST) — leads still open are excluded.",
+        conversionRatePercent: pct(won, leads.length),
+        matching: rows.length,
+        leads: rows.slice(0, num(a.limit, 20, 1, 50)),
+      };
+    },
+  },
+  {
     name: "get_revenue_summary",
     status: "Checking revenue",
     permission: "finance.view",
@@ -797,66 +860,12 @@ const TOOLS: AiTool[] = [
       };
     },
   },
-  {
-    name: "get_my_service",
-    status: "Checking your service",
-    permission: "customer",
-    description: "The customer's own service: Job ID, service, date and time, team names, status, checklist progress, quality-check result, invoice and approval/feedback state. Only the items the company shares with this customer are returned — anything missing is not available to them.",
-    parameters: { type: "OBJECT", properties: {} },
-    run: async (p) => {
-      if (p.kind !== "customer") throw new HttpError(403, "Not permitted.");
-      const j = await prisma.job.findUnique({
-        where: { id: p.jobId },
-        select: {
-          jobSerial: true, status: true, scheduledDate: true, scheduledTimeSlot: true, assignedStaffIds: true, assignedManagerId: true,
-          approvedAt: true, customerFeedbackRating: true, customerVisibility: true, customerNotes: true, locationAddress: true,
-          service: { select: { name: true } },
-          property: { select: { title: true } },
-          checklistItems: { select: { status: true } },
-          qualityChecks: { select: { decision: true }, orderBy: { createdAt: "desc" }, take: 1 },
-          invoices: { where: { status: { not: "CANCELLED" } }, select: { invoiceNumber: true, invoiceType: true, subtotal: true, discount: true, tax: true, total: true, balanceDue: true, status: true }, take: 1 },
-        },
-      });
-      if (!j) return { error: "Service not found." };
-      // The same visibility the customer page uses — hidden items are never given to the model.
-      const vis = resolveVisibility((await getSystemSettings()).customerVisibility, j.customerVisibility);
-      const team = await names([j.assignedManagerId, ...j.assignedStaffIds]);
-      const inv = j.invoices[0];
-      const done = j.checklistItems.filter((c) => c.status === "completed" || c.status === "skipped").length;
-      return {
-        ...(vis.jobId ? { jobId: j.jobSerial } : {}),
-        ...(vis.service ? { service: j.service.name } : {}),
-        ...(vis.location ? { property: j.property.title, address: j.locationAddress ?? undefined } : {}),
-        ...(vis.serviceDate ? { date: j.scheduledDate, timeWindow: j.scheduledTimeSlot } : {}),
-        ...(vis.team ? { team: Array.from(team.values()) } : {}),
-        ...(vis.status ? { status: j.status, progress: `${done} of ${j.checklistItems.length} tasks done` } : {}),
-        ...(vis.qcResult
-          ? { qualityCheck: DONE.includes(j.status) || ["PASS", "CUSTOMER_APPROVAL"].includes(j.status) ? "passed" : REWORK.includes(j.status) ? "finishing touches" : QC_WAIT.includes(j.status) ? "being checked" : "not yet" }
-          : {}),
-        ...(vis.serviceNotes && j.customerNotes ? { notes: j.customerNotes } : {}),
-        approved: !!j.approvedAt,
-        ...(vis.feedback ? { rating: j.customerFeedbackRating ?? null } : {}),
-        invoice:
-          vis.invoice && inv
-            ? {
-                invoiceNumber: inv.invoiceNumber,
-                type: inv.invoiceType,
-                amount: r2(inv.subtotal - inv.discount),
-                ...(inv.invoiceType === "GST" ? { gst: inv.tax } : {}),
-                total: inv.total,
-                ...(vis.paymentStatus ? { balanceDue: inv.balanceDue, status: inv.status } : {}),
-              }
-            : null,
-      };
-    },
-  },
 ];
 
 /* ------------------------------------------------------------- dispatch */
 
 function allowed(p: AiPrincipal, t: AiTool): boolean {
-  if (t.permission === "customer") return p.kind === "customer";
-  return p.kind === "user" && can(p.user, t.permission) && can(p.user, "ai.use");
+  return can(p.user, t.permission) && can(p.user, "ai.use");
 }
 
 /** The tools this principal may use — the ONLY ones the model is offered. */

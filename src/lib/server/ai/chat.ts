@@ -1,4 +1,4 @@
-import { streamTurn, type Content, type Part } from "./provider";
+import { streamTurn, type Msg, type ToolCall } from "./provider";
 import { declarationsFor, runTool, toolStatus, istToday, type AiPrincipal } from "./tools";
 import { ROLE_LABELS } from "@/lib/rbac";
 import { logger } from "@/lib/server/logger";
@@ -19,14 +19,9 @@ const MAX_TOOL_ROUNDS = 6;
 const MAX_TOOL_RESULT_CHARS = 40_000;
 
 function systemPrompt(p: AiPrincipal): string {
-  const who =
-    p.kind === "customer"
-      ? `You are speaking with a CUSTOMER (${p.customerName}) about their own service only.`
-      : `You are speaking with ${p.user.name}, whose role is ${ROLE_LABELS[p.user.role]}.`;
+  const who = `You are speaking with ${p.user.name}, whose role is ${ROLE_LABELS[p.user.role]}.`;
   const roleRules =
-    p.kind === "customer"
-      ? "Only discuss this customer's own service (status, schedule, team, progress, quality-check result, invoice, approval). Be warm and simple. Never discuss the business, other customers, staff performance or internal matters."
-      : p.user.role === "tax_officer"
+    p.user.role === "tax_officer"
       ? "This user handles GST only. Answer GST invoice and GST report questions. For anything else (jobs, customers, Non-GST invoices, revenue, staff) say it is outside what their role can see."
       : p.user.role === "field_manager"
       ? "This user is a Field Manager: help with their own assigned jobs, rework and quality results, and give practical on-site advice. They cannot see company revenue or other Field Managers' jobs."
@@ -56,10 +51,11 @@ How to answer:
 - For general business advice with no data needed, give practical advice and say it is general guidance.`;
 }
 
-function truncate(value: unknown): Record<string, unknown> {
+/** Tool results go into a "tool" message's content, which must be a string. */
+function truncate(value: unknown): string {
   const s = JSON.stringify(value ?? null);
-  if (s.length <= MAX_TOOL_RESULT_CHARS) return { result: value };
-  return { result: s.slice(0, MAX_TOOL_RESULT_CHARS), note: "Result truncated — ask a narrower question for the rest." };
+  if (s.length <= MAX_TOOL_RESULT_CHARS) return JSON.stringify({ result: value });
+  return JSON.stringify({ result: s.slice(0, MAX_TOOL_RESULT_CHARS), note: "Result truncated — ask a narrower question for the rest." });
 }
 
 /**
@@ -68,68 +64,51 @@ function truncate(value: unknown): Record<string, unknown> {
  * back until the model answers in text.
  */
 export async function runChat(p: AiPrincipal, history: ChatMessage[], send: (e: ChatEvent) => void, signal?: AbortSignal) {
-  // The provider needs the conversation to start with the user and alternate
-  // roles: drop leading answers and merge back-to-back turns (e.g. after a failed answer).
-  const contents: Content[] = [];
+  // Drop a leading assistant turn and merge back-to-back same-role turns (e.g. after a failed answer).
+  const messages: Msg[] = [{ role: "system", content: systemPrompt(p) }];
   for (const m of history) {
-    const role = m.role === "assistant" ? "model" : "user";
-    if (!contents.length && role === "model") continue;
-    const prev = contents[contents.length - 1];
-    if (prev && prev.role === role) prev.parts[0].text = `${prev.parts[0].text}\n\n${m.content}`;
-    else contents.push({ role, parts: [{ text: m.content }] });
+    const role = m.role === "assistant" ? "assistant" : "user";
+    if (messages.length === 1 && role === "assistant") continue;
+    const prev = messages[messages.length - 1];
+    if (prev.role === role && (role === "user" || role === "assistant") && !("toolCalls" in prev && prev.toolCalls?.length)) {
+      prev.content = `${prev.content ?? ""}\n\n${m.content}`;
+    } else {
+      messages.push(role === "assistant" ? { role: "assistant", content: m.content } : { role: "user", content: m.content });
+    }
   }
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   let answered = false;
   const declarations = declarationsFor(p);
   const used: string[] = [];
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const last = round === MAX_TOOL_ROUNDS;
-    const collected: Part[] = [];
-    for await (const parts of streamTurn(
-      {
-        systemInstruction: { parts: [{ text: systemPrompt(p) }] },
-        contents,
-        ...(declarations.length ? { tools: [{ functionDeclarations: declarations }], toolConfig: { functionCallingConfig: { mode: last ? "NONE" : "AUTO" } } } : {}),
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 8192,
-          // 2.5 models think by default and the thinking counts against the output budget;
-          // cap it so long reports still get their answer.
-          ...(/2\.5/.test(model) ? { thinkingConfig: { thinkingBudget: 1024 } } : {}),
-        },
-      },
-      signal
-    )) {
-      for (const part of parts) {
-        collected.push(part);
-        if (part.text && !part.thought) {
-          answered = true;
-          send({ type: "delta", text: part.text });
-        }
+    let text = "";
+    let calls: ToolCall[] = [];
+    for await (const ev of streamTurn(messages, declarations, { forceAnswer: last }, signal)) {
+      if (ev.text) {
+        answered = true;
+        text += ev.text;
+        send({ type: "delta", text: ev.text });
       }
+      if (ev.toolCalls) calls = ev.toolCalls;
     }
-    const calls = collected.filter((x) => x.functionCall);
     if (!calls.length) {
       if (!answered) {
         logger.warn("ai.chat.empty_answer", { round });
         send({ type: "error", message: "Intense AI didn't return an answer. Please try asking again, a little more specifically." });
         return;
       }
-      logger.info("ai.chat.answered", { who: p.kind === "user" ? p.user.id : `customer:${p.jobId}`, role: p.kind === "user" ? p.user.role : "customer", tools: used });
+      logger.info("ai.chat.answered", { who: p.user.id, role: p.user.role, tools: used });
       send({ type: "done" });
       return;
     }
-    contents.push({ role: "model", parts: collected }); // verbatim, incl. thought signatures
-    const responses: Part[] = [];
+    messages.push({ role: "assistant", content: text || null, toolCalls: calls });
     for (const c of calls) {
-      const name = c.functionCall!.name;
-      used.push(name);
-      send({ type: "status", text: toolStatus(name) });
-      const result = await runTool(p, name, c.functionCall!.args ?? {});
-      responses.push({ functionResponse: { name, response: truncate(result) } });
+      used.push(c.name);
+      send({ type: "status", text: toolStatus(c.name) });
+      const result = await runTool(p, c.name, c.args ?? {});
+      messages.push({ role: "tool", toolCallId: c.id, content: truncate(result) });
     }
-    contents.push({ role: "user", parts: responses });
   }
   send({ type: "done" });
 }

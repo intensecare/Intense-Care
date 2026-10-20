@@ -35,6 +35,7 @@
     "canvas-confetti": "^1.9.4",
     "cloudinary": "^2.11.0",
     "clsx": "^2.1.1",
+    "groq-sdk": "^1.6.0",
     "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.48.0",

@@ -134,7 +134,7 @@ A headless-Chromium sweep loads 22 pages at 320, 375, 390, 768, 1024, 1280 and 1
 Before deploying:
 
 1. Take a database backup (`pg_dump -Fc "$DATABASE_URL" > backup-$(date +%F).dump`).
-2. Set in the host: `DATABASE_URL`, `ERP_SESSION_SECRET` (`openssl rand -hex 32`), `APP_BASE_URL` (the public https URL), plus the optional notification and `GEMINI_API_KEY` values from `.env.example`. Never put the AI key in client code.
+2. Set in the host: `DATABASE_URL`, `ERP_SESSION_SECRET` (`openssl rand -hex 32`), `APP_BASE_URL` (the public https URL), plus the optional notification values and `GROQ_API_KEY` / `GROQ_MODEL` from `.env.example` for Intense AI. Both must be set as server-side environment variables in the hosting provider's dashboard (not `NEXT_PUBLIC_`) — the app builds fine without them, but Intense AI stays switched off until they're set. Never put the AI key in client code.
 3. Run `npx prisma migrate deploy` (applies `20261011000000_…`; safe to re-run).
 4. `npm run build` then start the app; sign in as Admin and open Expenses, Referrals, HR and Reports → Profit & costs.
 5. In Settings, review the referral rules (they default to ₹500 fixed, minimum job ₹2,000, must be paid, 90 days).

@@ -100,6 +100,7 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
       { label: "GST Dashboard", href: "/gst", permission: "gst.view" },
       { label: "GST Invoices", href: "/gst/invoices", permission: "gst.view" },
       { label: "GST Reports", href: "/gst/reports", permission: "gst.reports" },
+      { label: "Intense AI", href: "/assistant", permission: "ai.use" },
     ],
   },
   customer: {
@@ -128,6 +129,7 @@ const ROUTE_PERMISSIONS: { prefix: string; permission: Permission; layouts: Work
   { prefix: "/quality-queue/", permission: "qc.inspect", layouts: ["desk", "mobile"] },
   { prefix: "/my-jobs/", permission: "jobs.arrive", layouts: ["mobile"] },
   { prefix: "/device-storage", permission: "mobile.device", layouts: ["desk", "mobile"] },
+  { prefix: "/assistant", permission: "ai.use", layouts: ["desk", "mobile"] },
 ];
 
 /** Paths that need no sign-in (login and the customer's secure links). */

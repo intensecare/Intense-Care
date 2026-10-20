@@ -209,7 +209,7 @@ const ADMIN: PermissionGrant = Object.fromEntries(
  * customers, no other managers' jobs, no settings, users, reports or finance.
  */
 const FIELD_MANAGER: PermissionGrant = {
-  ...all("mobile.device"),
+  ...all("mobile.device", "ai.use"),
   ...assigned(
     "jobs.view",
     "jobs.update", // work notes only (server restricts fields)
@@ -237,7 +237,7 @@ const FIELD_MANAGER: PermissionGrant = {
 
 /** QC — inspects completed work; never touches money, users or settings. */
 const QC_INSPECTOR: PermissionGrant = {
-  ...all("mobile.device"),
+  ...all("mobile.device", "ai.use"),
   ...all(
     "jobs.view", // required data only — financial fields redacted server-side
     "checklist.view",
@@ -276,7 +276,7 @@ const CUSTOMER: PermissionGrant = {
  * invoiceType = GST for anyone without `finance.view`.
  */
 const TAX_OFFICER: PermissionGrant = {
-  ...all("gst.view", "gst.reports"),
+  ...all("gst.view", "gst.reports", "ai.use"),
 };
 
 export const ROLE_PERMISSIONS: Record<Role, PermissionGrant> = {
