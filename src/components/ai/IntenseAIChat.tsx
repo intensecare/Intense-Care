@@ -6,9 +6,9 @@ import { Markdown } from "./Markdown";
 import { cn } from "@/lib/utils";
 
 /**
- * INTENSE AI chat. Talks only to /api/ai/chat — the server decides what data
- * the assistant can see (the signed-in user's permissions, or the one job of
- * a customer's QR token). Nothing about the AI provider appears here.
+ * INTENSE AI chat — internal ERP users only. Talks only to /api/ai/chat; the
+ * server decides what data the assistant can see from the signed-in user's
+ * own permissions. Nothing about the AI provider appears here.
  */
 
 type Msg = { id: string; role: "user" | "assistant"; content: string; status?: string; error?: string; streaming?: boolean };
@@ -61,14 +61,6 @@ const SUGGESTIONS: Record<string, { suggested: Prompt[]; quick: Prompt[] }> = {
       { label: "Unregistered Buyers", q: "How many GST invoices this month went to customers without a GSTIN?" },
     ],
   },
-  customer: {
-    suggested: [
-      { label: "Where is my service?", q: "What's the status of my service?" },
-      { label: "What happens next?", q: "What happens next with my service?" },
-      { label: "My invoice", q: "Explain my invoice." },
-    ],
-    quick: [],
-  },
 };
 
 const newId = () => Math.random().toString(36).slice(2);
@@ -76,15 +68,12 @@ const newId = () => Math.random().toString(36).slice(2);
 export function IntenseAIChat({
   role,
   userName,
-  token,
   storageKey,
   compact = false,
   dock = "desk",
 }: {
   role: string;
   userName?: string;
-  /** Customer QR token — the assistant then sees only that job. */
-  token?: string;
   /** Keeps the conversation while moving around the app (cleared on sign-out). */
   storageKey: string;
   /** Inside a bottom sheet. */
@@ -100,7 +89,7 @@ export function IntenseAIChat({
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const prompts = SUGGESTIONS[role] ?? SUGGESTIONS.customer;
+  const prompts = SUGGESTIONS[role] ?? { suggested: [], quick: [] };
 
   // Restore / persist this session's conversation.
   useEffect(() => {
@@ -117,11 +106,11 @@ export function IntenseAIChat({
   }, [messages, busy, storageKey]);
 
   useEffect(() => {
-    fetch(`/api/ai/chat${token ? `?token=${encodeURIComponent(token)}` : ""}`, { cache: "no-store" })
+    fetch("/api/ai/chat", { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => setEnabled(!!j?.data?.enabled))
       .catch(() => setEnabled(false));
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -144,7 +133,7 @@ export function IntenseAIChat({
         const res = await fetch("/api/ai/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token, messages: history.filter((m) => m.content && !m.error).map((m) => ({ role: m.role, content: m.content.slice(0, 4000) })) }),
+          body: JSON.stringify({ messages: history.filter((m) => m.content && !m.error).map((m) => ({ role: m.role, content: m.content.slice(0, 4000) })) }),
           signal: ctrl.signal,
         });
         if (!res.ok || !res.body) {
@@ -184,7 +173,7 @@ export function IntenseAIChat({
         abortRef.current = null;
       }
     },
-    [busy, messages, token]
+    [busy, messages]
   );
 
   const stop = () => abortRef.current?.abort();
@@ -221,7 +210,7 @@ export function IntenseAIChat({
           <AiMark />
           <div className="min-w-0">
             <h1 className="text-sm font-bold tracking-[0.18em] text-zinc-950">INTENSE AI</h1>
-            <p className="text-sm text-zinc-500 truncate">{role === "customer" ? "Your service assistant" : "Your Business Intelligence Assistant"}</p>
+            <p className="text-sm text-zinc-500 truncate">Your Business Intelligence Assistant</p>
           </div>
         </div>
         {!empty && (
@@ -244,9 +233,7 @@ export function IntenseAIChat({
               <div aria-hidden className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-rose-500/30 blur-3xl" />
               <p className="relative text-xl sm:text-2xl font-semibold">Hi{first ? ` ${first}` : ""}, I&apos;m Intense AI.</p>
               <p className="relative mt-2 text-base text-zinc-300 max-w-xl">
-                {role === "customer"
-                  ? "Ask me anything about your service — status, your team, the quality check or your invoice."
-                  : role === "tax_officer"
+                {role === "tax_officer"
                   ? "Ask me about your GST invoices and GST reports."
                   : role === "admin"
                   ? "Ask me anything about your business, operations, customers, jobs, quality, revenue, or improvement opportunities."
@@ -348,7 +335,7 @@ export function IntenseAIChat({
             rows={1}
             maxLength={4000}
             disabled={enabled === false}
-            placeholder={role === "customer" ? "Ask about your service…" : "Ask Intense AI anything…"}
+            placeholder="Ask Intense AI anything…"
             className="flex-1 min-w-0 resize-none bg-transparent px-2 py-2.5 text-base outline-none max-h-40 [field-sizing:content] disabled:opacity-50"
           />
           {busy ? (

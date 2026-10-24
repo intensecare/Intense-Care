@@ -149,7 +149,7 @@ test("customer vocabulary: confirm → view progress → approve → rate", () =
 
 test("workspaces: five separate experiences, each with its own home", () => {
   assert.equal(homePathFor("tax_officer"), "/gst");
-  assert.deepEqual(navFor("tax_officer").map((n) => n.label), ["GST Dashboard", "GST Invoices", "GST Reports"]);
+  assert.deepEqual(navFor("tax_officer").map((n) => n.label), ["GST Dashboard", "GST Invoices", "GST Reports", "Intense AI"]);
   assert.deepEqual(
     navFor("admin").filter((n) => !n.secondary).map((n) => n.label),
     ["Dashboard", "Intense AI", "Jobs", "Customers", "Leads", "Quotations", "Invoices", "QC", "Reports", "Users"]
@@ -183,9 +183,9 @@ test("routing: the Field Operations Manager can't open the Operations desk; cust
   assert.equal(isPublicPath("/partner-portal/x"), false, "referral portal removed");
 });
 
-test("Tax Officer: GST invoices and GST reports only — nothing else, read-only", () => {
+test("Tax Officer: GST invoices and GST reports only — nothing else, read-only (plus Intense AI, scoped to those same tools)", () => {
   const grants = Object.entries(ROLE_PERMISSIONS.tax_officer).filter(([, s]) => s !== "NONE").map(([p]) => p).sort();
-  assert.deepEqual(grants, ["gst.reports", "gst.view"]);
+  assert.deepEqual(grants, ["ai.use", "gst.reports", "gst.view"]);
   for (const p of ["finance.view", "invoice.view", "invoice.create", "invoice.update", "jobs.view", "jobs.update", "users.manage", "customers.view", "qc.view", "settings.manage", "links.manage"] as const) {
     assert.equal(scopeOf("tax_officer", p), "NONE", p);
   }
@@ -200,14 +200,13 @@ test("Tax Officer: GST invoices and GST reports only — nothing else, read-only
   assert.equal(routeAllowed("admin", "/gst/reports"), true);
 });
 
-test("Intense AI: only Admin may open it; other roles are forbidden", () => {
-  assert.equal(scopeOf("admin", "ai.use") !== "NONE", true, "admin");
-  assert.equal(routeAllowed("admin", "/assistant"), true, "admin");
-
-  for (const r of ["field_operations_manager", "tax_officer", "customer"] as const) {
-    assert.equal(scopeOf(r, "ai.use"), "NONE", r);
-    assert.equal(routeAllowed(r, "/assistant"), false, r);
+test("Intense AI: every internal role may open it, scoped to what that role can already see; Customer cannot", () => {
+  for (const r of ["admin", "field_operations_manager", "tax_officer"] as const) {
+    assert.equal(scopeOf(r, "ai.use") !== "NONE", true, r);
+    assert.equal(routeAllowed(r, "/assistant"), true, r);
   }
+  assert.equal(scopeOf("customer", "ai.use"), "NONE", "customer");
+  assert.equal(routeAllowed("customer", "/assistant"), false, "customer");
 });
 
 test("GST / Non-GST invoice maths", () => {

@@ -1,24 +1,52 @@
+import Groq from "groq-sdk";
 import { logger } from "@/lib/server/logger";
 
 /**
- * AI provider client (server-only). The provider is Google's Gemini API, but
- * users only ever see "Intense AI": provider errors are logged here and
- * replaced with plain messages before anything reaches the browser.
+ * AI provider client (server-only) — Groq's chat completions API via the official `groq-sdk`.
+ * Users only ever see "Intense AI": provider errors are logged here and replaced with plain
+ * messages before anything reaches the browser.
  *
- * Env: GEMINI_API_KEY (required), GEMINI_MODEL (default gemini-2.5-flash),
- * GEMINI_API_BASE (optional, e.g. a proxy). The key never leaves the server.
+ * Env: GROQ_API_KEY (required), GROQ_MODEL (default openai/gpt-oss-120b — verified live against
+ * Groq's /openai/v1/models before choosing it; Groq retires models over time, so re-check that
+ * list if this one stops working rather than guessing a new one), GROQ_API_BASE (optional, e.g.
+ * a proxy — the bare root, like the default https://api.groq.com; the SDK appends /openai/v1/...
+ * itself). The key never leaves the server.
+ *
+ * This is the ONLY file that knows Groq's wire format. Everything else in src/lib/server/ai
+ * works with the provider-agnostic Msg/ToolDecl/StreamEvent shapes below — swapping providers
+ * again later should only ever touch this file.
  */
 
-export interface Part {
-  text?: string;
-  thought?: boolean;
-  thoughtSignature?: string;
-  functionCall?: { name: string; args?: Record<string, unknown> };
-  functionResponse?: { name: string; response: Record<string, unknown> };
+export interface ToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
 }
-export interface Content {
-  role: "user" | "model";
-  parts: Part[];
+export type Msg =
+  | { role: "system"; content: string }
+  | { role: "user"; content: string }
+  | { role: "assistant"; content: string | null; toolCalls?: ToolCall[] }
+  | { role: "tool"; toolCallId: string; content: string };
+
+export interface ToolSchema {
+  type: string;
+  description?: string;
+  enum?: string[];
+  properties?: Record<string, ToolSchema>;
+  items?: ToolSchema;
+  required?: string[];
+}
+export interface ToolDecl {
+  name: string;
+  description: string;
+  parameters?: ToolSchema;
+}
+
+export interface StreamEvent {
+  /** User-visible answer text (reasoning_format: "hidden" means the model's chain of thought is never sent to us at all). */
+  text?: string;
+  /** Present once, when the model finishes a turn by requesting tool calls instead of answering. */
+  toolCalls?: ToolCall[];
 }
 
 export class AiUnavailableError extends Error {
@@ -28,77 +56,154 @@ export class AiUnavailableError extends Error {
 }
 
 export function aiConfigured(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY?.trim());
+  return Boolean(process.env.GROQ_API_KEY?.trim());
+}
+
+const REQUEST_TIMEOUT_MS = 60_000;
+
+/** Our tool schema uses Gemini-era uppercase JSON-schema-ish types; Groq/OpenAI need lowercase. */
+function convertSchema(s: ToolSchema): Record<string, unknown> {
+  const out: Record<string, unknown> = { type: s.type.toLowerCase() };
+  if (s.description) out.description = s.description;
+  if (s.enum) out.enum = s.enum;
+  if (s.properties) out.properties = Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, convertSchema(v)]));
+  if (s.items) out.items = convertSchema(s.items);
+  if (s.required) out.required = s.required;
+  return out;
+}
+
+function toGroqTools(tools: ToolDecl[]): Groq.Chat.Completions.ChatCompletionTool[] {
+  return tools.map((t) => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters ? convertSchema(t.parameters) : { type: "object", properties: {} },
+    },
+  }));
+}
+
+function toGroqMessages(messages: Msg[]): Groq.Chat.Completions.ChatCompletionMessageParam[] {
+  return messages.map((m) => {
+    if (m.role === "assistant") {
+      return {
+        role: "assistant",
+        content: m.content,
+        ...(m.toolCalls?.length
+          ? { tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: "function" as const, function: { name: c.name, arguments: JSON.stringify(c.args) } })) }
+          : {}),
+      };
+    }
+    if (m.role === "tool") return { role: "tool", tool_call_id: m.toolCallId, content: m.content };
+    return { role: m.role, content: m.content };
+  });
+}
+
+let client: Groq | null = null;
+function groq(): Groq {
+  if (client) return client;
+  client = new Groq({
+    apiKey: process.env.GROQ_API_KEY?.trim(),
+    baseURL: process.env.GROQ_API_BASE?.trim() || undefined,
+    timeout: REQUEST_TIMEOUT_MS,
+  });
+  return client;
+}
+
+/** The model-setup-problem admin messages, keyed by what went wrong — never the provider's name. */
+function setupMessage(detail: string): string {
+  return `Intense AI's ${detail}. The administrator should check the AI key and model setting in the server's environment settings.`;
 }
 
 /**
- * One streamed model turn. Yields the parts of each streamed chunk as they
- * arrive (text deltas, function calls with their thought signatures).
+ * One streamed model turn. Yields user-visible text deltas as they arrive, then (at most once)
+ * the tool calls the model asked for, fully assembled — Groq streams a tool call's JSON
+ * arguments in fragments across several chunks, keyed by index, so they're accumulated here
+ * rather than yielded piecemeal.
  */
 export async function* streamTurn(
-  body: { systemInstruction: { parts: Part[] }; contents: Content[]; tools?: unknown[]; toolConfig?: unknown; generationConfig?: unknown },
+  messages: Msg[],
+  tools: ToolDecl[],
+  opts: { forceAnswer?: boolean } = {},
   signal?: AbortSignal
-): AsyncGenerator<Part[]> {
-  const key = process.env.GEMINI_API_KEY?.trim();
-  if (!key) throw new AiUnavailableError("not_configured", "Intense AI isn't set up yet. Ask your administrator to add the AI key.");
-  const base = (process.env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com").replace(/\/$/, "");
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+): AsyncGenerator<StreamEvent> {
+  if (!aiConfigured()) throw new AiUnavailableError("not_configured", "Intense AI isn't set up yet. Ask your administrator to add the AI key.");
+  const model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
 
-  let res: Response;
+  let stream: AsyncIterable<Groq.Chat.Completions.ChatCompletionChunk>;
   try {
-    res = await fetch(`${base}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify(body),
-      signal,
-    });
+    stream = await groq().chat.completions.create(
+      {
+        model,
+        stream: true,
+        messages: toGroqMessages(messages),
+        temperature: 0.3,
+        max_completion_tokens: 8192,
+        // gpt-oss models always reason a little even at "low" — hidden so it's never shown, and
+        // capped the same way the previous Gemini integration capped its thinking budget.
+        reasoning_effort: "low",
+        reasoning_format: "hidden",
+        ...(opts.forceAnswer ? { tool_choice: "none" as const } : tools.length ? { tools: toGroqTools(tools) } : {}),
+      },
+      { signal }
+    );
   } catch (err) {
-    if (signal?.aborted) throw err;
-    logger.error("ai.provider.network_error", { error: err instanceof Error ? err.message : String(err) });
-    throw new AiUnavailableError("provider_error", "Intense AI couldn't be reached. Please try again in a moment.");
-  }
-  if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => "");
-    logger.error("ai.provider.http_error", { status: res.status, detail: detail.slice(0, 500) });
-    if (res.status === 429) throw new AiUnavailableError("rate_limited", "Intense AI is busy or the AI plan's limit was reached. Please try again in a minute.");
-    // Set-up problems an administrator can fix — say which one (never the provider's name).
-    if (/API_KEY_INVALID|API key not valid|API_KEY_SERVICE_BLOCKED|SERVICE_DISABLED|PERMISSION_DENIED/i.test(detail) || res.status === 401 || res.status === 403) {
-      throw new AiUnavailableError("setup", "Intense AI's key was not accepted. The administrator should check the AI key in the server's environment settings and that the AI API is enabled for that key.");
+    if (signal?.aborted) throw err; // the caller disconnected or pressed Stop — nothing to report
+    if (err instanceof Groq.APIUserAbortError) throw err;
+    if (err instanceof Groq.APIConnectionTimeoutError) throw new AiUnavailableError("provider_error", "Intense AI took too long to respond. Please try again.");
+    if (err instanceof Groq.RateLimitError) throw new AiUnavailableError("rate_limited", "Intense AI is busy or the AI plan's limit was reached. Please try again in a minute.");
+    if (err instanceof Groq.AuthenticationError || err instanceof Groq.PermissionDeniedError) throw new AiUnavailableError("setup", setupMessage("key was not accepted"));
+    if (err instanceof Groq.NotFoundError) throw new AiUnavailableError("setup", setupMessage("model setting is not available"));
+    if (err instanceof Groq.APIConnectionError) {
+      logger.error("ai.provider.network_error", { error: err.message });
+      throw new AiUnavailableError("provider_error", "Intense AI couldn't be reached. Please try again in a moment.");
     }
-    if (res.status === 404 || /is not found for API version|not supported for generateContent/i.test(detail)) {
-      throw new AiUnavailableError("setup", "Intense AI's model setting is not available. The administrator should clear the AI model setting on the server (or set a current model).");
+    if (err instanceof Groq.InternalServerError) throw new AiUnavailableError("provider_error", "Intense AI's provider is temporarily unavailable. Please try again shortly.");
+    if (err instanceof Groq.APIError) {
+      logger.error("ai.provider.http_error", { status: err.status, message: err.message.slice(0, 500) });
+      throw new AiUnavailableError("provider_error", "Intense AI couldn't answer right now. Please try again.");
     }
-    if (/location is not supported|FAILED_PRECONDITION/i.test(detail)) {
-      throw new AiUnavailableError("setup", "Intense AI isn't available from this server's region. The administrator should host the app in a supported region.");
-    }
+    logger.error("ai.provider.unknown_error", { error: err instanceof Error ? err.message : String(err) });
     throw new AiUnavailableError("provider_error", "Intense AI couldn't answer right now. Please try again.");
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line.startsWith("data:")) continue;
-      const json = line.slice(5).trim();
-      if (!json || json === "[DONE]") continue;
-      let chunk: { candidates?: { content?: { parts?: Part[] }; finishReason?: string }[]; promptFeedback?: { blockReason?: string } };
-      try {
-        chunk = JSON.parse(json);
-      } catch {
-        continue;
+  const callAcc = new Map<number, { id: string; name: string; args: string }>();
+  try {
+    for await (const chunk of stream) {
+      const choice = chunk.choices?.[0];
+      if (!choice) continue;
+      const delta = choice.delta ?? {};
+      if (typeof delta.content === "string" && delta.content.length) {
+        yield { text: delta.content };
       }
-      if (chunk.promptFeedback?.blockReason) {
-        throw new AiUnavailableError("blocked", "Intense AI can't help with that request. Try asking about your business data.");
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          const cur = callAcc.get(idx) ?? { id: "", name: "", args: "" };
+          if (tc.id) cur.id = tc.id;
+          if (tc.function?.name) cur.name = tc.function.name;
+          if (tc.function?.arguments) cur.args += tc.function.arguments;
+          callAcc.set(idx, cur);
+        }
       }
-      const parts = chunk.candidates?.[0]?.content?.parts;
-      if (parts?.length) yield parts;
+      if (choice.finish_reason === "tool_calls") {
+        const calls: ToolCall[] = Array.from(callAcc.values()).map((c) => {
+          let args: Record<string, unknown> = {};
+          try {
+            args = c.args ? JSON.parse(c.args) : {};
+          } catch {
+            args = {};
+          }
+          return { id: c.id, name: c.name, args };
+        });
+        yield { toolCalls: calls };
+        callAcc.clear();
+      }
     }
+  } catch (err) {
+    if (signal?.aborted || err instanceof Groq.APIUserAbortError) throw err;
+    if (err instanceof Groq.APIConnectionTimeoutError) throw new AiUnavailableError("provider_error", "Intense AI took too long to respond. Please try again.");
+    logger.error("ai.provider.stream_error", { error: err instanceof Error ? err.message : String(err) });
+    throw new AiUnavailableError("provider_error", "Intense AI couldn't answer right now. Please try again.");
   }
 }

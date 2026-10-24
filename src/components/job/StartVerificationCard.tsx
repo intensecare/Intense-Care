@@ -5,10 +5,11 @@ import { ShieldCheck, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/states";
-import { SelectField, textareaCls, useApiList, Pill } from "@/components/biz/Bits";
+import { textareaCls, useApiList, Pill } from "@/components/biz/Bits";
 import { Field } from "@/components/ui/input";
 import { useApp } from "@/lib/app-context";
-import { START_MODES, START_MODE_INFO, effectiveStartMode, modeNeedsGps, normalizeStartMode, type StartMode, type StartVerificationSettings } from "@/lib/start-verification";
+import { START_MODE_INFO, effectiveStartMode, modeNeedsGps, normalizeStartMode, type StartMode, type StartVerificationSettings } from "@/lib/start-verification";
+import { VerificationModeCards } from "@/components/job/VerificationModeCards";
 import type { Job } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 
@@ -16,8 +17,8 @@ interface Attempt { id: string; at: string; user: string; role: string; mode: st
 
 const QR_LABEL: Record<string, string> = { VALID: "QR valid", INVALID: "QR invalid", EXPIRED: "QR expired", REVOKED: "QR cancelled", OTHER_JOB: "QR of another job", OTHER_PROPERTY: "QR of another property", MISSING: "No QR scanned", RATE_LIMITED: "Too many QR attempts" };
 const GPS_LABEL: Record<string, string> = { PASSED: "GPS passed", FAILED: "GPS failed" };
-/** Rows written before the three-mode change. */
-const LEGACY_MODE: Record<string, string> = { QR: "QR job start (retired)", QR_GPS: "QR + GPS (retired)" };
+/** Rows written while "QR_GPS" was the combined-check spelling, before it became "GPS_QR". */
+const LEGACY_MODE: Record<string, string> = { QR_GPS: "QR + GPS (retired spelling)" };
 
 async function patchJob(id: string, body: Record<string, unknown>) {
   const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
@@ -102,10 +103,11 @@ export function StartVerificationCard({ job, canEdit }: { job: Job; canEdit: boo
             <DialogTitle>Start verification for this job</DialogTitle>
             <DialogDescription>The Field Manager sees what is required before they arrive.</DialogDescription>
           </DialogHeader>
-          <SelectField label="Mode" id="sv-mode" value={draft} onChange={setDraft}>
-            <option value="">Company default ({START_MODE_INFO[sv.defaultMode].label})</option>
-            {START_MODES.map((m) => <option key={m} value={m}>{START_MODE_INFO[m].label}</option>)}
-          </SelectField>
+          <label className="flex items-center gap-3 text-sm text-zinc-800 min-h-11">
+            <input type="checkbox" checked={draft === ""} onChange={(e) => setDraft(e.target.checked ? "" : sv.defaultMode)} className="h-5 w-5 accent-rose-500" />
+            Use the company default ({START_MODE_INFO[sv.defaultMode].label})
+          </label>
+          {draft !== "" && <VerificationModeCards name="sv-mode" value={draft as StartMode} onChange={setDraft} />}
           {error && <Notice tone="error">{error}</Notice>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEdit(false)}>Cancel</Button>

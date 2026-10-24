@@ -219,7 +219,7 @@ const ADMIN: PermissionGrant = Object.fromEntries(
  * Never Admin: no finance, payments, users, settings, integrations or contacts.
  */
 const FIELD_OPERATIONS_MANAGER: PermissionGrant = {
-  ...all("mobile.device"),
+  ...all("mobile.device", "ai.use"),
   ...assigned(
     "jobs.view",
     "jobs.update", // work notes only (server restricts fields)
@@ -267,7 +267,7 @@ const CUSTOMER: PermissionGrant = {
  * invoiceType = GST for anyone without `finance.view`.
  */
 const TAX_OFFICER: PermissionGrant = {
-  ...all("gst.view", "gst.reports"),
+  ...all("gst.view", "gst.reports", "ai.use"),
 };
 
 export const ROLE_PERMISSIONS: Record<Role, PermissionGrant> = {

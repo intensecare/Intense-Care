@@ -6,11 +6,18 @@ import { AppProvider } from "@/lib/app-context";
 import { RouteGuard } from "@/components/common/RouteGuard";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { NativeBridge } from "@/components/mobile/NativeBridge";
+import { resolveBaseUrl } from "@/lib/server/policy";
+
+const title = "Intense Care Deep Cleaning Operations ERP";
+const description =
+  "Enterprise Field-Service ERP for Intense Care Deep Cleaning Operations — Secure Customer Links, Checklists, Independent QC, Customer Sign-off, and Commission Engine";
 
 export const metadata: Metadata = {
-  title: "Intense Care Deep Cleaning Operations ERP",
-  description:
-    "Enterprise Field-Service ERP for Intense Care Deep Cleaning Operations — Secure Customer Links, Checklists, Independent QC, Customer Sign-off, and Commission Engine",
+  metadataBase: new URL(resolveBaseUrl(null)),
+  title,
+  description,
+  openGraph: { title, description, siteName: "Intense Care", type: "website" },
+  twitter: { card: "summary_large_image", title, description },
 };
 
 export default function RootLayout({

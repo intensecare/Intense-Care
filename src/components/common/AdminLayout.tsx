@@ -125,14 +125,8 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
 
       {/* Desktop sidebar */}
       <aside className="print:hidden hidden lg:flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-white h-screen sticky top-0">
-        <Link href={home} className="flex items-center gap-3 px-5 h-16 border-b border-zinc-100">
-          <span className="h-9 w-9 rounded-xl bg-white border border-zinc-200 p-1.5 flex items-center justify-center overflow-hidden">
-            <img src="/logo.png" alt="" className="h-full w-full object-contain" />
-          </span>
-          <span className="leading-tight">
-            <span className="block text-sm font-bold tracking-[0.14em] text-zinc-950">INTENSE CARE</span>
-            <span className="block text-xs text-zinc-500">{workspace.title}</span>
-          </span>
+        <Link href={home} className="flex items-center px-5 h-16 border-b border-zinc-100 hover:opacity-90 transition-opacity" aria-label="Intense Care Home">
+          <img src="/intense-logo-black.png" alt="Intense Care" className="h-8 w-auto object-contain" />
         </Link>
         <nav aria-label="Main" className="flex-1 overflow-y-auto p-3 space-y-0.5">
           {secondaryNav.length > 0 && (
@@ -182,10 +176,8 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Top bar */}
         <header className="print:hidden sticky top-0 z-30 h-16 bg-white/95 backdrop-blur border-b border-zinc-200 px-4 sm:px-6 flex items-center gap-3">
-          <Link href={home} className="lg:hidden flex items-center gap-2 shrink-0" aria-label="Home">
-            <span className="h-9 w-9 rounded-xl bg-white border border-zinc-200 p-1.5 flex items-center justify-center overflow-hidden">
-              <img src="/logo.png" alt="" className="h-full w-full object-contain" />
-            </span>
+          <Link href={home} className="lg:hidden flex items-center shrink-0 hover:opacity-90 transition-opacity" aria-label="Home">
+            <img src="/intense-logo-black.png" alt="Intense Care" className="h-7 w-auto object-contain" />
           </Link>
           {canSearchJobs ? (
           <form onSubmit={search} className="hidden sm:block relative flex-1 max-w-md">

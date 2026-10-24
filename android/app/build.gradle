@@ -8,8 +8,10 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Every Play Store upload needs a higher versionCode: APP_VERSION_CODE=2 ./gradlew bundleRelease
-        versionCode (System.getenv("APP_VERSION_CODE") ?: "1").toInteger()
-        versionName System.getenv("APP_VERSION_NAME") ?: "1.0.0"
+        def envVersionCode = (System.getenv("APP_VERSION_CODE") ?: "1").toInteger()
+        def envVersionName = System.getenv("APP_VERSION_NAME") ?: "1.0.0"
+        versionCode envVersionCode
+        versionName envVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

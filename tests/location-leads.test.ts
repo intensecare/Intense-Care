@@ -59,19 +59,19 @@ test("distance: ~40 m and ~3 km", () => {
   assert.ok(distanceMeters(12.95, 77.6, 12.97, 77.62) > 3000);
 });
 
-test("start modes: exactly DIRECT, GPS, GPS_QR; retired values never weaken", () => {
-  assert.deepEqual([...START_MODES], ["DIRECT", "GPS", "GPS_QR"]);
-  assert.equal(normalizeStartMode("QR"), "GPS_QR");
-  assert.equal(normalizeStartMode("QR_GPS"), "GPS_QR");
+test("start modes: DIRECT, GPS, QR, GPS_QR; only the retired QR_GPS spelling is upgraded", () => {
+  assert.deepEqual([...START_MODES], ["DIRECT", "GPS", "QR", "GPS_QR"]);
+  assert.equal(normalizeStartMode("QR"), "QR", "QR is a real mode again, not auto-upgraded");
+  assert.equal(normalizeStartMode("QR_GPS"), "GPS_QR", "only the old QR_GPS spelling is still retired");
   assert.equal(normalizeStartMode("FACE_ID"), null);
   const s = { ...DEFAULT_START_VERIFICATION, defaultMode: "GPS" as const };
   assert.equal(effectiveStartMode(null, s), "GPS");
   assert.equal(effectiveStartMode("DIRECT", s), "DIRECT");
-  assert.equal(effectiveStartMode("QR", s), "GPS_QR");
+  assert.equal(effectiveStartMode("QR", s), "QR");
   assert.equal(effectiveStartMode("DIRECT", { ...s, allowPerJobOverride: false }), "GPS", "per-job mode ignored when overrides are off");
   assert.equal(effectiveStartMode(null, { ...s, defaultMode: "QR_GPS" as never }), "GPS_QR", "a stored retired default reads as GPS_QR");
-  assert.deepEqual([modeNeedsGps("DIRECT"), modeNeedsGps("GPS"), modeNeedsGps("GPS_QR")], [false, true, true]);
-  assert.deepEqual([modeNeedsQr("DIRECT"), modeNeedsQr("GPS"), modeNeedsQr("GPS_QR")], [false, false, true]);
+  assert.deepEqual([modeNeedsGps("DIRECT"), modeNeedsGps("GPS"), modeNeedsGps("QR"), modeNeedsGps("GPS_QR")], [false, true, false, true]);
+  assert.deepEqual([modeNeedsQr("DIRECT"), modeNeedsQr("GPS"), modeNeedsQr("QR"), modeNeedsQr("GPS_QR")], [false, false, true, true]);
 });
 
 test("QR scan: the token is the last path segment of the customer link", () => {

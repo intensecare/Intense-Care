@@ -1,10 +1,11 @@
-// Intense AI security + plumbing check, with a stand-in AI provider.
+// Intense AI security + plumbing check, with a stand-in AI provider (Groq's OpenAI-compatible
+// chat completions wire format).
 //
-// The stand-in obeys scripted questions like "CALL get_invoices {"type":"NON_GST"}"
+// The stand-in obeys scripted questions like `CALL get_invoices {"type":"NON_GST"}`
 // — i.e. it behaves like a model that ASKS for data it should not get — so this
 // proves the server enforces permissions regardless of what the model wants.
 // Run after scripts/e2e-verify.mjs on the same database, with the app started as:
-//   GEMINI_API_KEY=test-key GEMINI_API_BASE=http://localhost:3999 npm run start -- -p 3100
+//   GROQ_API_KEY=test-key GROQ_API_BASE=http://localhost:3999 npm run start -- -p 3100
 //   BASE_URL=http://localhost:3100 node scripts/ai-verify.mjs
 import http from "node:http";
 import { execSync } from "node:child_process";
@@ -22,30 +23,33 @@ const mock = http.createServer((req, res) => {
   req.on("data", (c) => (raw += c));
   req.on("end", () => {
     const body = JSON.parse(raw || "{}");
-    seen.push({ url: req.url, key: req.headers["x-goog-api-key"], body });
-    const contents = body.contents ?? [];
-    const last = contents[contents.length - 1];
-    const firstUser = contents.find((c) => c.role === "user")?.parts?.[0]?.text ?? "";
-    const lastUserText = [...contents].reverse().find((c) => c.role === "user" && c.parts?.[0]?.text)?.parts[0].text ?? "";
+    seen.push({ url: req.url, auth: req.headers["authorization"], body });
+    const messages = body.messages ?? [];
+    const last = messages[messages.length - 1];
+    const firstUser = messages.find((m) => m.role === "user")?.content ?? "";
+    const lastUserText = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
     const sse = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
     if (lastUserText.startsWith("ERROR")) {
       res.writeHead(500, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ error: { message: "Gemini API internal error at generativelanguage.googleapis.com" } }));
+      return res.end(JSON.stringify({ error: { message: "Groq API internal error", type: "server_error" } }));
     }
     res.writeHead(200, { "Content-Type": "text/event-stream" });
-    const fr = last?.parts?.find((p) => p.functionResponse);
-    if (fr && !lastUserText.startsWith("LOOP")) {
-      const text = "RESULT " + JSON.stringify(last.parts.map((p) => p.functionResponse.response));
-      sse({ candidates: [{ content: { role: "model", parts: [{ text: text.slice(0, 20) }] } }] });
-      sse({ candidates: [{ content: { role: "model", parts: [{ text: text.slice(20) }] }, finishReason: "STOP" }] });
+    if (last?.role === "tool" && !lastUserText.startsWith("LOOP")) {
+      // Gather every trailing "tool" message (one round can answer several parallel calls).
+      const trailing = [];
+      for (let i = messages.length - 1; i >= 0 && messages[i].role === "tool"; i--) trailing.unshift(messages[i]);
+      const text = "RESULT " + JSON.stringify(trailing.map((t) => JSON.parse(t.content)));
+      sse({ choices: [{ index: 0, delta: { role: "assistant", content: text.slice(0, 20) }, finish_reason: null }] });
+      sse({ choices: [{ index: 0, delta: { content: text.slice(20) }, finish_reason: "stop" }] });
       return res.end();
     }
     const m = /^(?:CALL|LOOP) (\w+)\s*(\{.*\})?/.exec(lastUserText);
-    if (m && body.toolConfig?.functionCallingConfig?.mode !== "NONE") {
-      sse({ candidates: [{ content: { role: "model", parts: [{ functionCall: { name: m[1], args: JSON.parse(m[2] || "{}") }, thoughtSignature: "sig-123" }] } }] });
+    if (m && body.tool_choice !== "none") {
+      sse({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "call_test_1", type: "function", function: { name: m[1], arguments: m[2] || "{}" } }] }, finish_reason: null }] });
+      sse({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] });
       return res.end();
     }
-    sse({ candidates: [{ content: { role: "model", parts: [{ text: `Hello from the model (${firstUser.slice(0, 20)})` }] }, finishReason: "STOP" }] });
+    sse({ choices: [{ index: 0, delta: { role: "assistant", content: `Hello from the model (${firstUser.slice(0, 20)})` }, finish_reason: "stop" }] });
     res.end();
   });
 });
@@ -63,7 +67,7 @@ async function chat(cookie, question, extra = {}) {
   const text = events.filter((e) => e.type === "delta").map((e) => e.text).join("");
   return { status: r.status, events, text, result: text.startsWith("RESULT ") ? JSON.parse(text.slice(7))[0] : null };
 }
-const declared = () => (seen[seen.length - 1].body.tools?.[0]?.functionDeclarations ?? []).map((d) => d.name).sort();
+const declared = () => (seen[seen.length - 1].body.tools ?? []).map((t) => t.function.name).sort();
 
 const admin = await login("admin@test.local", "adminpass123");
 const fm = await login("fm1@test.local", "password123");
@@ -77,57 +81,73 @@ ok((await (await fetch(BASE + "/api/ai/chat", { headers: { cookie: admin } })).j
 let r = await chat(admin, "Hello");
 ok(r.text.startsWith("Hello from the model") && r.events.at(-1).type === "done", "plain answer streams back and finishes");
 await fetch(BASE + "/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json", cookie: admin }, body: JSON.stringify({ messages: [{ role: "assistant", content: "Welcome" }, { role: "user", content: "first try" }, { role: "user", content: "Hello again" }] }) }).then((x) => x.text());
-ok(JSON.stringify(seen.at(-1).body.contents.map((c) => c.role)) === '["user"]' && seen.at(-1).body.contents[0].parts[0].text.includes("Hello again"), "history after a failed answer is merged into one user turn");
-ok(seen.at(-1).key === "test-key" && seen.at(-1).url.includes(":streamGenerateContent?alt=sse"), "server calls the provider with the server-side key (streaming)");
-ok(seen.at(-1).body.systemInstruction.parts[0].text.includes("You are INTENSE AI"), "assistant is instructed to be Intense AI");
+ok(JSON.stringify(seen.at(-1).body.messages.map((m) => m.role)) === '["system","user"]' && seen.at(-1).body.messages[1].content.includes("Hello again"), "history after a failed answer is merged into one user turn (after the system prompt)");
+ok(seen.at(-1).auth === "Bearer test-key" && seen.at(-1).url.includes("/chat/completions"), "server calls the provider with the server-side key (streaming)");
+ok(seen.at(-1).body.messages[0].role === "system" && seen.at(-1).body.messages[0].content.includes("You are INTENSE AI"), "assistant is instructed to be Intense AI");
 
 r = await chat(admin, 'CALL get_revenue_summary {"period":"all_time","compare_previous":true}');
 ok(r.events.some((e) => e.type === "status" && e.text === "Checking revenue"), "tool progress shown to the user ('Checking revenue')");
 ok(typeof r.result?.result?.current?.billed === "number", `admin revenue tool returns real figures (billed ₹${r.result?.result?.current?.billed})`);
-ok(seen.at(-1).body.contents.some((c) => c.role === "model" && c.parts.some((p) => p.thoughtSignature === "sig-123")), "model turn echoed back verbatim (thought signature kept)");
 ok(declared().includes("get_revenue_summary") && declared().includes("get_field_manager_performance") && declared().includes("get_customer_feedback"), "admin is offered the full business toolset");
 
 r = await chat(admin, 'CALL get_business_metrics {"period":"all_time"}');
 const bm = r.result?.result;
 ok(bm?.jobs?.booked >= 1 && "revenue" in bm && "firstTimePassRatePercent" in bm.quality, "admin business metrics include jobs, quality and revenue");
 
-// Intense AI is for Admin (and customers through their QR) only.
-for (const [who, c] of [["Tax Officer", tax], ["Field Manager", fm], ["QC", qc]]) {
-  const before = seen.length;
-  ok((await chat(c, "Hello")).status === 403, `${who}: Intense AI refused (403)`);
-  ok(seen.length === before, `${who}: nothing is sent to the AI provider`);
-  ok((await fetch(BASE + "/api/ai/chat", { headers: { cookie: c } })).status === 403, `${who}: AI status check refused`);
+// Intense AI is for internal ERP users (ai.use) — Admin, Field Manager, QC and Tax Officer all now
+// get it, each scoped to exactly what their existing permissions already allow (no new role access
+// was invented; ai.use was simply missing from three of the four roles' grants until now).
+for (const [who, c, expectTools, forbidTools] of [
+  ["Field Manager", fm, ["get_jobs", "get_my_work_summary", "get_qc_report", "get_rework_report", "get_customers"], ["get_leads", "get_revenue_summary", "get_business_metrics", "get_gst_summary"]],
+  ["Field Operations Manager (former QC)", qc, ["get_qc_report", "get_rework_report", "get_jobs"], ["get_leads", "get_revenue_summary", "get_gst_summary"]],
+  ["Tax Officer", tax, ["get_invoices", "get_gst_summary"], ["get_leads", "get_revenue_summary", "get_jobs", "get_customers", "get_business_metrics"]],
+]) {
+  const res = await chat(c, "Hello");
+  ok(res.status === 200 && res.text.startsWith("Hello from the model"), `${who}: Intense AI now answers (ai.use was missing before this fix)`);
+  ok((await fetch(BASE + "/api/ai/chat", { headers: { cookie: c } })).status === 200, `${who}: AI status check succeeds`);
+  const d = declared();
+  for (const t of expectTools) ok(d.includes(t), `${who}: offered ${t}`);
+  for (const t of forbidTools) ok(!d.includes(t), `${who}: NOT offered ${t} (no permission for it)`);
 }
 
-// Customer — their own job only, via the QR token
+// Defense in depth: even a tool never DECLARED to a role is refused server-side if a (compromised)
+// model asks for it anyway — the model's own tool list is never the security boundary.
+r = await chat(tax, 'CALL get_leads {}'); // leads.view is Admin-only
+ok(/Not permitted/.test(r.result?.result?.error ?? JSON.stringify(r.result)), "Tax Officer: undeclared get_leads call is refused server-side");
+r = await chat(fm, 'CALL get_revenue_summary {}'); // finance.view — Field Manager never has it
+ok(/Not permitted/.test(r.result?.result?.error ?? JSON.stringify(r.result)), "Field Manager: undeclared get_revenue_summary call is refused server-side");
+
+// get_leads — the new Customers & Leads tool, Admin-only (leads.view), real data, correctly shaped.
+r = await chat(admin, 'CALL get_leads {"segment":"due_followup"}');
+const leadsResult = r.result?.result;
+ok(leadsResult && "byStatus" in leadsResult && "winRatePercent" in leadsResult && "totalLeads" in leadsResult, "Admin: get_leads returns byStatus / winRatePercent / totalLeads");
+ok(Array.isArray(leadsResult?.leads), "…and the matching leads themselves");
+
+// Intense AI is internal-only now — there is no customer path at all, token or otherwise.
+ok((await chat(null, "hi")).status >= 400, "No session, no token field → refused outright");
 const jobId = sql(`select id from "Job" where status='COMPLETED' limit 1`);
 const link = (await (await fetch(BASE + "/api/qr-links", { method: "POST", headers: { cookie: admin, "Content-Type": "application/json" }, body: JSON.stringify({ action: "get", jobId }) })).json()).data.linkUrl;
 const token = link.split("/").pop();
-r = await chat(null, "CALL get_my_service {}", { token });
-ok(r.result?.result?.jobId === sql(`select "jobSerial" from "Job" where id='${jobId}'`), "Customer (QR token): sees their own service");
-ok(JSON.stringify(declared()) === JSON.stringify(["get_my_service"]), "Customer is offered only their own service");
-// What the real provider rejects: OBJECT schemas without properties, conversations not starting with the user.
-ok(seen.every((x) => (x.body.tools?.[0]?.functionDeclarations ?? []).every((d) => !d.parameters || Object.keys(d.parameters.properties ?? {}).length > 0)), "no tool is declared with an empty parameter object");
-ok(seen.every((x) => x.body.contents[0].role === "user" && x.body.contents.every((c, i) => i === 0 || c.role !== x.body.contents[i - 1].role)), "every request starts with the user and alternates roles");
-ok(seen.every((x) => x.body.generationConfig?.thinkingConfig?.thinkingBudget > 0), "thinking is capped so answers are not cut off");
-r = await chat(null, 'CALL get_jobs {}', { token });
-ok(/Not permitted/.test(r.result?.result?.error ?? ""), "Customer: model asking for all jobs → Not permitted");
-r = await chat(null, 'CALL get_customers {}', { token });
-ok(/Not permitted/.test(r.result?.result?.error ?? ""), "Customer: model asking for other customers → Not permitted");
-ok((await chat(null, "hi", { token: token.slice(0, -3) + "xyz" })).status >= 400, "Customer: tampered token refused");
+const beforeCustomer = seen.length;
+ok((await chat(null, "CALL get_my_service {}", { token })).status >= 400, "A request carrying a valid customer QR token is STILL refused — token is not a bypass, the field is simply ignored");
+ok(seen.length === beforeCustomer, "…and nothing was sent to the AI provider for it");
+ok((await fetch(BASE + `/api/ai/chat?token=${encodeURIComponent(token)}`)).status >= 400, "GET with ?token= no longer grants access either");
+ok(!seen.some((x) => (x.body.tools ?? []).some((t) => t.function.name === "get_my_service")), "get_my_service no longer exists as a tool at all");
+ok(seen.every((x) => x.body.messages[0]?.role === "system" && (x.body.messages[1]?.role ?? "user") === "user"), "every request opens with the system prompt then the user");
+ok(seen.every((x) => x.body.reasoning_effort === "low"), "reasoning effort is capped so answers are not slow or cut off");
 
 // Robustness + branding
 r = await chat(admin, "ERROR please");
 const err = r.events.find((e) => e.type === "error");
-ok(err && !/gemini|google/i.test(err.message), `provider failure becomes a plain message: "${err?.message}"`);
+ok(err && !/groq|gemini|google/i.test(err.message), `provider failure becomes a plain message: "${err?.message}"`);
 r = await chat(admin, 'LOOP get_jobs {}');
-ok(r.events.at(-1).type === "done" && seen.at(-1).body.toolConfig.functionCallingConfig.mode === "NONE", "endless tool calling is cut off (final round answers without tools)");
+ok(r.events.at(-1).type === "done" && seen.at(-1).body.tool_choice === "none", "endless tool calling is cut off (final round forced to answer without tools)");
 ok((await chat(admin, "x".repeat(4001))).status === 400, "over-long question refused");
 
 const files = [];
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).forEach((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : files.push(path.join(d, e.name))));
 walk(".next/static");
-const leaks = files.filter((f) => /\.(js|css|html)$/.test(f) && /gemini|GEMINI_API_KEY|generativelanguage/i.test(fs.readFileSync(f, "utf8")));
+const leaks = files.filter((f) => /\.(js|css|html)$/.test(f) && /groq|GROQ_API_KEY|gemini|generativelanguage/i.test(fs.readFileSync(f, "utf8")));
 ok(leaks.length === 0, `browser bundles never mention the provider or key (${leaks.length} files)`);
 
 mock.close();

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { normalizeCoords } from "@/lib/location";
 import { validateCrew, createJobWithInvoice, cleanVisibility, afterJobCreated } from "@/lib/server/job-create";
+import { START_MODES } from "@/lib/start-verification";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
@@ -107,6 +108,8 @@ const CreateJobSchema = z.object({
   invoiceType: z.enum(["GST", "NON_GST"]).optional(),
   /** GST only: inter-state supply → IGST instead of CGST + SGST. */
   interState: z.boolean().optional().default(false),
+  /** Per-job override of the start verification mode; unset = follow the company default. */
+  startVerificationMode: z.enum(START_MODES).nullable().optional(),
 });
 
 /**
@@ -188,6 +191,9 @@ export async function POST(request: Request) {
     }
 
     const settings = await getSystemSettings();
+    if (d.startVerificationMode !== undefined && d.startVerificationMode !== null && !settings.jobStartVerification.allowPerJobOverride) {
+      return fail("Per-job start verification is turned off in Settings.", 409);
+    }
     const invoiceType = d.invoiceType ?? (service.gstTreatment === "NON_GST" ? "NON_GST" : "GST");
     const result = await createJobWithInvoice(
       {
@@ -208,6 +214,7 @@ export async function POST(request: Request) {
         saveLocationToProperty: d.saveLocationToProperty,
         customerVisibility: cleanVisibility(d.customerVisibility),
         invoice: { type: invoiceType, interState: d.interState },
+        startVerificationMode: d.startVerificationMode ?? null,
       },
       settings
     );

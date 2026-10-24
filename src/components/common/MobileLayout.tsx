@@ -128,7 +128,7 @@ export function MobileLayout({
 
 /** Shared Profile tab for field roles: who am I, text size, sign out. */
 export function ProfilePanel() {
-  const { currentUser, roleLabel, logout } = useAuth();
+  const { currentUser, roleLabel, logout, can } = useAuth();
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border border-zinc-200 bg-white p-5 flex items-center gap-4">
@@ -150,6 +150,11 @@ export function ProfilePanel() {
           </div>
         )}
       </section>
+      {can("ai.use") && (
+        <Link href="/assistant" className="w-full h-12 rounded-xl border border-zinc-300 bg-white text-base font-semibold text-zinc-800 inline-flex items-center justify-center gap-2">
+          <Sparkles className="h-4 w-4 text-rose-500" aria-hidden /> Intense AI
+        </Link>
+      )}
       <Link href="/device-storage" className="w-full h-12 rounded-xl border border-zinc-300 bg-white text-base font-semibold text-zinc-800 inline-flex items-center justify-center">
         Device storage &amp; notifications
       </Link>

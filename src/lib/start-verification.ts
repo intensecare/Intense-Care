@@ -2,10 +2,11 @@
  * Job start verification — how a Field Manager proves they are at the job
  * before it starts (the "I'm here" step, which then asks the customer to confirm).
  *
- * Exactly three policies, set by Admin (Settings → Job start verification),
- * optionally overridden per job. GPS_QR reuses the job's one customer QR.
+ * Four policies, set by Admin (Settings → Job start verification), optionally
+ * overridden per job. QR and GPS_QR both reuse the job's one customer QR —
+ * no separate QR is ever minted for staff.
  */
-export const START_MODES = ["DIRECT", "GPS", "GPS_QR"] as const;
+export const START_MODES = ["DIRECT", "GPS", "QR", "GPS_QR"] as const;
 export type StartMode = (typeof START_MODES)[number];
 
 export interface StartVerificationSettings {
@@ -26,19 +27,20 @@ export const DEFAULT_START_VERIFICATION: StartVerificationSettings = {
   allowPerJobOverride: true,
 };
 
-export const START_MODE_INFO: Record<StartMode, { label: string; action: string; needs: string }> = {
-  DIRECT: { label: "Direct Job Start", action: "Start Job", needs: "No GPS or QR needed. Tap Start Job when you arrive." },
-  GPS: { label: "GPS Job Start", action: "Verify GPS & Start Job", needs: "Your phone's GPS must place you at the saved job location. Turn on location before you arrive." },
-  GPS_QR: { label: "GPS + QR Job Start", action: "Verify GPS + Scan QR", needs: "Your GPS must place you at the saved job location AND you must scan the customer's QR for this job." },
+export const START_MODE_INFO: Record<StartMode, { label: string; action: string; needs: string; short: string }> = {
+  DIRECT: { label: "No Verification", short: "No GPS or QR required", action: "Start Job", needs: "No GPS or QR needed. Tap Start Job when you arrive." },
+  GPS: { label: "Location Verification", short: "GPS location must match", action: "Verify GPS & Start Job", needs: "Your phone's GPS must place you at the saved job location. Turn on location before you arrive." },
+  QR: { label: "QR Verification Only", short: "Scan the customer's QR", action: "Scan QR & Start Job", needs: "Scan the customer's QR code for this job. GPS is not required." },
+  GPS_QR: { label: "QR + Location Verification", short: "GPS and QR both required", action: "Verify GPS + Scan QR", needs: "Your GPS must place you at the saved job location AND you must scan the customer's QR for this job." },
 };
 
-/** Older stored values (before the three-mode change) map to the mode that replaced them. */
+/** `QR_GPS` was an even older alias for the combined check, before it was briefly spelled `GPS_QR`-only; `QR` is a normal mode again. */
 export function normalizeStartMode(v: unknown): StartMode | null {
-  if (v === "QR" || v === "QR_GPS") return "GPS_QR";
+  if (v === "QR_GPS") return "GPS_QR";
   return isStartMode(v) ? v : null;
 }
 export const modeNeedsGps = (m: StartMode) => m === "GPS" || m === "GPS_QR";
-export const modeNeedsQr = (m: StartMode) => m === "GPS_QR";
+export const modeNeedsQr = (m: StartMode) => m === "QR" || m === "GPS_QR";
 
 export const isStartMode = (v: unknown): v is StartMode => typeof v === "string" && (START_MODES as readonly string[]).includes(v);
 
