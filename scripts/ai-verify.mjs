@@ -99,7 +99,7 @@ ok(bm?.jobs?.booked >= 1 && "revenue" in bm && "firstTimePassRatePercent" in bm.
 // was invented; ai.use was simply missing from three of the four roles' grants until now).
 for (const [who, c, expectTools, forbidTools] of [
   ["Field Manager", fm, ["get_jobs", "get_my_work_summary", "get_qc_report", "get_rework_report", "get_customers"], ["get_leads", "get_revenue_summary", "get_business_metrics", "get_gst_summary"]],
-  ["QC", qc, ["get_qc_report", "get_rework_report", "get_jobs"], ["get_leads", "get_revenue_summary", "get_customers", "get_gst_summary"]],
+  ["Field Operations Manager (former QC)", qc, ["get_qc_report", "get_rework_report", "get_jobs"], ["get_leads", "get_revenue_summary", "get_gst_summary"]],
   ["Tax Officer", tax, ["get_invoices", "get_gst_summary"], ["get_leads", "get_revenue_summary", "get_jobs", "get_customers", "get_business_metrics"]],
 ]) {
   const res = await chat(c, "Hello");

@@ -158,6 +158,17 @@ export async function PATCH(request: Request) {
       patch.jobStartVerification = next;
     }
 
+    if (body.qualityControl && typeof body.qualityControl === "object") {
+      const v = body.qualityControl as Record<string, unknown>;
+      if (v.separationOfDuties !== undefined) {
+        if (typeof v.separationOfDuties !== "boolean") return NextResponse.json({ success: false, error: "Invalid quality control setting." }, { status: 400 });
+        patch.qualityControl = { ...current.qualityControl, separationOfDuties: v.separationOfDuties };
+        if (v.separationOfDuties !== current.qualityControl.separationOfDuties) {
+          void recordAudit({ actor: auth.user, action: "QC_SEPARATION_SETTING_CHANGED", entityType: "settings", entityId: "qualityControl", previousState: String(current.qualityControl.separationOfDuties), newState: String(v.separationOfDuties), request });
+        }
+      }
+    }
+
     if (body.upi && typeof body.upi === "object") {
       const v = body.upi as Record<string, unknown>;
       const next = { ...current.upi };

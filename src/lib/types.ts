@@ -100,6 +100,8 @@ export interface SystemSettings {
   contactSync: import("./contacts").ContactSyncSettings;
   /** UPI payment configuration (Admin). Empty and switched off until configured. */
   upi: import("./payments").UpiSettings;
+  /** Quality control rules. */
+  qualityControl: import("./qc-policy").QcPolicy;
 }
 
 /** What a customer may see on their QR page. Internal data is never included. */
@@ -389,6 +391,10 @@ export interface QualityCheck {
   issuesCount: number;
   notes?: string;
   evidencePhotos: string[];
+  /** When the inspection began (absent on records from before the merge). */
+  startedAt?: string;
+  /** The inspector was also on the job's crew (only possible when separation of duties is switched off). */
+  inspectorOnCrew?: boolean;
   inspectedAt?: string;
   completedAt?: string;
 }

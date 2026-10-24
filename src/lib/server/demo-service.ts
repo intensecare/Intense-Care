@@ -68,7 +68,7 @@ export async function ensureDemoAccounts() {
           serviceId: service.id,
           scheduledDate: today,
           scheduledTimeSlot: "10:00 - 14:00",
-          assignedManagerId: ids.field_manager,
+          assignedManagerId: ids.field_operations_manager,
           amount: service.basePrice,
           status: "ASSIGNED",
           notes: "Demo job",

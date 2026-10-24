@@ -14,14 +14,14 @@ datasource db {
 }
 
 /// Login account. `role` is one of the sign-in roles (src/lib/rbac/roles.ts):
-/// admin | field_manager | qc_inspector | tax_officer. Customers never sign
+/// admin | field_operations_manager | tax_officer (legacy field_manager / qc_inspector are migrated). Customers never sign
 /// in — they use the ONE secure link / QR of their job.
 model User {
   id                String   @id @default(cuid())
   name              String
   email             String   @unique
   phone             String
-  role              String // admin | field_manager | qc_inspector | tax_officer
+  role              String // admin | field_operations_manager | tax_officer
   avatar            String?
   passwordHash      String? // bcrypt hash; null = password login disabled until set
   active            Boolean  @default(true)
@@ -63,22 +63,22 @@ model Customer {
 }
 
 model Property {
-  id                  String   @id @default(cuid())
+  id                  String    @id @default(cuid())
   customerId          String
   title               String
   address             String
-  propertyType        String   @default("apartment") // apartment | villa | office | penthouse | commercial | duplex
+  propertyType        String    @default("apartment") // apartment | villa | office | penthouse | commercial | duplex
   /// Full, printable address (always required). The parts below are optional
   /// structure used for search, filters and documents.
-  city                String   @default("")
+  city                String    @default("")
   postalCode          String?
   addressLine         String?
   locality            String?
   state               String?
   country             String?
-  bedrooms            Int      @default(1)
-  bathrooms           Int      @default(1)
-  areaSqFt            Int      @default(1000)
+  bedrooms            Int       @default(1)
+  bathrooms           Int       @default(1)
+  areaSqFt            Int       @default(1000)
   /// The property's PERMANENT saved location. Both set or both null (DB check);
   /// never (0,0). A Field Manager's GPS reading is stored on the verification
   /// row and never written here.
@@ -95,9 +95,9 @@ model Property {
   accessNotes         String?
   parkingInstructions String?
   preferredTime       String?
-  recurringService    Boolean  @default(false)
+  recurringService    Boolean   @default(false)
   recurringFrequency  String?
-  createdAt           DateTime @default(now())
+  createdAt           DateTime  @default(now())
 
   customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
   jobs         Job[]
@@ -219,6 +219,9 @@ model Job {
   checklistItems     JobChecklistItem[]
   invoices           Invoice[]
   photos             JobPhoto[]
+  /// Start of the current inspection round (set by "Inspect", cleared when the round is decided).
+  qcStartedAt        DateTime?
+  qcStartedBy        String?
   qualityChecks      QualityCheck[]
   reworkTasks        ReworkTask[]
   complaints         Complaint[]
@@ -347,13 +350,18 @@ model Payment {
 }
 
 model QualityCheck {
-  id          String   @id @default(cuid())
-  jobId       String
-  inspectorId String
-  score       Int
-  decision    String // "PASS" | "REWORK_REQUIRED"
-  notes       String?
-  createdAt   DateTime @default(now())
+  id              String    @id @default(cuid())
+  jobId           String
+  inspectorId     String
+  score           Int
+  decision        String // "PASS" | "REWORK_REQUIRED"
+  notes           String?
+  createdAt       DateTime  @default(now())
+  /// When this inspection began and who began it (null on records from before the roles were merged).
+  startedAt       DateTime?
+  startedBy       String?
+  /// The inspector was also on the job's crew (only possible when separation of duties is switched off) — kept visible in the history.
+  inspectorOnCrew Boolean   @default(false)
 
   job    Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
   issues QualityIssue[]
@@ -831,7 +839,7 @@ model JobAssignmentEvent {
 /// Every job-start ("I'm here") verification attempt — passed, failed or Admin override.
 /// Append-only audit of who tried, which mode applied, GPS readings, distance and QR result.
 model JobStartVerification {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   jobId          String
   userId         String
   userName       String
@@ -855,8 +863,8 @@ model JobStartVerification {
   overrideReason String?
   statusBefore   String
   statusAfter    String
-  createdAt      DateTime @default(now())
-  job            Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+  job            Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([jobId, createdAt])
 }
@@ -1153,7 +1161,7 @@ model PushNotification {
 /// Permanent record of a file removed through Media & Storage: what it was, who
 /// removed it, why, and whether it was protected business media (override).
 model MediaDeletion {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   /// JOB_PHOTO | EXPENSE_RECEIPT | CLOUD_ORPHAN
   assetKind         String
   assetId           String
@@ -1165,12 +1173,12 @@ model MediaDeletion {
   jobSerial         String?
   uploadedBy        String?
   uploadedAt        DateTime?
-  protectedOverride Boolean  @default(false)
+  protectedOverride Boolean   @default(false)
   reason            String?
-  remoteDeleted     Boolean  @default(false)
+  remoteDeleted     Boolean   @default(false)
   deletedBy         String
   deletedByName     String
-  deletedAt         DateTime @default(now())
+  deletedAt         DateTime  @default(now())
 
   @@index([deletedAt])
   @@index([jobId])
@@ -1323,30 +1331,30 @@ model AmcVisit {
 /// when an authorised Admin verifies it (status VERIFIED → a Payment row is created, once). The amount is fixed by the
 /// server from the invoice's outstanding balance when the attempt is created; the customer never supplies it.
 model UpiPaymentAttempt {
-  id               String    @id @default(cuid())
-  invoiceId        String
-  jobId            String
-  customerId       String
+  id             String            @id @default(cuid())
+  invoiceId      String
+  jobId          String
+  customerId     String
   /// The `tr` sent to the UPI app — unique per attempt.
-  reference        String    @unique
-  amount           Float
+  reference      String            @unique
+  amount         Float
   /// Snapshot of where the money was asked to go (the Admin may change the UPI ID later).
-  payeeVpa         String
-  payeeName        String
+  payeeVpa       String
+  payeeName      String
   /// INITIATED | SUBMITTED (customer gave a UTR → review) | VERIFIED | REJECTED | CANCELLED
-  status           String    @default("INITIATED")
+  status         String            @default("INITIATED")
   /// UTR / UPI reference the customer (or Admin) entered. Globally unique among live attempts.
-  utr              String?
-  payerNote        String?
-  createdAt        DateTime  @default(now())
-  submittedAt      DateTime?
-  reviewedAt       DateTime?
-  reviewedBy       String?
-  reviewedByName   String?
-  reviewNote       String?
+  utr            String?
+  payerNote      String?
+  createdAt      DateTime          @default(now())
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewedBy     String?
+  reviewedByName String?
+  reviewNote     String?
   /// The ledger Payment created when verified.
-  paymentId        String?
-  events           UpiPaymentEvent[]
+  paymentId      String?
+  events         UpiPaymentEvent[]
 
   @@index([invoiceId, status])
   @@index([status, submittedAt])
@@ -1354,17 +1362,176 @@ model UpiPaymentAttempt {
 
 /// Audit trail: every status change of an attempt, who did it and when.
 model UpiPaymentEvent {
-  id          String   @id @default(cuid())
-  attemptId   String
-  at          DateTime @default(now())
-  fromStatus  String?
-  toStatus    String
+  id         String   @id @default(cuid())
+  attemptId  String
+  at         DateTime @default(now())
+  fromStatus String?
+  toStatus   String
   /// CUSTOMER | ADMIN | SYSTEM
-  actorType   String
-  actorName   String?
-  note        String?
+  actorType  String
+  actorName  String?
+  note       String?
 
   attempt UpiPaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
 
   @@index([attemptId, at])
+}
+
+/// One row per account whose role was changed by the Field Manager + QC merge: what it was, so the change is auditable and reversible.
+model RoleMigration {
+  id           String   @id
+  userId       String
+  previousRole String
+  newRole      String
+  migratedAt   DateTime @default(now())
+  migration    String
+
+  @@index([userId])
+}
+
+/// ---------------------------------------------------------------------------
+/// WhatsApp Business Cloud API (official Meta integration). Secrets (access
+/// token, app secret, verify token) live ONLY in server environment variables —
+/// nothing in these tables is a credential.
+/// ---------------------------------------------------------------------------
+
+/// Non-secret integration settings + health, one row. IDs entered here override the env defaults.
+model WhatsAppIntegration {
+  id                  String    @id @default("singleton")
+  wabaId              String?
+  phoneNumberId       String?
+  /// Display number / verified name / quality as last reported by Meta (informational).
+  displayPhone        String?
+  verifiedName        String?
+  qualityRating       String?
+  /// UNKNOWN | CONNECTED | ERROR — result of the last "Test connection".
+  connectionStatus    String    @default("UNKNOWN")
+  lastCheckedAt       DateTime?
+  lastCheckError      String?
+  /// GET challenge answered successfully (Meta accepted the callback URL).
+  lastVerifiedAt      DateTime?
+  /// Last POST that passed signature validation.
+  lastWebhookAt       DateTime?
+  lastSignatureFailAt DateTime?
+  lastProcessedAt     DateTime?
+  /// Set when Meta rejects the token (error 190) — cleared by a successful call.
+  credentialProblem        String?
+  updatedBy           String?
+  updatedAt           DateTime  @updatedAt
+}
+
+/// One WhatsApp number talking to the business: the inbox "conversation".
+model WhatsAppContact {
+  id               String            @id @default(cuid())
+  /// Digits only, with country code — exactly Meta's wa_id.
+  waId             String            @unique
+  phoneKey         String
+  profileName      String?
+  leadId           String?
+  /// Start of the customer-service window: the last message the CUSTOMER sent.
+  lastInboundAt    DateTime?
+  lastMessageAt    DateTime?
+  lastPreview      String?
+  lastDirection    String?
+  unreadCount      Int               @default(0)
+  /// Customer asked to stop (STOP/UNSUBSCRIBE) or an Admin recorded an opt-out: nothing is sent to them.
+  optedOut         Boolean           @default(false)
+  optedOutAt       DateTime?
+  /// Explicit permission for MARKETING templates. Default false — never assumed.
+  marketingConsent Boolean           @default(false)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  messages         WhatsAppMessage[]
+
+  @@index([phoneKey])
+  @@index([leadId])
+  @@index([lastMessageAt])
+}
+
+model WhatsAppMessage {
+  id                String          @id @default(cuid())
+  contactId         String
+  leadId            String?
+  /// Meta's message id (wamid…). Unique: a webhook retry can never store a message twice.
+  providerMessageId String?         @unique
+  /// Caller-supplied key so a double-clicked Send is one message.
+  clientRequestId   String?         @unique
+  /// IN | OUT
+  direction         String
+  /// text | image | document | audio | video | sticker | location | contacts | button | interactive | template | unsupported
+  type              String
+  body              String?
+  templateName      String?
+  /// IN: RECEIVED.  OUT: PENDING (not yet handed to Meta) | ACCEPTED (Meta took the request — NOT delivered) | SENT | DELIVERED | READ | FAILED
+  status            String
+  errorCode         String?
+  errorMessage      String?
+  providerTimestamp DateTime?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  failedAt          DateTime?
+  mediaProviderId   String?
+  mediaMime         String?
+  mediaFilename     String?
+  /// NONE | PENDING | STORED | FAILED | SKIPPED
+  mediaStatus       String          @default("NONE")
+  mediaNote         String?
+  mediaAttempts     Int             @default(0)
+  sentBy            String?
+  createdAt         DateTime        @default(now())
+  contact           WhatsAppContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  media             WhatsAppMedia?
+
+  @@index([contactId, createdAt])
+  @@index([leadId, createdAt])
+  @@index([mediaStatus])
+}
+
+/// Downloaded customer media, validated and stored in the database; served only through an authenticated ERP route.
+model WhatsAppMedia {
+  id        String          @id @default(cuid())
+  messageId String          @unique
+  mime      String
+  bytes     Bytes
+  size      Int
+  sha256    String
+  createdAt DateTime        @default(now())
+  message   WhatsAppMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+/// Every webhook change Meta sends, stored before processing (fast acknowledge, safe retry, idempotent).
+model WhatsAppEvent {
+  id          String    @id @default(cuid())
+  /// message:<wamid> | status:<wamid>:<status>[:<ts>] — the same event twice is one row.
+  dedupeKey   String    @unique
+  /// MESSAGE | STATUS
+  kind        String
+  /// PENDING | DONE | IGNORED | FAILED
+  state       String    @default("PENDING")
+  payload     Json
+  attempts    Int       @default(0)
+  lastError   String?
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([state, receivedAt])
+}
+
+/// Message templates (approved in Meta Business Manager). Synced from Meta or entered by an Admin.
+model WhatsAppTemplate {
+  id          String    @id @default(cuid())
+  name        String
+  language    String
+  /// UTILITY | MARKETING | AUTHENTICATION
+  category    String
+  /// Meta's review state; only APPROVED can be sent.
+  status      String    @default("APPROVED")
+  bodyPreview String?
+  paramCount  Int       @default(0)
+  active      Boolean   @default(true)
+  syncedAt    DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([name, language])
 }

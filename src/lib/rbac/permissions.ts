@@ -205,10 +205,20 @@ const ADMIN: PermissionGrant = Object.fromEntries(
 ) as PermissionGrant;
 
 /**
- * Field Manager — only the jobs assigned to them. No revenue, no other
- * customers, no other managers' jobs, no settings, users, reports or finance.
+ * Field Operations Manager = the former Field Manager + QC Inspector in one role.
+ *
+ *  Field operations — ASSIGNED scope: only the jobs assigned to them. No revenue, no other
+ *  customers, no settings, users, reports or finance.
+ *
+ *  Quality control — the qc.* / rework.create permissions are ALL-scoped, but which JOBS they
+ *  reach is decided by the "QC window" in authz.ts: jobs waiting for / in inspection or rework,
+ *  and jobs this person inspected. A Field Operations Manager therefore never browses the whole
+ *  job list. Whether they may inspect a job they worked on themselves is the separation-of-duties
+ *  setting (Settings → Quality control), enforced on the server in /api/quality.
+ *
+ * Never Admin: no finance, payments, users, settings, integrations or contacts.
  */
-const FIELD_MANAGER: PermissionGrant = {
+const FIELD_OPERATIONS_MANAGER: PermissionGrant = {
   ...all("mobile.device", "ai.use"),
   ...assigned(
     "jobs.view",
@@ -219,9 +229,7 @@ const FIELD_MANAGER: PermissionGrant = {
     "checklist.view",
     "checklist.execute",
     "photos.view",
-    "photos.upload",
-    "qc.view", // result of the inspection on own jobs
-    "rework.view",
+    "photos.upload", // before / after evidence; QC photos go through qc.inspect below
     "rework.complete",
     "customers.view", // contact details of the customer on the assigned job
     "properties.view",
@@ -233,25 +241,8 @@ const FIELD_MANAGER: PermissionGrant = {
   ),
   ...own("photos.delete"), // only photos they uploaded themselves
   ...all("services.view"),
-};
-
-/** QC — inspects completed work; never touches money, users or settings. */
-const QC_INSPECTOR: PermissionGrant = {
-  ...all("mobile.device", "ai.use"),
-  ...all(
-    "jobs.view", // required data only — financial fields redacted server-side
-    "checklist.view",
-    "photos.view",
-    "photos.upload", // QC evidence
-    "qc.view",
-    "qc.inspect",
-    "qc.pass",
-    "qc.rework",
-    "qc.reinspect",
-    "rework.view",
-    "rework.create",
-    "services.view"
-  ),
+  // Quality control
+  ...all("qc.view", "qc.inspect", "qc.pass", "qc.rework", "qc.reinspect", "rework.view", "rework.create"),
 };
 
 /**
@@ -281,8 +272,7 @@ const TAX_OFFICER: PermissionGrant = {
 
 export const ROLE_PERMISSIONS: Record<Role, PermissionGrant> = {
   admin: ADMIN,
-  field_manager: FIELD_MANAGER,
-  qc_inspector: QC_INSPECTOR,
+  field_operations_manager: FIELD_OPERATIONS_MANAGER,
   tax_officer: TAX_OFFICER,
   customer: CUSTOMER,
 };

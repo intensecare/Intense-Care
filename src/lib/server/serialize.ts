@@ -304,6 +304,8 @@ export function serializeQualityCheck(q: Prisma.QualityCheckGetPayload<object>):
     issuesCount: 0,
     notes: q.notes ?? undefined,
     evidencePhotos: [],
+    startedAt: q.startedAt ? q.startedAt.toISOString() : undefined,
+    inspectorOnCrew: q.inspectorOnCrew || undefined,
     inspectedAt: new Date(q.createdAt).toISOString(),
     completedAt: new Date(q.createdAt).toISOString(),
   };

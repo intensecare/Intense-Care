@@ -4,7 +4,7 @@ import { errorResponse } from "@/lib/server/http";
 import { ok, fail, readJson } from "@/lib/server/serialize";
 import { recordAudit } from "@/lib/server/audit";
 import { EmployeeInput, SENSITIVE_FIELDS, findDuplicateEmployee, serializeEmployees, teamEmployeeIds } from "@/lib/server/hr";
-import { can } from "@/lib/rbac";
+import { can, FIELD_OPS_STORED_ROLES } from "@/lib/rbac";
 
 /** GET — one staff member, their assignments and (hr.sensitive only) documents. */
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
@@ -106,7 +106,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (
       touched.includes("managerUserId") &&
       d.managerUserId &&
-      !(await prisma.user.findFirst({ where: { id: d.managerUserId, active: true, role: { in: ["field_manager", "admin"] } }, select: { id: true } }))
+      !(await prisma.user.findFirst({ where: { id: d.managerUserId, active: true, role: { in: [...FIELD_OPS_STORED_ROLES, "admin"] } }, select: { id: true } }))
     )
       return fail("Pick an active Field Manager or Admin as the manager.", 400);
 

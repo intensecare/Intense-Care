@@ -101,9 +101,9 @@ ok(sql(`select count(*) from "AuditLog" where "entityId"='${dup2.json.data.id}' 
 rep = (await admin(`/api/reports/business?from=${today}&to=${today}`)).json?.data;
 ok(rep.costs.byCategory.find((c) => c.category === "CLEANING_SUPPLIES")?.total === 1180, "voided expense is not in the totals (cleaning supplies = 1180 once)");
 // permissions
-for (const [n, c] of [["QC", qcc], ["Tax Officer", taxc]]) ok(await denied(n, c, "/api/expenses"), `${n} cannot list expenses`);
+for (const [n, c] of [["Tax Officer", taxc]]) ok(await denied(n, c, "/api/expenses"), `${n} cannot list expenses`);
 ok((await anon("/api/expenses")).status === 401, "signed-out cannot list expenses");
-ok((await qcc("/api/expenses", { method: "POST", body: exp })).status === 403, "QC cannot create expenses");
+ok((await taxc("/api/expenses", { method: "POST", body: exp })).status === 403, "Tax Officer cannot create expenses");
 // CSV
 const csv = await admin(`/api/expenses?format=csv&from=${today}&to=${today}`, { raw: true });
 ok(csv.status === 200 && /text\/csv/.test(csv.headers.get("content-type") ?? "") && csv.text.includes("CleanMart"), "Admin exports expenses as CSV");
@@ -121,7 +121,7 @@ ok(rcp.status === 201 && rcp.json?.data?.id, "receipt image uploads");
 ok((await up(admin, Buffer.from("<script>alert(1)</script>"), "x.png", "image/png")).status === 415, "a file that only claims to be an image is rejected (content checked)");
 ok((await up(admin, Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(3.5 * 1024 * 1024, 1)]), "big.pdf", "application/pdf")).status === 413, "oversized upload is refused");
 ok((await up(admin, Buffer.from("MZ binary"), "a.exe", "application/octet-stream")).status === 415, "executable types are refused");
-ok((await up(qcc, png, "q.png", "image/png")).status === 403, "QC cannot upload receipts");
+ok((await up(taxc, png, "q.png", "image/png")).status === 403, "Tax Officer cannot upload receipts");
 const withR = await admin("/api/expenses", { method: "POST", body: { ...exp, description: "With receipt", amount: 777, vendor: "Receipt Co", idempotencyKey: "idem-receipt-01", receiptFileId: rcp.json.data.id } });
 ok(withR.status === 201 && withR.json?.data?.receipt?.id === rcp.json.data.id, "receipt is attached to an expense");
 const got = await admin(`/api/files/${rcp.json.data.id}`, { raw: true });
@@ -157,7 +157,7 @@ const fmEmpList = (await fmc("/api/hr/employees")).json?.data?.rows ?? [];
 ok(fmEmpList.some((x) => x.id === ravi.id) && !fmEmpList.some((x) => x.id === lena.id), "Field Manager sees only their own team");
 ok((await fm2c(`/api/hr/employees/${ravi.id}`)).status === 403 || (await fm2c(`/api/hr/employees/${ravi.id}`)).status === 404, "another Field Manager cannot open that profile");
 ok((await admin(`/api/hr/employees/${ravi.id}`)).json?.data?.employee?.payRate === 18000, "Admin sees pay");
-for (const [n, c] of [["QC", qcc], ["Tax Officer", taxc]]) ok(await denied(n, c, "/api/hr/employees"), `${n} cannot open HR`);
+for (const [n, c] of [["Tax Officer", taxc]]) ok(await denied(n, c, "/api/hr/employees"), `${n} cannot open HR`);
 ok((await fmc("/api/hr/employees", { method: "POST", body: { fullName: "Nope Nope", phone: "9111111111" } })).status === 403, "Field Manager cannot add employees");
 ok((await fmc("/api/hr/payroll")).status === 403, "Field Manager cannot see payroll");
 ok((await fmc(`/api/hr/employees/${ravi.id}`, { method: "PATCH", body: { payRate: 99999 } })).status === 403, "Field Manager cannot change pay");
@@ -181,7 +181,7 @@ const after = (await admin(`/api/hr/attendance?employeeId=${ravi.id}&from=${toda
 ok(fix.status === 200 && after?.corrected === true && after?.correctionReason === "Left early, confirmed by phone", "Admin correction stores the reason and marks the record corrected");
 ok(sql(`select "correctedBy" is not null and "correctedAt" is not null from "AttendanceRecord" where id='${rec.id}'`) === "t", "…with who and when");
 ok(sql(`select count(*) from "AuditLog" where "entityId"='${rec.id}'`) !== "0", "correction is in the audit trail");
-ok((await qcc(`/api/hr/attendance`)).status === 403, "QC cannot read attendance");
+ok((await taxc(`/api/hr/attendance`)).status === 403, "Tax Officer cannot read attendance");
 // FM marks own team only
 ok((await fmc("/api/hr/attendance", { method: "POST", body: { employeeId: lena.id, date: today, action: "mark", status: "PRESENT" } })).status === 403, "Field Manager cannot mark someone outside their team");
 ok((await fmc("/api/hr/attendance", { method: "POST", body: { employeeId: ravi.id, date: addDays(today, -1), action: "mark", status: "PRESENT" } })).status === 403, "Field Manager cannot back-date attendance");

@@ -1,5 +1,5 @@
 /**
- * Four user types — Admin, Field Manager, QC, Customer (link only).
+ * User types — Admin, Field Operations Manager (field work + QC), Tax Officer, Customer (link only).
  * Permission matrix, sign-in rules, next action and workspace routing.
  * Run: npm test
  */
@@ -24,6 +24,7 @@ import {
   isPublicPath,
   type Principal,
 } from "../src/lib/rbac";
+import { inspectionBarredReason, DEFAULT_QC_POLICY } from "../src/lib/qc-policy";
 import { validateTransition } from "../src/lib/state-machine";
 import { computeInvoiceFigures, isValidGstin } from "../src/lib/tax";
 import { jobIdPrefix } from "../src/lib/server/job-serial";
@@ -32,17 +33,17 @@ import type { Job } from "../src/lib/types";
 
 const principal = (role: Principal["role"], extra: Partial<Principal> = {}): Principal => ({ id: "u1", role, ...extra });
 
-test("exactly five user types; four sign in (the customer uses the job QR / link)", () => {
-  assert.deepEqual([...ROLES].sort(), ["admin", "customer", "field_manager", "qc_inspector", "tax_officer"]);
-  assert.deepEqual([...SIGN_IN_ROLES].sort(), ["admin", "field_manager", "qc_inspector", "tax_officer"]);
+test("exactly four user types; three sign in (the customer uses the job QR / link)", () => {
+  assert.deepEqual([...ROLES].sort(), ["admin", "customer", "field_operations_manager", "tax_officer"]);
+  assert.deepEqual([...SIGN_IN_ROLES].sort(), ["admin", "field_operations_manager", "tax_officer"]);
   assert.equal(canSignIn("customer"), false, "customers use the secure link, never a login");
   assert.equal(canSignIn("referral_partner"), false);
 });
 
 test("legacy roles map onto the four types; unknown values never widen access", () => {
   for (const r of ["super_admin", "ops_manager", "scheduler", "accounts", "admin"]) assert.equal(normalizeRole(r), "admin", r);
-  for (const r of ["staff", "field_staff", "field_manager"]) assert.equal(normalizeRole(r), "field_manager", r);
-  assert.equal(normalizeRole("qc_inspector"), "qc_inspector");
+  // The merge: every pre-merge field / QC value resolves to the combined role, so old rows keep working.
+  for (const r of ["staff", "field_staff", "field_manager", "qc_inspector", "qc", "field_operations_manager"]) assert.equal(normalizeRole(r), "field_operations_manager", r);
   assert.equal(normalizeRole("tax_officer"), "tax_officer");
   assert.equal(normalizeRole("referral_partner"), "customer");
   assert.equal(normalizeRole("hacker"), "customer");
@@ -58,51 +59,85 @@ test("matrix: only declared permissions; Admin holds everything", () => {
   for (const p of PERMISSIONS) assert.equal(scopeOf("admin", p), "ALL");
 });
 
-test("Field Manager: only assigned jobs; no revenue, customers list, settings, users, reports or finance", () => {
-  assert.equal(scopeOf("field_manager", "jobs.view"), "ASSIGNED");
-  for (const p of ["finance.view", "invoice.view", "reports.view", "users.view", "users.manage", "settings.view", "settings.manage", "dashboard.view", "jobs.assign", "qc.pass", "qc.inspect"] as const) {
-    assert.equal(scopeOf("field_manager", p), "NONE", p);
+test("Field Operations Manager (field side): only assigned jobs; no revenue, settings, users, reports or finance; never Admin", () => {
+  assert.equal(scopeOf("field_operations_manager", "jobs.view"), "ASSIGNED");
+  for (const p of ["finance.view", "invoice.view", "reports.view", "users.view", "users.manage", "settings.view", "settings.manage", "dashboard.view", "jobs.assign", "payment.record", "contacts.view", "media.manage", "integrations.manage"] as const) {
+    assert.equal(scopeOf("field_operations_manager", p), "NONE", p);
   }
-  const fm = principal("field_manager");
+  const fm = principal("field_operations_manager");
   assert.equal(authorize(fm, "jobs.start", { assignedManagerId: "u1", assignedStaffIds: [] }).allowed, true);
   assert.equal(authorize(fm, "jobs.start", { assignedManagerId: "someone-else", assignedStaffIds: [] }).allowed, false, "another manager's job");
   assert.equal(authorize(fm, "customers.view", { assignedManagerId: "other" }).allowed, false);
 });
 
-test("QC: inspects, passes and raises rework; never touches money, users or settings", () => {
-  for (const p of ["qc.inspect", "qc.pass", "qc.rework", "qc.reinspect", "photos.upload"] as const) assert.equal(scopeOf("qc_inspector", p), "ALL", p);
-  for (const p of ["finance.view", "users.manage", "settings.manage", "jobs.assign", "jobs.arrive", "jobs.complete"] as const) {
-    assert.equal(scopeOf("qc_inspector", p), "NONE", p);
-  }
+test("Field Operations Manager (quality side): inspects, passes, raises and reinspects rework — same role, still no money", () => {
+  for (const p of ["qc.view", "qc.inspect", "qc.pass", "qc.rework", "qc.reinspect", "rework.view", "rework.create"] as const) assert.equal(scopeOf("field_operations_manager", p), "ALL", p);
+  assert.equal(scopeOf("field_operations_manager", "rework.complete"), "ASSIGNED", "only on the jobs they work on");
+  assert.equal(scopeOf("field_operations_manager", "jobs.arrive"), "ASSIGNED");
+  for (const p of ["finance.view", "users.manage", "settings.manage", "jobs.assign"] as const) assert.equal(scopeOf("field_operations_manager", p), "NONE", p);
+  // The role keeps its pre-merge parts out of Admin's reach: Admin has everything, this role does not.
+  const all = PERMISSIONS.filter((p) => scopeOf("field_operations_manager", p) === "NONE").length;
+  assert.ok(all > PERMISSIONS.length / 2, "most permissions stay Admin-only");
 });
 
-test("state machine: Field Manager cannot pass QC; QC cannot complete field work; start needs customer confirmation", () => {
+test("merge: legacy Field Manager and QC identifiers resolve to the combined role with the SAME permissions", () => {
+  for (const legacy of ["field_manager", "qc_inspector", "qc", "staff", "field_staff"]) {
+    assert.equal(normalizeRole(legacy), "field_operations_manager", legacy);
+    assert.equal(canSignIn(legacy), true, `${legacy} can still sign in`);
+    for (const p of PERMISSIONS) assert.equal(scopeOf(legacy, p), scopeOf("field_operations_manager", p), `${legacy} ${p}`);
+  }
+  assert.equal(normalizeRole("customer"), "customer");
+  assert.equal(canSignIn("customer"), false);
+});
+
+test("state machine: no skipping the journey, whoever holds the role; start needs customer confirmation", () => {
   const job = (status: Job["status"], extra: Partial<Job> = {}) => ({ id: "JOB-1", status, assignedStaffIds: [], ...extra }) as unknown as Job;
-  assert.equal(validateTransition(job("QUALITY_CHECK"), "PASS", "field_manager").allowed, false);
-  assert.equal(validateTransition(job("IN_PROGRESS"), "WORK_COMPLETED", "qc_inspector").allowed, false);
-  assert.equal(validateTransition(job("IN_PROGRESS"), "WORK_COMPLETED", "field_manager").allowed, true);
-  assert.equal(validateTransition(job("CUSTOMER_VERIFIED"), "IN_PROGRESS", "field_manager").allowed, false, "needs customerConfirmedAt");
-  assert.equal(validateTransition(job("CUSTOMER_VERIFIED", { customerConfirmedAt: "2026-10-08T10:00:00Z" }), "IN_PROGRESS", "field_manager").allowed, true);
+  assert.equal(validateTransition(job("QUALITY_CHECK"), "PASS", "field_operations_manager").allowed, true, "the combined role may pass an inspected job");
+  assert.equal(validateTransition(job("IN_PROGRESS"), "PASS", "field_operations_manager").allowed, false, "…but not straight from the work");
+  assert.equal(validateTransition(job("WORK_COMPLETED"), "COMPLETED", "field_operations_manager").allowed, false);
+  assert.equal(validateTransition(job("SCHEDULED"), "WORK_COMPLETED", "field_operations_manager").allowed, false);
+  assert.equal(validateTransition(job("IN_PROGRESS"), "WORK_COMPLETED", "field_operations_manager").allowed, true);
+  assert.equal(validateTransition(job("CUSTOMER_VERIFIED"), "IN_PROGRESS", "field_operations_manager").allowed, false, "needs customerConfirmedAt");
+  assert.equal(validateTransition(job("CUSTOMER_VERIFIED", { customerConfirmedAt: "2026-10-08T10:00:00Z" }), "IN_PROGRESS", "field_operations_manager").allowed, true);
   assert.equal(validateTransition(job("SCHEDULED"), "COMPLETED", "admin").allowed, false, "no skipping the journey");
 });
 
 test("Field Manager flow: I'm Here → wait → Start → checklist → photos → Complete → wait for QC → fix rework", () => {
   const ctx = { assignedManagerId: "u1", assignedStaffIds: [] as string[] };
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "ASSIGNED" })?.label, "Start Job");
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "ARRIVED" })?.waiting, true);
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "ARRIVED", customerConfirmedAt: "x" })?.target, "IN_PROGRESS");
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "IN_PROGRESS", checklistTotal: 3, checklistDone: 1 })?.kind, "checklist");
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "IN_PROGRESS", checklistTotal: 3, checklistDone: 3 })?.kind, "photos");
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "IN_PROGRESS", checklistTotal: 3, checklistDone: 3, photosBefore: 1, photosAfter: 1 })?.target, "WORK_COMPLETED");
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "WORK_COMPLETED" })?.label, "Waiting for QC");
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "REWORK_ASSIGNED", openRework: 2 })?.kind, "rework");
-  assert.equal(getNextAction("field_manager", { ...ctx, status: "REWORK_COMPLETED" })?.waiting, true);
+  assert.equal(getNextAction("field_operations_manager", { ...ctx, status: "ASSIGNED" })?.label, "Start Job");
+  assert.equal(getNextAction("field_operations_manager", { ...ctx, status: "ARRIVED" })?.waiting, true);
+  assert.equal(getNextAction("field_operations_manager", { ...ctx, status: "ARRIVED", customerConfirmedAt: "x" })?.target, "IN_PROGRESS");
+  assert.equal(getNextAction("field_operations_manager", { ...ctx, status: "IN_PROGRESS", checklistTotal: 3, checklistDone: 1 })?.kind, "checklist");
+  assert.equal(getNextAction("field_operations_manager", { ...ctx, status: "IN_PROGRESS", checklistTotal: 3, checklistDone: 3 })?.kind, "photos");
+  assert.equal(getNextAction("field_operations_manager", { ...ctx, status: "IN_PROGRESS", checklistTotal: 3, checklistDone: 3, photosBefore: 1, photosAfter: 1 })?.target, "WORK_COMPLETED");
+  assert.equal(getNextAction("field_operations_manager", { ...ctx, status: "WORK_COMPLETED" })?.label, "Waiting for QC");
+  assert.equal(getNextAction("field_operations_manager", { ...ctx, status: "REWORK_ASSIGNED", openRework: 2 })?.kind, "rework");
+  assert.equal(getNextAction("field_operations_manager", { ...ctx, status: "REWORK_COMPLETED" })?.waiting, true);
 });
 
-test("QC next action: inspect → reinspect; waits while rework is open", () => {
-  assert.equal(getNextAction("qc_inspector", { status: "WORK_COMPLETED" })?.label, "Inspect");
-  assert.equal(getNextAction("qc_inspector", { status: "REWORK_COMPLETED" })?.label, "Reinspect");
-  assert.equal(getNextAction("qc_inspector", { status: "REWORK_ASSIGNED" })?.waiting, true);
+test("QC next action (job on someone else's crew): inspect → reinspect; waits while rework is open", () => {
+  const other = { assignedManagerId: "someone-else", assignedStaffIds: [] as string[], viewerId: "u1", separationOfDuties: true };
+  assert.equal(getNextAction("field_operations_manager", { ...other, status: "WORK_COMPLETED" })?.label, "Inspect");
+  assert.equal(getNextAction("field_operations_manager", { ...other, status: "REWORK_COMPLETED" })?.label, "Reinspect");
+  assert.equal(getNextAction("field_operations_manager", { ...other, status: "REWORK_ASSIGNED" })?.waiting, true);
+});
+
+test("separation of duties: on their OWN job the combined role is told to wait — unless the company switched the rule off", () => {
+  const mine = { assignedManagerId: "u1", assignedStaffIds: [] as string[], viewerId: "u1" };
+  assert.equal(getNextAction("field_operations_manager", { ...mine, separationOfDuties: true, status: "WORK_COMPLETED" })?.label, "Needs another inspector");
+  assert.equal(getNextAction("field_operations_manager", { ...mine, separationOfDuties: true, status: "REWORK_COMPLETED" })?.waiting, true);
+  assert.equal(getNextAction("field_operations_manager", { ...mine, separationOfDuties: false, status: "WORK_COMPLETED" })?.label, "Inspect");
+  assert.equal(getNextAction("field_operations_manager", { ...mine, separationOfDuties: false, status: "IN_PROGRESS", checklistTotal: 1, checklistDone: 0 })?.kind, "checklist", "field work is unaffected");
+});
+
+test("separation-of-duties policy: crew members are barred only while the rule is on", () => {
+  const job = { assignedManagerId: "m1", assignedStaffIds: ["s1", "s2"] };
+  for (const id of ["m1", "s1", "s2"]) {
+    assert.ok(inspectionBarredReason({ separationOfDuties: true }, id, job), id);
+    assert.equal(inspectionBarredReason({ separationOfDuties: false }, id, job), null, id);
+  }
+  assert.equal(inspectionBarredReason({ separationOfDuties: true }, "outsider", job), null);
+  assert.equal(inspectionBarredReason(DEFAULT_QC_POLICY, "m1", job) !== null, true, "the rule is ON by default");
 });
 
 test("customer vocabulary: confirm → view progress → approve → rate", () => {
@@ -124,26 +159,24 @@ test("workspaces: five separate experiences, each with its own home", () => {
     ["Schedule", "Properties", "Services", "GST", "Expenses", "Referrals", "HR", "Contacts", "Media & Storage", "Reviews & Feedback", "Settings"]
   );
   assert.equal(homePathFor("admin"), "/");
-  assert.equal(homePathFor("field_manager"), "/my-jobs");
-  assert.equal(homePathFor("qc_inspector"), "/quality-queue");
-  assert.deepEqual(navFor("field_manager").map((n) => n.href), ["/my-jobs"]);
-  assert.deepEqual(navFor("qc_inspector").map((n) => n.href), ["/quality-queue"]);
+  assert.equal(homePathFor("field_operations_manager"), "/my-jobs");
+  assert.deepEqual(navFor("field_operations_manager").map((n) => n.href), ["/my-jobs", "/quality-queue"]);
   assert.equal(navFor("customer").length, 0);
   assert.ok(navFor("admin").some((n) => n.href === "/users"));
   // §4 Quotations are an Admin surface only — no other role holds quotes.manage.
   assert.ok(navFor("admin").some((n) => n.href === "/quotations"));
-  for (const role of ["field_manager", "qc_inspector", "tax_officer", "customer"] as const) {
+  for (const role of ["field_operations_manager", "tax_officer", "customer"] as const) {
     assert.equal(routeAllowed(role, "/quotations"), false, role + " must not reach quotations");
   }
 });
 
-test("routing: Field Manager and QC can't open the Operations desk; customer pages are public", () => {
+test("routing: the Field Operations Manager can't open the Operations desk; customer pages are public", () => {
   for (const path of ["/", "/jobs", "/jobs/JOB-1", "/jobs/new", "/quotations", "/reviews", "/customers", "/finance", "/reports", "/users", "/settings"]) {
-    assert.equal(routeAllowed("field_manager", path), false, `FM ${path}`);
-    assert.equal(routeAllowed("qc_inspector", path), false, `QC ${path}`);
+    assert.equal(routeAllowed("field_operations_manager", path), false, `FOM ${path}`);
   }
-  assert.equal(routeAllowed("field_manager", "/my-jobs/JOB-1"), true);
-  assert.equal(routeAllowed("qc_inspector", "/quality-queue/JOB-1"), true);
+  assert.equal(routeAllowed("field_operations_manager", "/my-jobs/JOB-1"), true);
+  assert.equal(routeAllowed("field_operations_manager", "/quality-queue/JOB-1"), true);
+  assert.equal(routeAllowed("field_operations_manager", "/quality-queue"), true);
   assert.equal(routeAllowed("admin", "/my-jobs"), false, "Admin manages jobs from the job page");
   assert.equal(isPublicPath("/customer/service/abc"), true);
   assert.equal(isPublicPath("/customer/quote/abc"), true);
@@ -160,7 +193,7 @@ test("Tax Officer: GST invoices and GST reports only — nothing else, read-only
   for (const path of ["/", "/jobs", "/jobs/x", "/invoices", "/invoices/x", "/customers", "/users", "/settings", "/reports", "/my-jobs", "/quality-queue"]) {
     assert.equal(routeAllowed("tax_officer", path), false, path);
   }
-  for (const role of ["field_manager", "qc_inspector"] as const) {
+  for (const role of ["field_operations_manager"] as const) {
     for (const path of ["/gst", "/gst/invoices/abc", "/invoices", "/invoices/abc"]) assert.equal(routeAllowed(role, path), false, `${role} ${path}`);
   }
   assert.equal(routeAllowed("admin", "/invoices/abc"), true);
@@ -168,7 +201,7 @@ test("Tax Officer: GST invoices and GST reports only — nothing else, read-only
 });
 
 test("Intense AI: every internal role may open it, scoped to what that role can already see; Customer cannot", () => {
-  for (const r of ["admin", "field_manager", "qc_inspector", "tax_officer"] as const) {
+  for (const r of ["admin", "field_operations_manager", "tax_officer"] as const) {
     assert.equal(scopeOf(r, "ai.use") !== "NONE", true, r);
     assert.equal(routeAllowed(r, "/assistant"), true, r);
   }
@@ -200,10 +233,10 @@ test("Job ID: CUSTOMER-NAME-DDMMYYYY prefix", () => {
 
 test("approvals and notification deep links follow the four roles", () => {
   assert.equal(canApprove("admin", "users.delete"), true);
-  assert.equal(canApprove("field_manager", "settings.critical"), false);
+  assert.equal(canApprove("field_operations_manager", "settings.critical"), false);
   assert.equal(canApprove("admin", "audit.delete"), false, "audit history is never deleted");
-  assert.equal(deepLinkFor("field_manager", "rework_assigned", { jobId: "J1" }).path, "/my-jobs/J1");
-  assert.equal(deepLinkFor("qc_inspector", "qc_ready", { jobId: "J1" }).path, "/quality-queue/J1");
+  assert.equal(deepLinkFor("field_operations_manager", "rework_assigned", { jobId: "J1" }).path, "/my-jobs/J1");
+  assert.equal(deepLinkFor("field_operations_manager", "qc_ready", { jobId: "J1" }).path, "/quality-queue/J1");
   assert.equal(deepLinkFor("customer", "team_arrived", { customerLink: "https://x/customer/service/t" }).path, "https://x/customer/service/t");
 });
 
@@ -211,12 +244,12 @@ test("Expenses, referrals, HR, payroll: who may do what", () => {
   const sensitive = ["hr.sensitive", "hr.manage", "payroll.manage", "leave.manage", "freelance.manage", "attendance.correct", "referrals.approve", "referrals.manage", "expenses.manage", "expenses.view"] as const;
   for (const p of sensitive) assert.equal(scopeOf("admin", p), "ALL", `admin ${p}`);
   // Field Manager: their own team and attendance, and expenses they submit — never money, payroll or personal details.
-  assert.equal(scopeOf("field_manager", "hr.view"), "ASSIGNED");
-  assert.equal(scopeOf("field_manager", "attendance.record"), "ASSIGNED");
-  assert.equal(scopeOf("field_manager", "expenses.submit"), "ASSIGNED");
-  for (const p of sensitive) assert.equal(scopeOf("field_manager", p), "NONE", `field_manager must not have ${p}`);
-  // QC, Tax Officer and Customer get none of it.
-  for (const r of ["qc_inspector", "tax_officer", "customer"] as const) {
+  assert.equal(scopeOf("field_operations_manager", "hr.view"), "ASSIGNED");
+  assert.equal(scopeOf("field_operations_manager", "attendance.record"), "ASSIGNED");
+  assert.equal(scopeOf("field_operations_manager", "expenses.submit"), "ASSIGNED");
+  for (const p of sensitive) assert.equal(scopeOf("field_operations_manager", p), "NONE", `field_operations_manager must not have ${p}`);
+  // Tax Officer and Customer get none of it.
+  for (const r of ["tax_officer", "customer"] as const) {
     for (const p of [...sensitive, "hr.view", "attendance.record", "expenses.submit"] as const) assert.equal(scopeOf(r, p), "NONE", `${r} must not have ${p}`);
   }
 });
@@ -224,6 +257,6 @@ test("Expenses, referrals, HR, payroll: who may do what", () => {
 test("routing: HR, Expenses and Referrals are Admin-only pages", () => {
   for (const path of ["/hr", "/hr/abc", "/expenses", "/referrals"]) {
     assert.equal(routeAllowed("admin", path), true, `admin ${path}`);
-    for (const r of ["field_manager", "qc_inspector", "tax_officer"] as const) assert.equal(routeAllowed(r, path), false, `${r} ${path}`);
+    for (const r of ["field_operations_manager", "tax_officer"] as const) assert.equal(routeAllowed(r, path), false, `${r} ${path}`);
   }
 });

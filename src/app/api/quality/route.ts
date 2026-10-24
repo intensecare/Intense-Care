@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
-import { requirePermission, authorizeJob, visibleJobIds, requireUser } from "@/lib/server/authz";
+import { requirePermission, authorizeJob, visibleJobIds, requireUser, HttpError } from "@/lib/server/authz";
+import { getSystemSettings } from "@/lib/server/settings";
+import { inspectionBarredReason, isOnCrew } from "@/lib/qc-policy";
 import { errorResponse } from "@/lib/server/http";
 import {
   serializeQualityCheck,
@@ -112,6 +114,22 @@ async function firstUserWith(_permission: "complaints.manage"): Promise<{ id: st
   return row ? { id: row.id, name: row.name } : null;
 }
 
+/** The company's "inspector must not be on the job's crew" rule — checked on every inspection action. */
+async function enforceSeparation(user: { id: string; name: string; role: string }, job: { id: string; assignedManagerId: string | null; assignedStaffIds: string[] }, request: Request) {
+  const policy = (await getSystemSettings()).qualityControl;
+  const reason = inspectionBarredReason(policy, user.id, job);
+  if (reason) {
+    void recordAudit({ actor: user as never, action: "QC_SEPARATION_BLOCKED", entityType: "job", entityId: job.id, jobId: job.id, details: "Inspector is on the job's crew", request });
+    throw new HttpError(403, reason);
+  }
+}
+
+/** When the current inspection round began (set by "Inspect"); a reinspection that was never "started" begins now. */
+async function roundStart(jobId: string): Promise<{ at: Date; by: string | null }> {
+  const j = await prisma.job.findUnique({ where: { id: jobId }, select: { qcStartedAt: true, qcStartedBy: true } });
+  return { at: j?.qcStartedAt ?? new Date(), by: j?.qcStartedBy ?? null };
+}
+
 /**
  * POST /api/quality — QC lifecycle write-through. Every action resolves its
  * permission + job scope through the matrix:
@@ -133,7 +151,8 @@ export async function POST(request: Request) {
       if (!parsed.success) return fail("Invalid payload.", 400);
       const { user, job } = await authorizeJob(parsed.data.jobId, "qc.inspect");
       if (job.status !== "WORK_COMPLETED") return fail(`Inspection starts from WORK_COMPLETED (current: ${job.status}).`, 409);
-      await prisma.job.update({ where: { id: job.id }, data: { status: "QUALITY_CHECK", updatedAt: new Date() } });
+      await enforceSeparation(user, job, request);
+      await prisma.job.update({ where: { id: job.id }, data: { status: "QUALITY_CHECK", updatedAt: new Date(), qcStartedAt: new Date(), qcStartedBy: user.id } });
       await recordActivity({ jobId: job.id, type: "STATUS_CHANGED", message: "QC inspection started", actor: { id: user.id, name: user.name, role: user.role } });
       void recordAudit({ actor: user, action: "QC_STARTED", entityType: "job", entityId: job.id, jobId: job.id, previousState: "WORK_COMPLETED", newState: "QUALITY_CHECK", request });
       return ok({ jobId: job.id, status: "QUALITY_CHECK" });
@@ -151,10 +170,13 @@ export async function POST(request: Request) {
       if (d.decision === "REWORK_REQUIRED" && d.issues.length === 0) {
         return fail("Add at least one issue to require rework.", 400);
       }
+      await enforceSeparation(user, job, request);
 
+      const startedAt = await roundStart(d.jobId);
       const qc = await prisma.qualityCheck.create({
-        data: { jobId: d.jobId, inspectorId: user.id, score: d.score, decision: d.decision, notes: d.notes },
+        data: { jobId: d.jobId, inspectorId: user.id, score: d.score, decision: d.decision, notes: d.notes, startedAt: startedAt.at, startedBy: startedAt.by, inspectorOnCrew: isOnCrew(user.id, job) },
       });
+      await prisma.job.update({ where: { id: d.jobId }, data: { qcStartedAt: null, qcStartedBy: null } });
 
       if (d.decision === "REWORK_REQUIRED") {
         const leadWorker = job.assignedManagerId ?? job.assignedStaffIds[0] ?? "";
@@ -309,9 +331,12 @@ export async function POST(request: Request) {
       if (!["REWORK_COMPLETED", "REINSPECTION"].includes(job.status)) {
         return fail(`Reinspection applies after rework is completed (current: ${job.status}).`, 409);
       }
+      await enforceSeparation(user, job, request);
       const now = new Date();
       // Every reinspection is a QC round in the job's history.
-      await prisma.qualityCheck.create({ data: { jobId: d.jobId, inspectorId: user.id, score: 100, decision: "PASS", notes: d.notes || "Reinspection passed" } });
+      const round = await roundStart(d.jobId);
+      await prisma.qualityCheck.create({ data: { jobId: d.jobId, inspectorId: user.id, score: 100, decision: "PASS", notes: d.notes || "Reinspection passed", startedAt: round.at, startedBy: round.by, inspectorOnCrew: isOnCrew(user.id, job) } });
+      await prisma.job.update({ where: { id: d.jobId }, data: { qcStartedAt: null, qcStartedBy: null } });
       await prisma.job.update({ where: { id: d.jobId }, data: { status: "PASS" } });
       try {
         const { onQcPassed } = await import("@/lib/server/workflow-service");

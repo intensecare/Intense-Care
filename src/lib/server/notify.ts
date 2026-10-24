@@ -4,6 +4,7 @@ import { prisma } from "./prisma";
 import { logger, maskPhone } from "./logger";
 import { deepLinkFor, ROLES, scopeOf, type Permission } from "@/lib/rbac";
 import { resolveBaseUrl } from "./policy";
+import { sendAutomatic } from "./whatsapp/send";
 import { bucket, messages, pushToUser, pushToUsers, userIdsWithRole } from "./push";
 
 /**
@@ -33,7 +34,7 @@ function company(): string {
 
 async function auditAndMaybeSend(params: { jobId: string; phone: string; purpose: string; body: string }): Promise<NotifyResult> {
   const providerConfigured = Boolean(process.env.TWOFACTOR_API_KEY);
-  const waCloud = Boolean(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
+  const waCloud = Boolean(process.env.WHATSAPP_ACCESS_TOKEN);
   const waConfigured = waCloud || Boolean(process.env.WHATSAPP_API_URL);
   const provider = waConfigured ? "whatsapp" : providerConfigured ? "2factor" : "none";
 
@@ -90,32 +91,15 @@ async function auditAndMaybeSend(params: { jobId: string; phone: string; purpose
 }
 
 /**
- * WhatsApp Cloud API delivery (WHATSAPP_ACCESS_TOKEN + WHATSAPP_PHONE_NUMBER_ID).
- * With WHATSAPP_TEMPLATE_NAME the message goes out as that approved template
- * with the composed text as its one body variable ({{1}}) — required for
- * business-initiated messages; otherwise as a plain text message.
+ * WhatsApp Cloud API delivery through the shared, tracked sender (src/lib/server/whatsapp/send.ts). With
+ * WHATSAPP_TEMPLATE_NAME the message goes out as that approved template with the composed text as its one body
+ * variable ({{1}}) — required for business-initiated messages; otherwise as plain text (only valid inside the
+ * customer's 24-hour window). Customers who opted out are skipped. The log says "SENT" only for "accepted by WhatsApp";
+ * real delivery is tracked on the WhatsApp message itself from Meta's status webhooks.
  */
 async function sendWhatsAppCloud(phone: string, body: string): Promise<void> {
-  const to = phone.replace(/[^0-9]/g, "");
-  const template = process.env.WHATSAPP_TEMPLATE_NAME;
-  const payload = template
-    ? {
-        messaging_product: "whatsapp",
-        to,
-        type: "template",
-        template: {
-          name: template,
-          language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en" },
-          components: [{ type: "body", parameters: [{ type: "text", text: body }] }],
-        },
-      }
-    : { messaging_product: "whatsapp", to, type: "text", text: { body } };
-  const res = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`WhatsApp API ${res.status}`);
+  const r = await sendAutomatic(phone, body, process.env.WHATSAPP_TEMPLATE_NAME || null, process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en");
+  if (!r.queued) throw new Error(r.reason ?? "whatsapp_not_sent");
 }
 
 /** Settings → Notifications: each automatic message can be switched off. */

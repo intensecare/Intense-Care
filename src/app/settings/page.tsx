@@ -3,7 +3,7 @@
 import { isValidVpa, upiProblem, UPI_PROBLEM_TEXT, type UpiSettings } from "@/lib/payments";
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Save, CheckCircle2, CalendarDays, Upload, Trash2, Users, ChevronRight } from "lucide-react";
+import { Save, CheckCircle2, CalendarDays, Upload, Trash2, Users, ChevronRight, MessageCircle } from "lucide-react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { VisibilityEditor } from "@/components/common/VisibilityEditor";
@@ -133,6 +133,7 @@ export default function SettingsPage() {
   const [visibility, setVisibility] = useState<CustomerVisibility>(s.customerVisibility);
   const [notifications, setNotifications] = useState<NotificationSettings>(s.notifications);
   const [upi, setUpi] = useState<UpiSettings>(s.upi);
+  const [separation, setSeparation] = useState<boolean>(s.qualityControl?.separationOfDuties ?? true);
   const [startV, setStartV] = useState<StartVerificationSettings>(s.jobStartVerification);
   const [startDist, setStartDist] = useState(String(s.jobStartVerification.maxDistanceMeters));
   const [startAcc, setStartAcc] = useState(String(s.jobStartVerification.maxAccuracyMeters));
@@ -166,6 +167,7 @@ export default function SettingsPage() {
     setVisibility(s.customerVisibility);
     setNotifications(s.notifications);
     setUpi(s.upi);
+    setSeparation(s.qualityControl?.separationOfDuties ?? true);
     setStartV(s.jobStartVerification);
     setStartDist(String(s.jobStartVerification.maxDistanceMeters));
     setStartAcc(String(s.jobStartVerification.maxAccuracyMeters));
@@ -194,6 +196,7 @@ export default function SettingsPage() {
     setIsSaving(true);
     setError(null);
     const r = await updateSystemSettings({
+      qualityControl: { separationOfDuties: separation },
       upi: { ...upi, vpa: upi.vpa.trim(), payeeName: upi.payeeName.trim(), description: upi.description.trim() },
       companyName: companyName.trim(),
       companyTagline: companyTagline.trim(),
@@ -305,6 +308,14 @@ export default function SettingsPage() {
           </div>
         </section>
 
+        <section id="s-qc" className={section} aria-labelledby="s-qc-h">
+          <Head id="s-qc" title="Quality control" hint="Field Operations Managers do the work and check it. Choose whether someone may inspect a job they worked on." />
+          <label className="flex items-start gap-3 text-sm text-zinc-900">
+            <input type="checkbox" className="mt-0.5 h-5 w-5" checked={separation} onChange={(e) => setSeparation(e.target.checked)} />
+            <span><span className="font-semibold">Inspector must not be on the job&apos;s crew</span> (recommended). Nobody who is assigned to a job can inspect, pass or reinspect it — another Field Operations Manager or an Admin must. Switching this off lets a manager check their own work; every inspection still records who did it and that they were on the crew.</span>
+          </label>
+        </section>
+
         <section id="s-upi" className={section} aria-labelledby="s-upi-h">
           <Head id="s-upi" title="UPI payment" hint="Lets customers pay an invoice from their invoice page with Google Pay, PhonePe, Paytm or any UPI app. Money goes straight to the account below; an Admin confirms each payment after checking the bank — nothing is marked paid automatically. Job completion never waits for payment." />
           {(() => {
@@ -409,6 +420,16 @@ export default function SettingsPage() {
                 {googleStatus?.connected ? "Connected" : "Off"}
               </span>
             </div>
+            <Link href="/settings/whatsapp" className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 px-4 py-3 min-h-14 hover:bg-zinc-50">
+              <span className="flex items-center gap-3 min-w-0">
+                <MessageCircle className="h-5 w-5 text-zinc-400 shrink-0" aria-hidden />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-zinc-950">WhatsApp Business (Meta Cloud API)</span>
+                  <span className="block text-sm text-zinc-500">Webhook, connection status, templates and health</span>
+                </span>
+              </span>
+              <span className="shrink-0 text-sm font-semibold text-rose-700">Manage</span>
+            </Link>
           </section>
         )}
 

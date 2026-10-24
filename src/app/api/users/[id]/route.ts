@@ -8,7 +8,7 @@ import { logger } from "@/lib/server/logger";
 import { recordAudit } from "@/lib/server/audit";
 import { normalizeRole } from "@/lib/rbac";
 
-const RoleSchema = z.enum(["admin", "field_manager", "qc_inspector", "tax_officer"]);
+const RoleSchema = z.enum(["admin", "field_operations_manager", "tax_officer"]);
 
 const UpdateSchema = z.object({
   name: z.string().min(2).max(120).optional(),

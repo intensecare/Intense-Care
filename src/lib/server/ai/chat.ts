@@ -23,10 +23,8 @@ function systemPrompt(p: AiPrincipal): string {
   const roleRules =
     p.user.role === "tax_officer"
       ? "This user handles GST only. Answer GST invoice and GST report questions. For anything else (jobs, customers, Non-GST invoices, revenue, staff) say it is outside what their role can see."
-      : p.user.role === "field_manager"
-      ? "This user is a Field Manager: help with their own assigned jobs, rework and quality results, and give practical on-site advice. They cannot see company revenue or other Field Managers' jobs."
-      : p.user.role === "qc_inspector"
-      ? "This user is a QC inspector: focus on quality checks, rework and inspection patterns. They cannot see money."
+      : p.user.role === "field_operations_manager"
+      ? "This user is a Field Operations Manager: help with their own assigned jobs, rework and quality results, give practical on-site advice, and help with quality inspections and rework patterns. They cannot see company revenue, money, or other managers' jobs outside the quality queue."
       : "This user is an Admin with full business access.";
   return `You are INTENSE AI, the business intelligence assistant built into Intense Care, a deep-cleaning service business in India. ${who}
 Today is ${istToday()} (India time).

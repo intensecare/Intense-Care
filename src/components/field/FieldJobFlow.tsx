@@ -26,6 +26,7 @@ import {
   User,
   ScanLine,
   Image as ImageIcon,
+  ClipboardCheck,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { MobileLayout, ProfilePanel } from "@/components/common/MobileLayout";
@@ -756,9 +757,12 @@ function greeting(): string {
 }
 
 export function FieldJobList({ tab }: { tab: string }) {
-  const { jobs, checklistItems, photos, reworkTasks, qualityIssues, currentUser, loading } = useApp();
+  const { systemSettings, jobs, checklistItems, photos, reworkTasks, qualityIssues, currentUser, loading } = useApp();
   const today = new Date().toISOString().slice(0, 10);
-  const mine = (jobs as FieldJob[]).filter((j) => !["CLOSED", "CANCELLED"].includes(j.status));
+  // "My Jobs" = jobs I am on the crew of. The jobs list also carries other people's jobs that are waiting for inspection (the quality queue).
+  const onMyCrew = (j: FieldJob) => j.assignedManagerId === currentUser?.id || (j.assignedStaffIds ?? []).includes(currentUser?.id ?? "\0");
+  const mine = (jobs as FieldJob[]).filter((j) => onMyCrew(j) && !["CLOSED", "CANCELLED"].includes(j.status));
+  const waitingForMe = (jobs as FieldJob[]).filter((j) => ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"].includes(j.status) && (!onMyCrew(j) || systemSettings.qualityControl?.separationOfDuties === false)).length;
   const sorted = [...mine].sort((a, b) => (a.scheduledDate === b.scheduledDate ? a.scheduledTimeSlot.localeCompare(b.scheduledTimeSlot) : a.scheduledDate.localeCompare(b.scheduledDate)));
   const openTasks = reworkTasks.filter((t) => t.status !== "completed" && sorted.some((j) => j.id === t.jobId && REWORK_STATUSES.includes(j.status)));
   const reworkJobs = sorted.filter((j) => openTasks.some((t) => t.jobId === j.id));
@@ -779,6 +783,8 @@ export function FieldJobList({ tab }: { tab: string }) {
       photosBefore: photos.filter((p) => p.jobId === j.id && p.photoType === "before").length,
       photosAfter: photos.filter((p) => p.jobId === j.id && p.photoType === "after").length,
       openRework: reworkTasks.filter((t) => t.jobId === j.id && t.status !== "completed").length,
+      viewerId: currentUser.id,
+      separationOfDuties: systemSettings.qualityControl?.separationOfDuties ?? true,
     });
     const actionable = next && !next.waiting && next.kind !== "wait" && next.kind !== "view";
     const showNavigate = ["SCHEDULED", "ASSIGNED"].includes(j.status);
@@ -834,6 +840,16 @@ export function FieldJobList({ tab }: { tab: string }) {
             <p className="text-base text-zinc-500">{greeting()},</p>
             <p className="text-2xl font-semibold text-zinc-950">{currentUser.name.split(" ")[0]}</p>
           </div>
+          {waitingForMe > 0 && (
+            <Link href="/quality-queue?tab=quality" className="flex items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+              <ClipboardCheck className="h-6 w-6 text-rose-600 shrink-0" aria-hidden />
+              <span className="flex-1">
+                <span className="block text-base font-semibold text-rose-950">Waiting for inspection</span>
+                <span className="block text-sm text-rose-900">{waitingForMe} job{waitingForMe === 1 ? "" : "s"} ready for your quality check</span>
+              </span>
+              <ChevronRight className="h-5 w-5 text-rose-700" aria-hidden />
+            </Link>
+          )}
           {reworkJobs.length > 0 && (
             <Link href="/my-jobs?tab=tasks" className="flex items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4">
               <AlertTriangle className="h-6 w-6 text-amber-600 shrink-0" aria-hidden />
