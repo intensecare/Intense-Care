@@ -3,7 +3,7 @@
 import { isValidVpa, upiProblem, UPI_PROBLEM_TEXT, type UpiSettings } from "@/lib/payments";
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Save, CheckCircle2, CalendarDays, Upload, Trash2, Users, ChevronRight } from "lucide-react";
+import { Save, CheckCircle2, CalendarDays, Upload, Trash2, Users, ChevronRight, MessageCircle } from "lucide-react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { VisibilityEditor } from "@/components/common/VisibilityEditor";
@@ -426,6 +426,16 @@ export default function SettingsPage() {
                 {googleStatus?.connected ? "Connected" : "Off"}
               </span>
             </div>
+            <Link href="/settings/whatsapp" className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 px-4 py-3 min-h-14 hover:bg-zinc-50">
+              <span className="flex items-center gap-3 min-w-0">
+                <MessageCircle className="h-5 w-5 text-zinc-400 shrink-0" aria-hidden />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-zinc-950">WhatsApp Business (Meta Cloud API)</span>
+                  <span className="block text-sm text-zinc-500">Webhook, connection status, templates and health</span>
+                </span>
+              </span>
+              <span className="shrink-0 text-sm font-semibold text-rose-700">Manage</span>
+            </Link>
           </section>
         )}
 
