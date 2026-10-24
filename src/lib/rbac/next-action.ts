@@ -105,6 +105,10 @@ export interface JobContext {
   invoiceFinalized?: boolean;
   approvedAt?: string | null;
   feedbackAt?: string | null;
+  /** Who is asking. A Field Operations Manager on the job's own crew may be barred from inspecting it (separation of duties). */
+  viewerId?: string | null;
+  /** The company's "inspector must not be on the job's crew" rule (Settings → Quality control). */
+  separationOfDuties?: boolean;
 }
 
 const WAIT = (label: string, hint: string): NextAction => ({ kind: "wait", label, hint, waiting: true, tone: "neutral" });
@@ -117,45 +121,7 @@ export function getNextAction(roleRaw: Role | string, job: JobContext): NextActi
   const photosComplete = (job.photosBefore ?? 0) > 0 && (job.photosAfter ?? 0) > 0;
   const unassigned = !job.assignedManagerId && (job.assignedStaffIds?.length ?? 0) === 0;
 
-  /* ---------------------------------------------------------------- customer */
-  if (role === "customer") {
-    switch (s) {
-      case "DRAFT":
-      case "SCHEDULED":
-      case "ASSIGNED":
-        return { kind: "view", label: "View Service", hint: "Your team is scheduled.", tone: "neutral" };
-      case "ARRIVED":
-        return job.customerConfirmedAt
-          ? WAIT("Team Confirmed", "Your service is about to start.")
-          : { kind: "confirm", label: "Confirm & Start", hint: "Your cleaning team has arrived.", tone: "primary" };
-      case "CUSTOMER_VERIFIED":
-      case "IN_PROGRESS":
-        return { kind: "view", label: "View Progress", hint: "Service in progress.", tone: "neutral" };
-      case "WORK_COMPLETED":
-      case "QUALITY_CHECK":
-      case "REWORK_REQUIRED":
-      case "REWORK_ASSIGNED":
-      case "REWORK_IN_PROGRESS":
-      case "REWORK_COMPLETED":
-      case "REINSPECTION":
-        return { kind: "view", label: "Review Before / After", hint: "Quality check in progress.", tone: "neutral" };
-      case "PASS":
-      case "CUSTOMER_APPROVAL":
-        return { kind: "approve", label: "Approve Service", hint: "Quality checked. Ready for your approval.", tone: "primary" };
-      case "COMPLETED":
-      case "FEEDBACK_REQUESTED":
-        return job.feedbackAt
-          ? { kind: "view", label: "View Report", hint: "Thank you for your feedback.", tone: "success" }
-          : { kind: "feedback", label: "Rate Your Service", hint: "Service completed.", tone: "success" };
-      case "CLOSED":
-        return { kind: "view", label: "View Report", hint: "Service completed.", tone: "success" };
-      default:
-        return null;
-    }
-  }
-
-  /* ----------------------------------------------------------- field manager */
-  if (role === "field_manager") {
+  function fieldAction(): NextAction | null {
     switch (s) {
       case "SCHEDULED":
       case "ASSIGNED":
@@ -194,8 +160,7 @@ export function getNextAction(roleRaw: Role | string, job: JobContext): NextActi
     }
   }
 
-  /* ---------------------------------------------------------------- QC role */
-  if (role === "qc_inspector") {
+  function qcAction(): NextAction | null {
     switch (s) {
       case "WORK_COMPLETED":
         return { kind: "inspect", label: "Inspect", hint: "Ready for quality inspection.", tone: "primary" };
@@ -203,17 +168,67 @@ export function getNextAction(roleRaw: Role | string, job: JobContext): NextActi
         return { kind: "inspect", label: "Inspect", hint: "Inspection in progress.", tone: "primary" };
       case "REWORK_COMPLETED":
       case "REINSPECTION":
-        return { kind: "inspect", label: "Reinspect", hint: "Rework submitted by the Field Manager.", tone: "primary" };
+        return { kind: "inspect", label: "Reinspect", hint: "Rework submitted by the field team.", tone: "primary" };
       case "REWORK_REQUIRED":
       case "REWORK_ASSIGNED":
       case "REWORK_IN_PROGRESS":
-        return WAIT("Rework in Progress", "The Field Manager is fixing the reported issues.");
+        return WAIT("Rework in Progress", "The Field Operations Manager is fixing the reported issues.");
       case "PASS":
       case "CUSTOMER_APPROVAL":
         return WAIT("Passed", "Waiting for customer approval.");
       default:
         return null;
     }
+  }
+
+
+  /* ---------------------------------------------------------------- customer */
+  if (role === "customer") {
+    switch (s) {
+      case "DRAFT":
+      case "SCHEDULED":
+      case "ASSIGNED":
+        return { kind: "view", label: "View Service", hint: "Your team is scheduled.", tone: "neutral" };
+      case "ARRIVED":
+        return job.customerConfirmedAt
+          ? WAIT("Team Confirmed", "Your service is about to start.")
+          : { kind: "confirm", label: "Confirm & Start", hint: "Your cleaning team has arrived.", tone: "primary" };
+      case "CUSTOMER_VERIFIED":
+      case "IN_PROGRESS":
+        return { kind: "view", label: "View Progress", hint: "Service in progress.", tone: "neutral" };
+      case "WORK_COMPLETED":
+      case "QUALITY_CHECK":
+      case "REWORK_REQUIRED":
+      case "REWORK_ASSIGNED":
+      case "REWORK_IN_PROGRESS":
+      case "REWORK_COMPLETED":
+      case "REINSPECTION":
+        return { kind: "view", label: "Review Before / After", hint: "Quality check in progress.", tone: "neutral" };
+      case "PASS":
+      case "CUSTOMER_APPROVAL":
+        return { kind: "approve", label: "Approve Service", hint: "Quality checked. Ready for your approval.", tone: "primary" };
+      case "COMPLETED":
+      case "FEEDBACK_REQUESTED":
+        return job.feedbackAt
+          ? { kind: "view", label: "View Report", hint: "Thank you for your feedback.", tone: "success" }
+          : { kind: "feedback", label: "Rate Your Service", hint: "Service completed.", tone: "success" };
+      case "CLOSED":
+        return { kind: "view", label: "View Report", hint: "Service completed.", tone: "success" };
+      default:
+        return null;
+    }
+  }
+
+  /* ------------------------------------------- field operations manager (field work + QC) */
+  if (role === "field_operations_manager") {
+    const viewer = job.viewerId ?? null;
+    const onCrew = viewer === null || job.assignedManagerId === viewer || (job.assignedStaffIds ?? []).includes(viewer);
+    const qcTurn = ["WORK_COMPLETED", "QUALITY_CHECK", "REWORK_COMPLETED", "REINSPECTION"].includes(s);
+    // A job on someone else's crew is a quality job; their own is a field job.
+    if (!onCrew) return qcAction();
+    if (qcTurn && viewer !== null && job.separationOfDuties === false) return qcAction(); // the company lets them check their own work
+    if (qcTurn && viewer !== null && job.separationOfDuties === true) return WAIT("Needs another inspector", "Company rule: you can't inspect a job you worked on. Another Field Operations Manager or an Admin will do it.");
+    return fieldAction();
   }
 
   /* ------------------------------------------------------------------ admin */
@@ -230,14 +245,14 @@ export function getNextAction(roleRaw: Role | string, job: JobContext): NextActi
         : { kind: "handover", label: "Share Customer Link", hint: "Team arrived. Waiting for customer confirmation.", tone: "warning" };
     case "CUSTOMER_VERIFIED":
     case "IN_PROGRESS":
-      return WAIT("Service in Progress", "The Field Manager is working.");
+      return WAIT("Service in Progress", "The Field Operations Manager is working.");
     case "WORK_COMPLETED":
     case "QUALITY_CHECK":
       return WAIT("QC Pending", "Work completed. Waiting for the quality check.");
     case "REWORK_REQUIRED":
     case "REWORK_ASSIGNED":
     case "REWORK_IN_PROGRESS":
-      return WAIT("Rework in Progress", "The Field Manager is fixing what QC found.");
+      return WAIT("Rework in Progress", "The Field Operations Manager is fixing what QC found.");
     case "REWORK_COMPLETED":
     case "REINSPECTION":
       return WAIT("Reinspection Pending", "Rework submitted. Waiting for QC.");

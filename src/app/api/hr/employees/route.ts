@@ -6,7 +6,7 @@ import { ok, fail, readJson } from "@/lib/server/serialize";
 import { recordAudit } from "@/lib/server/audit";
 import { csvResponse, nextEmployeeCode, parsePaging } from "@/lib/server/biz";
 import { EmployeeInput, SENSITIVE_FIELDS, findDuplicateEmployee, serializeEmployees, teamEmployeeIds } from "@/lib/server/hr";
-import { can } from "@/lib/rbac";
+import { can, FIELD_OPS_STORED_ROLES } from "@/lib/rbac";
 import { employmentLabel } from "@/lib/business";
 
 /**
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       if (!u) return fail("That login doesn't exist.", 404);
       if (await prisma.employee.findUnique({ where: { userId: d.userId }, select: { id: true } })) return fail("That login is already linked to another staff record.", 409);
     }
-    if (d.managerUserId && !(await prisma.user.findFirst({ where: { id: d.managerUserId, active: true, role: { in: ["field_manager", "admin"] } }, select: { id: true } }))) return fail("Pick an active Field Manager or Admin as the manager.", 400);
+    if (d.managerUserId && !(await prisma.user.findFirst({ where: { id: d.managerUserId, active: true, role: { in: [...FIELD_OPS_STORED_ROLES, "admin"] } }, select: { id: true } }))) return fail("Pick an active Field Operations Manager or Admin as the manager.", 400);
 
     const created = await prisma.employee.create({
       data: {

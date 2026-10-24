@@ -10,15 +10,13 @@ type DemoAccount = { role: string; label: string };
 
 const DEMO_ICON: Record<string, React.ElementType> = {
   admin: ShieldCheck,
-  field_manager: Smartphone,
-  qc_inspector: ClipboardCheck,
+  field_operations_manager: Smartphone,
   tax_officer: Receipt,
   customer: QrCode,
 };
 const DEMO_HINT: Record<string, string> = {
   admin: "Runs the business",
-  field_manager: "Does the work on site",
-  qc_inspector: "Checks the work",
+  field_operations_manager: "Does the work on site and checks it",
   tax_officer: "GST invoices only",
   customer: "Opens the job QR page",
 };

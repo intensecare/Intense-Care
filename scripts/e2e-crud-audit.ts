@@ -103,7 +103,7 @@ async function runE2ECrudAudit() {
         name: `Test FM ${timestamp}`,
         email: userEmail,
         phone: `91${Math.floor(10000000 + Math.random() * 90000000)}`,
-        role: "field_manager",
+        role: "field_operations_manager",
         passwordHash,
         active: true,
       },

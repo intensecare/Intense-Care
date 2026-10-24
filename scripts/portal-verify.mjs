@@ -29,9 +29,9 @@ const anon = client();
 
 const admin = await login("admin@test.local", "adminpass123");
 const mk = (name, email, role) => admin("/api/users", { method: "POST", body: { name, email, phone: "+919800000000", role, password: "password123" } });
-await mk("Pay FM", "payfm@test.local", "field_manager");
-await mk("Pay FM2", "payfm2@test.local", "field_manager");
-await mk("Pay QC", "payqc@test.local", "qc_inspector");
+await mk("Pay FM", "payfm@test.local", "field_operations_manager");
+await mk("Pay FM2", "payfm2@test.local", "field_operations_manager");
+await mk("Pay QC", "payqc@test.local", "field_operations_manager");
 await mk("Pay Tax", "paytax@test.local", "tax_officer");
 const fm1 = await login("payfm@test.local", "password123");
 const fm2 = await login("payfm2@test.local", "password123");
@@ -140,7 +140,7 @@ sql(`update "Job" set status='WORK_COMPLETED' where id='${jobA.id}'`);
 ok((await staff(qc, pBK.id)) === 200, "QC can open photos of a job waiting for inspection");
 { const r = await qc(`/api/photos?jobId=${jobB.id}`); console.log("INFO QC photo list of a job outside the queue:", r.status, r.data?.length); }
 ok((await fm1(`/api/photos?jobId=${jobB.id}`)).status === 403, "Field Manager is refused another job's photo list");
-ok((await fm2(`/api/photos`)).data.every((p) => [jobB.id, jobD.id].includes(p.jobId)), "Field Manager's global list holds only their own jobs' photos");
+ok((await fm2(`/api/photos`)).data.every((p) => [jobB.id, jobD.id, jobA.id].includes(p.jobId)), "Field Manager's global list holds only their own jobs (plus jobs in the QC window)' photos");
 sql(`update "Job" set status='IN_PROGRESS' where id='${jobA.id}'`);
 
 /* ============================== 2. PROPERTY MAP LINKS ============================== */

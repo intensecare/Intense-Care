@@ -14,14 +14,14 @@ datasource db {
 }
 
 /// Login account. `role` is one of the sign-in roles (src/lib/rbac/roles.ts):
-/// admin | field_manager | qc_inspector | tax_officer. Customers never sign
+/// admin | field_operations_manager | tax_officer (legacy field_manager / qc_inspector are migrated). Customers never sign
 /// in — they use the ONE secure link / QR of their job.
 model User {
   id                String   @id @default(cuid())
   name              String
   email             String   @unique
   phone             String
-  role              String // admin | field_manager | qc_inspector | tax_officer
+  role              String // admin | field_operations_manager | tax_officer
   avatar            String?
   passwordHash      String? // bcrypt hash; null = password login disabled until set
   active            Boolean  @default(true)
@@ -219,6 +219,9 @@ model Job {
   checklistItems     JobChecklistItem[]
   invoices           Invoice[]
   photos             JobPhoto[]
+  /// Start of the current inspection round (set by "Inspect", cleared when the round is decided).
+  qcStartedAt        DateTime?
+  qcStartedBy        String?
   qualityChecks      QualityCheck[]
   reworkTasks        ReworkTask[]
   complaints         Complaint[]
@@ -354,6 +357,11 @@ model QualityCheck {
   decision    String // "PASS" | "REWORK_REQUIRED"
   notes       String?
   createdAt   DateTime @default(now())
+  /// When this inspection began and who began it (null on records from before the roles were merged).
+  startedAt   DateTime?
+  startedBy   String?
+  /// The inspector was also on the job's crew (only possible when separation of duties is switched off) — kept visible in the history.
+  inspectorOnCrew Boolean @default(false)
 
   job    Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
   issues QualityIssue[]
@@ -1367,4 +1375,16 @@ model UpiPaymentEvent {
   attempt UpiPaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
 
   @@index([attemptId, at])
+}
+
+/// One row per account whose role was changed by the Field Manager + QC merge: what it was, so the change is auditable and reversible.
+model RoleMigration {
+  id           String   @id
+  userId       String
+  previousRole String
+  newRole      String
+  migratedAt   DateTime @default(now())
+  migration    String
+
+  @@index([userId])
 }

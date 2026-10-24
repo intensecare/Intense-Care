@@ -21,7 +21,7 @@ async function api(cookie, path, { method = "GET", body } = {}) {
 }
 const login = async (email, password) => (await fetch(BASE + "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) })).headers.get("set-cookie").split(";")[0];
 const adminCk = await login("admin@test.local", "adminpass123");
-await api(adminCk, "/api/users", { method: "POST", body: { name: "Gal FM", email: "galfm@test.local", phone: "+919800000000", role: "field_manager", password: "password123" } });
+await api(adminCk, "/api/users", { method: "POST", body: { name: "Gal FM", email: "galfm@test.local", phone: "+919800000000", role: "field_operations_manager", password: "password123" } });
 const fmId = sql(`select id from "User" where email='galfm@test.local'`);
 const fmCk = await login("galfm@test.local", "password123");
 const svc = (await api(adminCk, "/api/services", { method: "POST", body: { name: "Gallery Clean", basePrice: 3000, estimatedDurationHours: 2, checklistTemplate: [{ area: "Hall", task: "x", critical: false }] } })).json.data;

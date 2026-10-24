@@ -46,7 +46,7 @@ export async function GET() {
   }
 }
 
-const BodySchema = z.object({ role: z.enum(["admin", "field_manager", "qc_inspector", "tax_officer", "customer"]) });
+const BodySchema = z.object({ role: z.enum(["admin", "field_operations_manager", "tax_officer", "customer"]) });
 
 /**
  * POST /api/auth/demo-login { role } — signs in as that role's demo account

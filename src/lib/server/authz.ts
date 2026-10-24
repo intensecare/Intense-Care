@@ -118,6 +118,37 @@ function opsWindowBlocks(_user: SessionUser, _scheduledDate: string): boolean {
   return false;
 }
 
+/* -------------------------------------------------------------------------- */
+/* The QC window                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A Field Operations Manager's job scope is ASSIGNED, but quality control means looking at jobs that are NOT theirs.
+ * The "QC window" widens the scope of the read permissions below — and only for people who hold qc.inspect over ALL
+ * records — to jobs that are in the quality pipeline, plus every job they have inspected themselves (their history).
+ * It never reaches customers, properties or money, and it does not exist for any other permission.
+ */
+export const QC_WINDOW_STATUSES = [
+  "WORK_COMPLETED",
+  "QUALITY_CHECK",
+  "REWORK_REQUIRED",
+  "REWORK_ASSIGNED",
+  "REWORK_IN_PROGRESS",
+  "REWORK_COMPLETED",
+  "REINSPECTION",
+  "PASS",
+  "CUSTOMER_APPROVAL",
+] as const;
+const QC_WINDOW_PERMISSIONS: Permission[] = ["jobs.view", "checklist.view", "photos.view", "qc.view", "rework.view", "customer_approval.view"];
+
+function hasQcWindow(user: SessionUser, permission: Permission): boolean {
+  return QC_WINDOW_PERMISSIONS.includes(permission) && scopeOf(user.role, "qc.inspect") === "ALL" && scopeOf(user.role, permission) === "ASSIGNED";
+}
+
+function qcWindowWhere(user: SessionUser): Prisma.JobWhereInput {
+  return { OR: [{ status: { in: [...QC_WINDOW_STATUSES] } }, { qualityChecks: { some: { inspectorId: user.id } } }] };
+}
+
 /** Team member ids for TEAM-scoped queries. */
 async function teamMemberIds(teamId: string): Promise<string[]> {
   const rows = await prisma.user.findMany({ where: { teamId }, select: { id: true } });
@@ -128,8 +159,11 @@ async function teamMemberIds(teamId: string): Promise<string[]> {
  * Prisma `where` that limits jobs to the user's scope for the permission.
  * Returns `null` when the user has no access at all.
  */
-export async function jobWhereFor(user: SessionUser, permission: Permission): Promise<Prisma.JobWhereInput | null> {
+export async function jobWhereFor(user: SessionUser, permission: Permission, opts: { qcWindow?: boolean } = {}): Promise<Prisma.JobWhereInput | null> {
   const scope = scopeOf(user.role, permission);
+  if (scope === "ASSIGNED" && opts.qcWindow !== false && hasQcWindow(user, permission)) {
+    return { OR: [{ assignedManagerId: user.id }, { assignedStaffIds: { has: user.id } }, qcWindowWhere(user)] };
+  }
   switch (scope) {
     case "ALL":
       return {};
@@ -198,7 +232,13 @@ export async function authorizeJob(
   if (!job) throw new HttpError(404, "Job not found.");
 
   const ref = scope === "TEAM" || scope === "BRANCH" ? await jobResourceRef(job) : (job as ResourceRef);
-  const decision = authorize(user, permission, ref);
+  let decision = authorize(user, permission, ref);
+  if (!decision.allowed && hasQcWindow(user, permission)) {
+    const inWindow =
+      (QC_WINDOW_STATUSES as readonly string[]).includes(job.status) ||
+      (await prisma.qualityCheck.count({ where: { jobId, inspectorId: user.id } })) > 0;
+    if (inWindow) decision = { allowed: true, scope };
+  }
   if (!decision.allowed) {
     logger.warn("authz.job_access_denied", { userId: user.id, role: user.role, permission, jobId, scope });
     throw new HttpError(403, decision.reason ?? "You cannot access this job.");
@@ -220,7 +260,7 @@ export function isAssignedWorker(
   job: { assignedManagerId: string | null; assignedStaffIds: string[] },
   userId: string
 ): boolean {
-  return matchesScope("ASSIGNED", { id: userId, role: "field_manager" }, job);
+  return matchesScope("ASSIGNED", { id: userId, role: "field_operations_manager" }, job);
 }
 
 /** The lead on site: the assigned field manager, else the first crew member. */

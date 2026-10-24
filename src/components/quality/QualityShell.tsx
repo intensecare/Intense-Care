@@ -23,7 +23,7 @@ export function QualityShell({
   children: React.ReactNode;
 }) {
   const { currentUser } = useAuth();
-  if (currentUser?.role === "qc_inspector") {
+  if (currentUser?.role === "field_operations_manager") {
     return (
       <MobileLayout title={title} subtitle={subtitle ?? "Quality"} backHref={backHref} action={action}>
         {children}

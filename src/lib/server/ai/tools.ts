@@ -4,7 +4,7 @@ import { jobWhereFor, authorizeJob, HttpError } from "@/lib/server/authz";
 import { invoiceWhereFor, istDayStart } from "@/lib/server/invoices";
 import { getSystemSettings, resolveVisibility } from "@/lib/server/settings";
 import type { SessionUser } from "@/lib/server/session";
-import { can, scopeOf, type Permission } from "@/lib/rbac";
+import { can, scopeOf, FIELD_OPS_STORED_ROLES, type Permission } from "@/lib/rbac";
 
 /**
  * INTENSE AI — the ONLY way the assistant can read business data.
@@ -707,7 +707,7 @@ const TOOLS: AiTool[] = [
         where: { AND: [scope, { scheduledDate: { gte: r.from, lte: r.to } }, { status: { not: "CANCELLED" } }] },
         select: { id: true, status: true, assignedManagerId: true, customerFeedbackRating: true, startedAt: true, completedAt: true, service: { select: { estimatedDurationHours: true } }, qualityChecks: { select: { decision: true, createdAt: true }, orderBy: { createdAt: "asc" } }, _count: { select: { complaints: true } } },
       });
-      const managers = await prisma.user.findMany({ where: { role: { in: ["field_manager", "field_staff", "staff"] } }, select: { id: true, name: true, active: true } });
+      const managers = await prisma.user.findMany({ where: { role: { in: FIELD_OPS_STORED_ROLES } }, select: { id: true, name: true, active: true } });
       return {
         period: r.label,
         fieldManagers: managers

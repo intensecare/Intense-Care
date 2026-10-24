@@ -132,6 +132,7 @@ export default function SettingsPage() {
   const [visibility, setVisibility] = useState<CustomerVisibility>(s.customerVisibility);
   const [notifications, setNotifications] = useState<NotificationSettings>(s.notifications);
   const [upi, setUpi] = useState<UpiSettings>(s.upi);
+  const [separation, setSeparation] = useState<boolean>(s.qualityControl?.separationOfDuties ?? true);
   const [startV, setStartV] = useState<StartVerificationSettings>(s.jobStartVerification);
   const [startDist, setStartDist] = useState(String(s.jobStartVerification.maxDistanceMeters));
   const [startAcc, setStartAcc] = useState(String(s.jobStartVerification.maxAccuracyMeters));
@@ -165,6 +166,7 @@ export default function SettingsPage() {
     setVisibility(s.customerVisibility);
     setNotifications(s.notifications);
     setUpi(s.upi);
+    setSeparation(s.qualityControl?.separationOfDuties ?? true);
     setStartV(s.jobStartVerification);
     setStartDist(String(s.jobStartVerification.maxDistanceMeters));
     setStartAcc(String(s.jobStartVerification.maxAccuracyMeters));
@@ -193,6 +195,7 @@ export default function SettingsPage() {
     setIsSaving(true);
     setError(null);
     const r = await updateSystemSettings({
+      qualityControl: { separationOfDuties: separation },
       upi: { ...upi, vpa: upi.vpa.trim(), payeeName: upi.payeeName.trim(), description: upi.description.trim() },
       companyName: companyName.trim(),
       companyTagline: companyTagline.trim(),
@@ -302,6 +305,14 @@ export default function SettingsPage() {
               </Link>
             ))}
           </div>
+        </section>
+
+        <section id="s-qc" className={section} aria-labelledby="s-qc-h">
+          <Head id="s-qc" title="Quality control" hint="Field Operations Managers do the work and check it. Choose whether someone may inspect a job they worked on." />
+          <label className="flex items-start gap-3 text-sm text-zinc-900">
+            <input type="checkbox" className="mt-0.5 h-5 w-5" checked={separation} onChange={(e) => setSeparation(e.target.checked)} />
+            <span><span className="font-semibold">Inspector must not be on the job&apos;s crew</span> (recommended). Nobody who is assigned to a job can inspect, pass or reinspect it — another Field Operations Manager or an Admin must. Switching this off lets a manager check their own work; every inspection still records who did it and that they were on the crew.</span>
+          </label>
         </section>
 
         <section id="s-upi" className={section} aria-labelledby="s-upi-h">

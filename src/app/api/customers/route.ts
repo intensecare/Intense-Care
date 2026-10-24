@@ -55,7 +55,7 @@ export async function GET() {
     if (scope === "OWN") {
       where = { id: user.customerId ?? "__none__" };
     } else if (scope !== "ALL") {
-      const jobWhere = await jobWhereFor(user, "jobs.view");
+      const jobWhere = await jobWhereFor(user, "jobs.view", { qcWindow: false });
       const jobs = await prisma.job.findMany({ where: jobWhere ?? { id: "__none__" }, select: { customerId: true } });
       where = { id: { in: Array.from(new Set(jobs.map((j) => j.customerId))) } };
     }

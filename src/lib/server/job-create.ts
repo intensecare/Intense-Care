@@ -5,7 +5,7 @@ import type { SessionUser } from "./session";
 import { nextJobSerial } from "./job-serial";
 import { nextInvoiceNumber } from "./invoices";
 import { computeInvoiceFigures, type InvoiceType } from "@/lib/tax";
-import { ASSIGNABLE_ROLES, can } from "@/lib/rbac";
+import { FIELD_OPS_STORED_ROLES, normalizeRole, can } from "@/lib/rbac";
 import type { QuoteLine, SystemSettings, CustomerVisibility } from "@/lib/types";
 import { CUSTOMER_VISIBILITY_KEYS } from "@/lib/types";
 import { formatAddress, normalizeCoords } from "@/lib/location";
@@ -28,11 +28,11 @@ export async function validateCrew(
   const crewIds = Array.from(new Set([...(p.assignedManagerId ? [p.assignedManagerId] : []), ...staff]));
   let assignedManagerId = p.assignedManagerId ?? null;
   if (crewIds.length === 0) return { assignedManagerId: null, assignedStaffIds: [] };
-  if (!can(user, "jobs.assign")) throw new HttpError(403, "Your role may create bookings but not assign Field Managers.");
-  const rows = await prisma.user.findMany({ where: { id: { in: crewIds }, role: { in: ASSIGNABLE_ROLES }, active: true }, select: { id: true, role: true } });
+  if (!can(user, "jobs.assign")) throw new HttpError(403, "Your role may create bookings but not assign Field Operations Managers.");
+  const rows = await prisma.user.findMany({ where: { id: { in: crewIds }, role: { in: FIELD_OPS_STORED_ROLES }, active: true }, select: { id: true, role: true } });
   const valid = new Map(rows.map((r) => [r.id, r.role]));
-  if (crewIds.some((id) => !valid.has(id))) throw new HttpError(400, "One or more selected people are not active Field Managers.");
-  if (!assignedManagerId) assignedManagerId = staff.find((id) => valid.get(id) === "field_manager") ?? null;
+  if (crewIds.some((id) => !valid.has(id))) throw new HttpError(400, "One or more selected people are not active Field Operations Managers.");
+  if (!assignedManagerId) assignedManagerId = staff.find((id) => normalizeRole(valid.get(id)) === "field_operations_manager") ?? null;
   const clash = await prisma.job.count({
     where: {
       scheduledDate: p.scheduledDate,

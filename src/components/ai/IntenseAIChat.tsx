@@ -37,27 +37,15 @@ const SUGGESTIONS: Record<string, { suggested: Prompt[]; quick: Prompt[] }> = {
       { label: "Improve Operations", q: "What should management focus on first to improve operations?" },
     ],
   },
-  field_manager: {
+  field_operations_manager: {
     suggested: [
       { label: "My Day", q: "What are my jobs today and what should I do first?" },
-      { label: "My Rework", q: "Do I have open rework items? What needs fixing?" },
-      { label: "My Quality", q: "How did my jobs do in QC this month and what are the common issues?" },
-      { label: "My Performance", q: "How am I performing this month — completed jobs, first-time QC pass, ratings?" },
-    ],
-    quick: [
-      { label: "Avoid Rework", q: "Based on my QC issues, give me a checklist to avoid rework." },
-      { label: "Find Problems", q: "Which of my jobs took longer than expected, and why might that be?" },
-    ],
-  },
-  qc_inspector: {
-    suggested: [
-      { label: "QC Analysis", q: "Summarize QC results this month: inspections, first-time pass rate and common issues." },
-      { label: "Rework Analysis", q: "Analyse rework this month compared with last month — by area and by Field Manager." },
-      { label: "Repeat Rework", q: "Which jobs needed more than one rework round?" },
       { label: "Waiting for QC", q: "Which jobs are waiting for inspection right now?" },
+      { label: "My Rework", q: "Do I have open rework items? What needs fixing?" },
+      { label: "QC Analysis", q: "Summarize QC results this month: inspections, first-time pass rate and common issues." },
     ],
     quick: [
-      { label: "Find Problems", q: "Which areas and services fail QC most often?" },
+      { label: "Avoid Rework", q: "Based on QC issues, give me a checklist to avoid rework." },
       { label: "Improve Quality", q: "How can we raise the first-time QC pass rate? Base it on the data." },
     ],
   },

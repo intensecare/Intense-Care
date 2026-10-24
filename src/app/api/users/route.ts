@@ -9,7 +9,7 @@ import { recordAudit } from "@/lib/server/audit";
 import { ASSIGNABLE_ROLES, normalizeRole, scopeOf } from "@/lib/rbac";
 
 /** Only the four sign-in roles can be given an account. Customers use their service link / QR. */
-const RoleSchema = z.enum(["admin", "field_manager", "qc_inspector", "tax_officer"]);
+const RoleSchema = z.enum(["admin", "field_operations_manager", "tax_officer"]);
 
 const CreateSchema = z.object({
   name: z.string().min(2).max(120),
