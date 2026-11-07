@@ -9,6 +9,7 @@ import { CustomerFormDialog, type CustomerFormPayload } from "@/components/commo
 import { PropertyFormDialog, type PropertyFormPayload } from "@/components/common/PropertyFormDialog";
 import { LocationPicker, type LocationValue } from "@/components/common/LocationPicker";
 import { VisibilityEditor } from "@/components/common/VisibilityEditor";
+import { QuickJobForm } from "@/components/job/QuickJobForm";
 import { VerificationModeCards } from "@/components/job/VerificationModeCards";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Button } from "@/components/ui/button";
@@ -39,7 +40,7 @@ function Step({ n, title, hint, children }: { n: number; title: string; hint?: s
 }
 
 /** New job — Customer → Property → Location → Service → Date & time → Field Manager → Notes → Customer visibility → Create. */
-function NewJobPage() {
+function NewJobPage({ switcher }: { switcher?: React.ReactNode }) {
   const router = useRouter();
   const params = useSearchParams();
   const { customers, properties, services, users, jobs, systemSettings, createCustomer, createProperty, refreshJobs, refreshFinance } = useApp();
@@ -159,6 +160,7 @@ function NewJobPage() {
           <ChevronLeft className="h-4 w-4" aria-hidden /> Jobs
         </Link>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-950">New job</h1>
+        {switcher}
 
         <Step n={1} title="Customer">
           <div className="flex flex-col sm:flex-row gap-2">
@@ -326,10 +328,37 @@ function NewJobPage() {
   );
 }
 
+/** New job: Quick Create (default, one page) or Advanced (full property, location, visibility and invoice options). */
+function Switcher() {
+  const params = useSearchParams();
+  const advanced = params.get("mode") === "advanced" || !!params.get("propertyId");
+  const customerId = params.get("customerId");
+  const href = (m: "quick" | "advanced") => `/jobs/new?mode=${m}${customerId ? `&customerId=${encodeURIComponent(customerId)}` : ""}`;
+  if (advanced) return <NewJobPage switcher={<ModeTabs advanced href={href} />} />;
+  return (
+    <AdminLayout>
+      <Link href="/jobs" className="inline-flex items-center gap-1 text-sm font-semibold text-zinc-600 hover:text-zinc-950 min-h-10"><ChevronLeft className="h-4 w-4" aria-hidden /> Jobs</Link>
+      <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-950 mt-2 mb-3">New job</h1>
+      <ModeTabs advanced={false} href={href} />
+      <div className="max-w-3xl"><QuickJobForm presetCustomerId={customerId ?? undefined} /></div>
+    </AdminLayout>
+  );
+}
+
+function ModeTabs({ advanced, href }: { advanced: boolean; href: (m: "quick" | "advanced") => string }) {
+  return (
+    <div className="mb-5 inline-flex rounded-xl border border-zinc-200 bg-white p-1" role="tablist" aria-label="Job creation mode">
+      {([["quick", "Quick create", !advanced], ["advanced", "Advanced", advanced]] as const).map(([m, label, on]) => (
+        <Link key={m} role="tab" aria-selected={on} href={href(m)} replace className={cn("min-h-10 px-4 inline-flex items-center rounded-lg text-sm font-semibold", on ? "bg-zinc-900 text-white" : "text-zinc-700 hover:bg-zinc-50")}>{label}</Link>
+      ))}
+    </div>
+  );
+}
+
 export default function Page() {
   return (
     <Suspense fallback={null}>
-      <NewJobPage />
+      <Switcher />
     </Suspense>
   );
 }

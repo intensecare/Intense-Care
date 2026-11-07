@@ -5,6 +5,7 @@ import { HttpError } from "./authz";
 import { financialYear } from "./invoices";
 import { resolveBaseUrl } from "./policy";
 import { generateToken, hashToken, sealToken, openToken } from "./qr-service";
+import { findOrCreateCustomer } from "./parties";
 import { computeInvoiceFigures, GSTIN_PATTERN } from "@/lib/tax";
 import type { SystemSettings, QuoteLine } from "@/lib/types";
 
@@ -27,8 +28,23 @@ const GstinField = z
   .transform((v) => v.trim().toUpperCase())
   .refine((v) => v === "" || GSTIN_PATTERN.test(v), "Customer GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5.");
 
+/** A customer typed straight into the quotation form. Only the name is required. */
+export const NewCustomerSchema = z.object({
+  name: z.string().trim().min(2, "Enter the customer's name.").max(160),
+  phone: z.string().trim().max(32).optional(),
+  email: z.string().trim().max(200).optional(),
+  address: z.string().trim().max(500).optional(),
+});
+
 export const QuoteInputSchema = z.object({
-  customerId: z.string().min(1).max(64),
+  /** Pick an existing customer… */
+  customerId: z.string().min(1).max(64).optional(),
+  /** …or type a new one (matched on phone number, so a known number is reused, not duplicated). */
+  newCustomer: NewCustomerSchema.optional(),
+  serviceAddress: z.string().trim().max(500).optional(),
+  requirements: z.string().max(2000).optional(),
+  internalNotes: z.string().max(2000).optional(),
+  advanceAmount: z.number().min(0).max(100_000_000).nullable().optional(),
   propertyId: z.string().max(64).nullable().optional(),
   items: z.array(LineSchema).min(1, "Add at least one service.").max(50),
   discount: z.number().min(0).max(10_000_000).default(0),
@@ -43,13 +59,26 @@ export const QuoteInputSchema = z.object({
 });
 export type QuoteInput = z.infer<typeof QuoteInputSchema>;
 
+/** Both checks in one place so POST and PATCH answer the same way. */
+export const QuoteInputChecked = QuoteInputSchema.superRefine((v, ctx) => {
+  if (!v.customerId && !v.newCustomer) ctx.addIssue({ code: "custom", message: "Select a customer or enter the new customer's name.", path: ["customerId"] });
+  if (v.customerId && v.newCustomer) ctx.addIssue({ code: "custom", message: "Choose an existing customer or a new one, not both.", path: ["customerId"] });
+});
+
 /** Normalised lines + money, computed by the same GST maths as invoices. */
 export async function buildQuoteData(input: QuoteInput, settings: SystemSettings) {
-  const customer = await prisma.customer.findUnique({ where: { id: input.customerId }, select: { id: true, gstin: true } });
-  if (!customer) throw new HttpError(404, "Customer not found.");
-  if (input.propertyId) {
-    const prop = await prisma.property.findUnique({ where: { id: input.propertyId }, select: { customerId: true } });
-    if (!prop || prop.customerId !== customer.id) throw new HttpError(400, "That property does not belong to this customer.");
+  let customerCreated = false;
+  // Validate everything that can be wrong BEFORE a new customer is written.
+  let customer: { id: string; gstin: string | null } | null = null;
+  if (input.customerId) {
+    customer = await prisma.customer.findUnique({ where: { id: input.customerId }, select: { id: true, gstin: true } });
+    if (!customer) throw new HttpError(404, "Customer not found.");
+    if (input.propertyId) {
+      const prop = await prisma.property.findUnique({ where: { id: input.propertyId }, select: { customerId: true } });
+      if (!prop || prop.customerId !== customer.id) throw new HttpError(400, "That property does not belong to this customer.");
+    }
+  } else if (input.propertyId) {
+    throw new HttpError(400, "A property can only be linked to an existing customer.");
   }
   const ids = input.items.map((l) => l.serviceId).filter((x): x is string => !!x);
   const services = ids.length ? await prisma.service.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
@@ -63,9 +92,21 @@ export async function buildQuoteData(input: QuoteInput, settings: SystemSettings
   });
   const subtotal = Math.round(items.reduce((a, l) => a + l.amount, 0) * 100) / 100;
   if (input.discount > subtotal) throw new HttpError(400, "The discount can't be more than the subtotal.");
+  const nc = input.newCustomer;
+  if (nc) {
+    const r = await findOrCreateCustomer({ name: nc.name, phone: nc.phone, email: nc.email, address: nc.address });
+    customer = { id: r.customer.id, gstin: r.customer.gstin };
+    customerCreated = r.created;
+  }
+  if (!customer) throw new HttpError(400, "Select a customer.");
   const f = computeInvoiceFigures({ invoiceType: input.quoteType, subtotal, discount: input.discount, gstRatePercent: settings.taxRatePercent, interState: input.interState });
   const gst = f.invoiceType === "GST";
-  return {
+  if (input.advanceAmount != null && input.advanceAmount > f.total) throw new HttpError(400, "The advance can't be more than the total.");
+  const data = {
+    serviceAddress: input.serviceAddress || null,
+    requirements: input.requirements?.trim() || null,
+    internalNotes: input.internalNotes?.trim() || null,
+    advanceAmount: input.advanceAmount ?? null,
     customerId: customer.id,
     propertyId: input.propertyId || null,
     serviceId: items.find((l) => l.serviceId)?.serviceId ?? null,
@@ -86,6 +127,7 @@ export async function buildQuoteData(input: QuoteInput, settings: SystemSettings
     paymentTerms: input.paymentTerms ?? settings.quotationPaymentTerms,
     notes: input.notes ?? null,
   };
+  return { data, customerCreated };
 }
 
 /** QT-2627-00001 — its own number series. */
@@ -125,6 +167,8 @@ export async function quoteDocument(id: string, settings: SystemSettings) {
     q,
     customer: customer ?? { name: "Customer", phone: "", email: "", address: "", gstin: null },
     property: property ? { title: property.title, address: [property.address, property.city].filter(Boolean).join(", ") } : null,
+    /** The address to print: the linked property's, else the one typed on the quotation, else nothing. */
+    serviceAddress: property ? [property.address, property.city].filter(Boolean).join(", ") : q.serviceAddress?.trim() || null,
     job: job ? { id: q.jobId!, jobNumber: job.jobSerial, invoiceId: job.invoices[0]?.id ?? null } : null,
     company: {
       name: settings.companyName,

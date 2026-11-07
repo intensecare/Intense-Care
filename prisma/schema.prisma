@@ -479,6 +479,14 @@ model Quote {
   terms          String?
   paymentTerms   String?
   notes          String?
+  /// Where the work will be done, typed on the quotation. Independent of a Property record: a quotation
+  /// can have a linked property, only this address, or neither.
+  serviceAddress String?
+  /// Extra requirements from the customer (printed) and notes for the office (never printed).
+  requirements   String?
+  internalNotes  String?
+  /// Advance asked for with the quotation (INR); the balance is total - advance.
+  advanceAmount  Float?
   /// draft | sent | accepted | declined | converted_to_job | expired
   status         String    @default("sent")
   acceptedAt     DateTime?

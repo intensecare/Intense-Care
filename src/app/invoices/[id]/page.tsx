@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft, Printer, CreditCard, Lock, Download, Trash2, Ban } from "lucide-react";
+import { PdfActions } from "@/components/document/PdfActions";
+import { ChevronLeft, CreditCard, Lock, Trash2, Ban } from "lucide-react";
 import { ShareButtons } from "@/components/document/DocParts";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
@@ -131,8 +132,7 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => window.print()} title="Choose “Save as PDF” in the print window"><Download className="h-4 w-4" aria-hidden /> Download PDF</Button>
-            <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4" aria-hidden /> Print</Button>
+            <PdfActions href={`/api/invoices/${encodeURIComponent(id)}/pdf`} />
             {linkUrl && (
               <ShareButtons
                 getUrl={async () => linkUrl}

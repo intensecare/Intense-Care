@@ -2,7 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { CheckCircle2, XCircle, Printer } from "lucide-react";
+import { CheckCircle2, XCircle } from "lucide-react";
+import { PdfActions } from "@/components/document/PdfActions";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { Skeleton, ErrorState, Notice } from "@/components/ui/states";
@@ -82,7 +83,7 @@ export default function CustomerQuotePage() {
           ) : data.quote.status === "expired" ? (
             <Notice tone="info">This quotation has expired. Please contact us for an updated one.</Notice>
           ) : null}
-          <Button variant="outline" className="w-full sm:w-auto" onClick={() => window.print()}><Printer className="h-4 w-4" aria-hidden /> Print / Save as PDF</Button>
+          <div className="flex flex-wrap gap-2"><PdfActions href={`/api/quote/${encodeURIComponent(token)}/pdf`} /></div>
         </div>
       </div>
     </main>

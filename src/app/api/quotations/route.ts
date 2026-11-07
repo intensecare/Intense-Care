@@ -4,7 +4,7 @@ import { errorResponse } from "@/lib/server/http";
 import { ok, fail, readJson, serializeQuote } from "@/lib/server/serialize";
 import { getSystemSettings } from "@/lib/server/settings";
 import { recordAudit } from "@/lib/server/audit";
-import { QuoteInputSchema, buildQuoteData, nextQuoteNumber } from "@/lib/server/quotations";
+import { QuoteInputChecked, buildQuoteData, nextQuoteNumber } from "@/lib/server/quotations";
 
 /** GET /api/quotations — every quotation, newest first (Admin). */
 export async function GET() {
@@ -27,11 +27,12 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const { user } = await requirePermission("quotes.manage");
-    const parsed = QuoteInputSchema.safeParse(await readJson(request));
+    const parsed = QuoteInputChecked.safeParse(await readJson(request));
     if (!parsed.success) return fail(parsed.error.issues[0]?.message || "Invalid quotation.", 400);
     const settings = await getSystemSettings();
-    const data = await buildQuoteData(parsed.data, settings);
+    const { data, customerCreated } = await buildQuoteData(parsed.data, settings);
     const created = await prisma.quote.create({ data: { ...data, quoteNumber: await nextQuoteNumber(), status: parsed.data.status } });
+    if (customerCreated) void recordAudit({ actor: user, action: "CUSTOMER_CREATED", entityType: "customer", entityId: created.customerId, details: `From quotation ${created.quoteNumber}`, request });
     void recordAudit({ actor: user, action: "QUOTE_CREATED", entityType: "quote", entityId: created.id, details: `${created.quoteNumber} ₹${created.total}`, request });
     return ok(serializeQuote(created), 201);
   } catch (err) {
