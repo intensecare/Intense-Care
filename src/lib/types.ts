@@ -735,6 +735,10 @@ export interface Quote {
   terms?: string;
   paymentTerms?: string;
   notes?: string;
+  serviceAddress?: string;
+  requirements?: string;
+  internalNotes?: string;
+  advanceAmount?: number;
   status: QuoteStatus;
   acceptedAt?: string;
   acceptedBy?: string;

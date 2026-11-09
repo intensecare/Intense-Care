@@ -2,12 +2,13 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, PenLine, Package } from "lucide-react";
+import { Plus, Trash2, PenLine, Package, FileText } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { Notice } from "@/components/ui/states";
 import { quoteApi } from "@/components/quote/QuoteParts";
+import { CustomerPicker, rememberCustomer, type CustomerChoice } from "@/components/common/CustomerPicker";
 import { useApp } from "@/lib/app-context";
 import { computeInvoiceFigures, isValidGstin } from "@/lib/tax";
 import { cn, formatMoney, toLocalDateOffset } from "@/lib/utils";
@@ -33,9 +34,17 @@ const area = "w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm";
  */
 export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; presetCustomerId?: string }) {
   const router = useRouter();
-  const { customers, properties, services, systemSettings } = useApp();
-  const [customerId, setCustomerId] = useState(initial?.customerId ?? presetCustomerId ?? "");
+  const { customers, properties, services, systemSettings, refreshCustomers } = useApp();
+  const [choice, setChoice] = useState<CustomerChoice>(() => {
+    const id = initial?.customerId ?? presetCustomerId;
+    return id ? { kind: "existing", customerId: id } : { kind: "none" };
+  });
+  const customerId = choice.kind === "existing" ? choice.customerId : "";
   const [propertyId, setPropertyId] = useState(initial?.propertyId ?? "");
+  const [serviceAddress, setServiceAddress] = useState(initial?.serviceAddress ?? "");
+  const [requirements, setRequirements] = useState(initial?.requirements ?? "");
+  const [internalNotes, setInternalNotes] = useState(initial?.internalNotes ?? "");
+  const [advance, setAdvance] = useState(initial?.advanceAmount ? String(initial.advanceAmount) : "");
   const [lines, setLines] = useState<Line[]>(() =>
     initial?.items.length
       ? initial.items.map((l) => ({ key: ++seq, serviceId: l.serviceId ?? null, description: l.description, quantity: String(l.quantity), rate: String(l.rate) }))
@@ -49,7 +58,7 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
   const [terms, setTerms] = useState(initial?.terms ?? systemSettings.quotationTerms ?? "");
   const [paymentTerms, setPaymentTerms] = useState(initial?.paymentTerms ?? systemSettings.quotationPaymentTerms ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
-  const [busy, setBusy] = useState<"draft" | "sent" | null>(null);
+  const [busy, setBusy] = useState<"draft" | "sent" | "pdf" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const customer = customers.find((c) => c.id === customerId);
@@ -59,10 +68,25 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
   // New customer → their only property, and their GSTIN for a GST quotation.
   useEffect(() => {
     if (!customerId) return;
-    if (!customerProps.some((p) => p.id === propertyId)) setPropertyId(customerProps.length === 1 ? customerProps[0].id : "");
+    if (!customerProps.some((p) => p.id === propertyId)) setPropertyId(customerProps.length === 1 && !initial ? customerProps[0].id : "");
     if (!initial && customer?.gstin) setGstin(customer.gstin);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId]);
+
+  // Choosing a property fills in its address; the address stays editable (it is what prints on the quotation).
+  const pickProperty = (id: string) => {
+    const prev = customerProps.find((p) => p.id === propertyId);
+    setPropertyId(id);
+    const p = customerProps.find((x) => x.id === id);
+    if (p && (!serviceAddress.trim() || serviceAddress === prev?.address)) setServiceAddress([p.address, p.city].filter(Boolean).join(", "));
+    if (!id && prev && serviceAddress === prev.address) setServiceAddress("");
+  };
+  useEffect(() => {
+    // A property picked automatically (their only one) also brings its address along.
+    const p = customerProps.find((x) => x.id === propertyId);
+    if (p && !serviceAddress.trim() && !initial) setServiceAddress([p.address, p.city].filter(Boolean).join(", "));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propertyId]);
 
   const setLine = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const pickService = (key: number, id: string) => {
@@ -83,7 +107,8 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
   const gstinError = quoteType === "GST" && gstin.trim() && !isValidGstin(gstin) ? "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5." : null;
 
   const problem = (): string | null => {
-    if (!customerId) return "Select a customer.";
+    if (choice.kind === "none") return "Select a customer, or add a new one.";
+    if (choice.kind === "new" && choice.name.trim().length < 2) return "Enter the new customer's name.";
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       const n = i + 1;
@@ -93,19 +118,28 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
       if (!(num(l.rate) >= 0)) return `Line ${n}: enter a rate.`;
     }
     if (disc < 0 || disc > subtotal) return "The discount can't be more than the subtotal.";
+    if (advance.trim() && !(num(advance) >= 0 && num(advance) <= fig.total)) return "The advance can't be more than the total.";
     if (!validUntil) return "Pick a valid-until date.";
     if (gstinError) return gstinError;
     return null;
   };
 
-  const save = async (status: "draft" | "sent") => {
+  const save = async (status: "draft" | "sent", thenPdf = false) => {
     const p = problem();
     if (p) return setError(p);
-    setBusy(status);
+    setBusy(thenPdf ? "pdf" : status);
     setError(null);
     const body = {
-      customerId,
+      ...(choice.kind === "existing"
+        ? { customerId: choice.customerId }
+        : choice.kind === "new"
+          ? { newCustomer: { name: choice.name.trim(), phone: choice.phone.trim() || undefined, email: choice.email.trim() || undefined, address: choice.address.trim() || undefined } }
+          : {}),
       propertyId: propertyId || null,
+      serviceAddress: serviceAddress.trim() || undefined,
+      requirements: requirements.trim() || undefined,
+      internalNotes: internalNotes.trim() || undefined,
+      advanceAmount: advance.trim() ? num(advance) : null,
       items: lines.map((l) => ({ serviceId: l.serviceId || null, description: l.description.trim(), quantity: num(l.quantity), rate: num(l.rate) })),
       discount: disc,
       quoteType,
@@ -122,19 +156,22 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
       : await quoteApi<Quote>("/api/quotations", { method: "POST", body: JSON.stringify(body) });
     setBusy(null);
     if (r.error || !r.data) return setError(r.error ?? "Could not save the quotation.");
-    router.push(`/quotations/${r.data.id}`);
+    rememberCustomer(r.data.customerId);
+    if (choice.kind === "new") await refreshCustomers();
+    router.push(`/quotations/${r.data.id}${thenPdf ? "?view=pdf" : ""}`);
   };
 
   return (
     <div className="space-y-5 pb-28">
       <section className="rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6 space-y-4">
         <h2 className="text-base font-semibold text-zinc-950">Customer</h2>
+        <CustomerPicker value={choice} onChange={setChoice} autoFocus={!initial && !presetCustomerId} />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Customer" required>
-            <SearchableSelect value={customerId} onChange={setCustomerId} options={customers.map((c) => ({ value: c.id, label: `${c.name}${c.phone ? ` · ${c.phone}` : ""}` }))} placeholder="Search customer" />
+          <Field label="Service address" htmlFor="qe-addr" hint="Optional — where the work will be done. No property record needed.">
+            <textarea id="qe-addr" value={serviceAddress} onChange={(e) => setServiceAddress(e.target.value)} rows={2} className={area} maxLength={500} placeholder="e.g. 12 MG Road, Indiranagar, Bengaluru" />
           </Field>
-          <Field label="Property" htmlFor="qe-prop" hint={customerId && !customerProps.length ? "No property yet — you can pick one when converting to a job." : "Optional"}>
-            <select id="qe-prop" value={propertyId} onChange={(e) => setPropertyId(e.target.value)} disabled={!customerId} className="w-full h-12 rounded-xl border border-zinc-300 bg-white px-3 text-base disabled:bg-zinc-50">
+          <Field label="Saved property" htmlFor="qe-prop" hint={customerId ? (customerProps.length ? "Optional — fills in the address" : "This customer has no saved property — that is fine.") : "Optional — for existing customers"}>
+            <select id="qe-prop" value={propertyId} onChange={(e) => pickProperty(e.target.value)} disabled={!customerId || !customerProps.length} className="w-full h-12 rounded-xl border border-zinc-300 bg-white px-3 text-base disabled:bg-zinc-50">
               <option value="">No property</option>
               {customerProps.map((p) => (
                 <option key={p.id} value={p.id}>{p.title} — {p.address}</option>
@@ -171,7 +208,7 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
               )}
               <div className="grid grid-cols-3 gap-3 items-end">
                 <Field label="Qty" htmlFor={`ql-q-${l.key}`}><Input id={`ql-q-${l.key}`} inputMode="decimal" value={l.quantity} onChange={(e) => setLine(l.key, { quantity: e.target.value })} /></Field>
-                <Field label="Rate (₹)" htmlFor={`ql-r-${l.key}`}><Input id={`ql-r-${l.key}`} inputMode="decimal" value={l.rate} onChange={(e) => setLine(l.key, { rate: e.target.value })} placeholder="0" /></Field>
+                <Field label="Rate (₹)" htmlFor={`ql-r-${l.key}`}><Input id={`ql-r-${l.key}`} inputMode="decimal" value={l.rate} onChange={(e) => setLine(l.key, { rate: e.target.value })} placeholder="0" onKeyDown={(e) => { if (e.key === "Enter" && i === lines.length - 1) { e.preventDefault(); setLines((ls) => [...ls, blank(false)]); } }} /></Field>
                 <div className="pb-3 text-right text-sm font-semibold tabular-nums text-zinc-900">{formatMoney(amounts[i])}</div>
               </div>
             </li>
@@ -212,6 +249,7 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Discount (₹)" htmlFor="qe-disc"><Input id="qe-disc" inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0" /></Field>
           <Field label="Valid until" required htmlFor="qe-valid"><Input id="qe-valid" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></Field>
+          <Field label="Advance (₹)" htmlFor="qe-adv" hint="Optional"><Input id="qe-adv" inputMode="decimal" value={advance} onChange={(e) => setAdvance(e.target.value)} placeholder="0" /></Field>
         </div>
         <dl className="rounded-xl bg-zinc-50 divide-y divide-zinc-200/70 text-sm">
           <div className="flex justify-between px-4 py-2"><dt className="text-zinc-600">Subtotal</dt><dd className="tabular-nums">{formatMoney(fig.subtotal)}</dd></div>
@@ -220,6 +258,8 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
             <div className="flex justify-between px-4 py-2"><dt className="text-zinc-600">{interState ? `IGST ${fig.gstRate}%` : `CGST + SGST ${fig.gstRate}%`}</dt><dd className="tabular-nums">{formatMoney(fig.tax)}</dd></div>
           )}
           <div className="flex justify-between px-4 py-2.5 font-semibold text-zinc-950"><dt>Total</dt><dd className="tabular-nums text-base">{formatMoney(fig.total)}</dd></div>
+          {num(advance) > 0 && <div className="flex justify-between px-4 py-2"><dt className="text-zinc-600">Advance</dt><dd className="tabular-nums">{formatMoney(num(advance))}</dd></div>}
+          {num(advance) > 0 && <div className="flex justify-between px-4 py-2"><dt className="text-zinc-600">Balance</dt><dd className="tabular-nums">{formatMoney(Math.max(0, fig.total - num(advance)))}</dd></div>}
         </dl>
       </section>
 
@@ -228,6 +268,8 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
         <Field label="Payment terms" htmlFor="qe-pay"><textarea id="qe-pay" value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} rows={2} className={area} maxLength={1000} /></Field>
         <Field label="Terms & conditions" htmlFor="qe-terms"><textarea id="qe-terms" value={terms} onChange={(e) => setTerms(e.target.value)} rows={4} className={area} maxLength={4000} /></Field>
         <Field label="Notes for the customer" htmlFor="qe-notes" hint="Printed on the quotation"><textarea id="qe-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={area} maxLength={2000} /></Field>
+        <Field label="Additional requirements" htmlFor="qe-req" hint="Optional — printed under the service scope"><textarea id="qe-req" value={requirements} onChange={(e) => setRequirements(e.target.value)} rows={2} className={area} maxLength={2000} /></Field>
+        <Field label="Internal notes" htmlFor="qe-int" hint="For the office only — never printed or shown to the customer"><textarea id="qe-int" value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} rows={2} className={area} maxLength={2000} /></Field>
       </section>
 
       {error && <Notice tone="error">{error}</Notice>}
@@ -240,7 +282,8 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => void save("draft")} loading={busy === "draft"} disabled={!!busy}>Save draft</Button>
-            <Button onClick={() => void save("sent")} loading={busy === "sent"} disabled={!!busy}>{initial ? "Save" : "Create quotation"}</Button>
+            <Button variant="outline" onClick={() => void save("sent", true)} loading={busy === "pdf"} disabled={!!busy}><FileText className="h-4 w-4" aria-hidden /> Generate PDF</Button>
+            <Button onClick={() => void save("sent")} loading={busy === "sent"} disabled={!!busy}>{initial ? "Save" : "Create"}</Button>
           </div>
         </div>
       </div>

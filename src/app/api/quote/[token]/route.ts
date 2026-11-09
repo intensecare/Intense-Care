@@ -23,9 +23,10 @@ export async function GET(request: Request, { params }: { params: { token: strin
       {
         success: true,
         data: {
-          quote: { ...quote, jobId: undefined, customerId: undefined, propertyId: undefined },
+          quote: { ...quote, jobId: undefined, customerId: undefined, propertyId: undefined, internalNotes: undefined },
           customer: { name: doc.customer.name, address: doc.customer.address, gstin: quote.quoteType === "GST" ? doc.customer.gstin : null },
           property: doc.property,
+          serviceAddress: doc.serviceAddress,
           company: doc.company,
         },
       },
