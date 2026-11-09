@@ -31,6 +31,7 @@ export async function getSystemSettings(): Promise<SystemSettings> {
       referralRules: { ...DEFAULT_SYSTEM_SETTINGS.referralRules, ...(data.referralRules ?? {}) },
       contactSync: { ...DEFAULT_SYSTEM_SETTINGS.contactSync, ...(data.contactSync ?? {}) },
       upi: { ...DEFAULT_SYSTEM_SETTINGS.upi, ...(data.upi ?? {}) },
+      qualityControl: { ...DEFAULT_SYSTEM_SETTINGS.qualityControl, ...(data.qualityControl ?? {}) },
       jobStartVerification: (() => {
         const sv = { ...DEFAULT_SYSTEM_SETTINGS.jobStartVerification, ...(data.jobStartVerification ?? {}) };
         // A stored retired mode (QR / QR_GPS) reads as the mode that replaced it.

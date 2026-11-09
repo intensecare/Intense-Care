@@ -146,7 +146,7 @@ export default function ReportsPage() {
     return customFrom <= customTo ? [customFrom, customTo] : [customTo, customFrom];
   }, [preset, customFrom, customTo]);
 
-  const managers = users.filter((u) => u.role === "field_manager");
+  const managers = users.filter((u) => u.role === "field_operations_manager");
   const inRange = (day: string | undefined | null) => !!day && day.slice(0, 10) >= from && day.slice(0, 10) <= to;
   const jobsIn = jobs.filter(
     (j) => inRange(j.scheduledDate) && j.status !== "CANCELLED" && (!serviceId || j.serviceId === serviceId) && (!fmId || j.assignedManagerId === fmId || j.assignedStaffIds.includes(fmId))
@@ -438,7 +438,7 @@ export default function ReportsPage() {
               {section === "fm" && (
                 <Panel title="Field Manager performance" onExport={() => downloadCsv(`fm_performance_${tag}`, fmRows.map((m) => ({ fieldManager: m.name, jobs: m.jobs, completed: m.completed, reworkTasks: m.rework, firstTimePassPct: m.firstPass ?? "", avgRating: m.rating ?? "" })))}>
                   {fmRows.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No Field Managers yet.</p>
+                    <p className="text-sm text-zinc-500">No Field Operations Managers yet.</p>
                   ) : (
                     <DataTable
                       caption="Field Manager performance"

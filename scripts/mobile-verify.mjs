@@ -36,9 +36,9 @@ const ensureUser = async (name, email, role) => {
   const r = await admin("/api/users", { method: "POST", body: { name, email, phone: "+919800000000", role, password: "password123" } });
   return r.data;
 };
-await ensureUser("Ravi FM", "fm1@test.local", "field_manager");
-await ensureUser("Sana FM", "fm2@test.local", "field_manager");
-await ensureUser("Quinn QC", "qc@test.local", "qc_inspector");
+await ensureUser("Ravi FM", "fm1@test.local", "field_operations_manager");
+await ensureUser("Sana FM", "fm2@test.local", "field_operations_manager");
+await ensureUser("Quinn QC", "qc@test.local", "field_operations_manager");
 const fm1 = (await login("fm1@test.local", "password123")).c;
 const fm2 = (await login("fm2@test.local", "password123")).c;
 const qc = (await login("qc@test.local", "password123")).c;

@@ -14,11 +14,14 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
+const require_sha = (buf) => createHash("sha256").update(buf).digest("hex");
 
+const BOOT = randomBytes(3).toString("hex");
+let WA_SEQ = 0;
 const PORT = Number(process.env.FAKE_PORT || 3998);
-const state = { assets: new Map(), control: {}, fcm: [], fcmCalls: new Map() };
-const resetState = () => { state.hits = []; state.assets.clear(); state.control = {}; state.fcm = []; state.fcmCalls.clear(); };
+const state = { assets: new Map(), control: {}, fcm: [], fcmCalls: new Map(), wa: { sent: [], n: 0 } };
+const resetState = () => { state.hits = []; state.assets.clear(); state.control = {}; state.fcm = []; state.fcmCalls.clear(); state.wa = { sent: [], n: 0 }; };
 
 function json(res, code, body) { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); }
 async function body(req) { const c = []; for await (const x of req) c.push(x); return Buffer.concat(c); }
@@ -46,6 +49,34 @@ const handler = async (req, res) => {
     if (p === "/__control") { Object.assign(state.control, JSON.parse((await body(req)).toString() || "{}")); return json(res, 200, state.control); }
     if (p === "/__seed") { const b = JSON.parse((await body(req)).toString()); state.assets.set(b.publicId, { public_id: b.publicId, bytes: b.bytes ?? 1000, format: "jpg", created_at: b.createdAt ?? new Date().toISOString(), secure_url: `http://localhost:${PORT}/img/${b.publicId}` }); return json(res, 200, { ok: true }); }
     if (p === "/__state") return json(res, 200, { assets: Array.from(state.assets.values()), control: state.control, hits: state.hits || [] });
+
+
+    // ---------------------------------------------------------------- Meta WhatsApp Cloud API (Graph): /graph/v21.0/…
+    //   server env: WHATSAPP_GRAPH_BASE=http://localhost:3998/graph  WHATSAPP_ACCESS_TOKEN=wa-test-token
+    //   control:    waExpired:true (every call → error 190)  waError:{http,code,message} (next send fails)  templates:[…]  media:{<id>:{base64,mime}}
+    //   inspect:    GET /__wasent
+    if (p === "/__wasent") return json(res, 200, state.wa.sent);
+    if (p.startsWith("/graph/") || p.startsWith("/wamedia/")) {
+      const auth = req.headers.authorization || "";
+      if (state.control.waExpired || auth !== "Bearer " + (state.control.waToken || "wa-test-token")) return json(res, 401, { error: { message: "Error validating access token: Session has expired", type: "OAuthException", code: 190 } });
+      if (p.startsWith("/wamedia/")) {
+        const m = (state.control.media || {})[p.slice(9)];
+        if (!m) { res.writeHead(404); return res.end("gone"); }
+        const buf = Buffer.from(m.base64, "base64"); res.writeHead(200, { "Content-Type": m.mime, "Content-Length": buf.length }); return res.end(buf);
+      }
+      const parts = p.replace(/^\/graph\/v[\d.]+\//, "").split("/");
+      if (req.method === "POST" && parts[1] === "messages") {
+        const b = JSON.parse((await body(req)).toString() || "{}");
+        if (state.control.waError) { const e = state.control.waError; if (!e.sticky) delete state.control.waError; return json(res, e.http || 400, { error: { message: e.message || "failed", code: e.code, type: "OAuthException" } }); }
+        const id = "wamid.FAKE" + BOOT + "x" + (++WA_SEQ); state.wa.sent.push({ ...b, _id: id });
+        return json(res, 200, { messaging_product: "whatsapp", contacts: [{ input: b.to, wa_id: b.to }], messages: [{ id }] });
+      }
+      if (parts.length === 2 && parts[1] === "subscribed_apps") return json(res, 200, { data: state.control.noSubscription ? [] : [{ whatsapp_business_api_data: { id: "1", name: "ERP" } }] });
+      if (parts.length === 2 && parts[1] === "message_templates") return json(res, 200, { data: state.control.templates || [] });
+      if (parts.length === 1 && (state.control.media || {})[parts[0]]) { const m = state.control.media[parts[0]]; const buf = Buffer.from(m.base64, "base64"); return json(res, 200, { id: parts[0], url: `http://localhost:${PORT}/wamedia/${parts[0]}`, mime_type: m.mime, sha256: m.sha256 || require_sha(buf), file_size: buf.length }); }
+      if (parts.length === 1 && /^\d+$/.test(parts[0])) return json(res, 200, { id: parts[0], display_phone_number: "+91 99999 00000", verified_name: "Intense Care", quality_rating: "GREEN", code_verification_status: "VERIFIED" });
+      return json(res, 404, { error: { message: "Unsupported get request", code: 100, type: "GraphMethodException" } });
+    }
 
     // Google short links + address search, for the property map-link tests.
     if (p.startsWith("/short/")) {

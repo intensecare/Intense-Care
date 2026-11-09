@@ -9,7 +9,7 @@ import { messages, pushToUsers, userIdsWithRole } from "@/lib/server/push";
 const Body = z.object({
   title: z.string().trim().min(3).max(60),
   body: z.string().trim().min(3).max(200),
-  roles: z.array(z.enum(["admin", "field_manager", "qc_inspector"])).min(1).default(["field_manager", "qc_inspector"]),
+  roles: z.array(z.enum(["admin", "field_operations_manager"])).min(1).default(["field_operations_manager"]),
   /** Sending the same key twice sends once. */
   idempotencyKey: z.string().min(8).max(80),
 });

@@ -2,6 +2,7 @@ import { createSign } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { logger } from "./logger";
+import { FIELD_OPS_STORED_ROLES } from "@/lib/rbac/roles";
 import { safeRoute, type PushMessage } from "@/lib/push-messages";
 
 /**
@@ -149,7 +150,7 @@ export async function pushToUsers(userIds: string[], msg: PushMessage, keyFor: (
 
 /** Active users of the given roles. */
 export async function userIdsWithRole(roles: string[]): Promise<string[]> {
-  return (await prisma.user.findMany({ where: { role: { in: roles }, active: true }, select: { id: true } })).map((u) => u.id);
+  return (await prisma.user.findMany({ where: { role: { in: roles.flatMap((r) => (r === "field_operations_manager" ? FIELD_OPS_STORED_ROLES : [r])) }, active: true }, select: { id: true } })).map((u) => u.id);
 }
 
 export { messages, safeRoute, bucket, dayKey } from "@/lib/push-messages";

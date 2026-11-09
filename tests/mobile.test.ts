@@ -138,15 +138,15 @@ test("device tokens: random, prefixed, only the hash is storable", () => {
 test("permissions: contacts and media are Admin-only; the device screen is for the field roles", () => {
   for (const p of ["contacts.sync", "contacts.view", "contacts.manage", "media.view", "media.manage"] as const) {
     assert.equal(scopeOf("admin", p), "ALL");
-    for (const r of ["field_manager", "qc_inspector", "tax_officer", "customer"] as const) assert.equal(scopeOf(r, p), "NONE", `${r} must not have ${p}`);
+    for (const r of ["field_operations_manager", "tax_officer", "customer"] as const) assert.equal(scopeOf(r, p), "NONE", `${r} must not have ${p}`);
   }
-  assert.notEqual(scopeOf("field_manager", "mobile.device"), "NONE");
-  assert.notEqual(scopeOf("qc_inspector", "mobile.device"), "NONE");
+  assert.notEqual(scopeOf("field_operations_manager", "mobile.device"), "NONE");
+  assert.notEqual(scopeOf("field_operations_manager", "mobile.device"), "NONE");
   assert.equal(scopeOf("tax_officer", "mobile.device"), "NONE");
-  assert.ok(routeAllowed("field_manager", "/device-storage"));
-  assert.ok(routeAllowed("qc_inspector", "/device-storage"));
+  assert.ok(routeAllowed("field_operations_manager", "/device-storage"));
+  assert.ok(routeAllowed("field_operations_manager", "/device-storage"));
   assert.ok(routeAllowed("admin", "/contacts") && routeAllowed("admin", "/media"));
-  assert.ok(!routeAllowed("field_manager", "/contacts") && !routeAllowed("field_manager", "/media"));
+  assert.ok(!routeAllowed("field_operations_manager", "/contacts") && !routeAllowed("field_operations_manager", "/media"));
   assert.ok(!routeAllowed("tax_officer", "/device-storage") && !routeAllowed("tax_officer", "/contacts"));
   assert.ok(navFor("admin").some((n) => n.href === "/contacts") && navFor("admin").some((n) => n.href === "/media"));
 });

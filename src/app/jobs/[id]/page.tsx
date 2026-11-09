@@ -49,7 +49,7 @@ const REWORK = ["REWORK_REQUIRED", "REWORK_ASSIGNED", "REWORK_IN_PROGRESS"];
 export default function JobPage() {
   const params = useParams();
   const jobId = String(params?.id ?? "");
-  const { loading, jobs, customers, properties, users, checklistItems, photos, qualityChecks, qualityIssues, reworkTasks, complaints, invoices, currentUser, refreshJobs, refreshPhotos, refreshQuality } = useApp();
+  const { systemSettings, loading, jobs, customers, properties, users, checklistItems, photos, qualityChecks, qualityIssues, reworkTasks, complaints, invoices, currentUser, refreshJobs, refreshPhotos, refreshQuality } = useApp();
   const { can } = useAuth();
 
   const job = jobs.find((j) => j.id === jobId) as DeskJob | undefined;
@@ -153,11 +153,13 @@ export default function JobPage() {
     openRework: openRework.length,
     approvedAt: job.approvedAt ?? null,
     feedbackAt: job.customerFeedbackAt ?? null,
+    viewerId: currentUser.id,
+    separationOfDuties: systemSettings.qualityControl?.separationOfDuties ?? true,
   });
 
   const cancelled = job.status === "CANCELLED";
   const terminal = ["COMPLETED", "FEEDBACK_REQUESTED", "CLOSED", "CANCELLED"].includes(job.status);
-  const managers = users.filter((u) => u.role === "field_manager" && u.active).sort((a, b) => a.name.localeCompare(b.name));
+  const managers = users.filter((u) => u.role === "field_operations_manager" && u.active).sort((a, b) => a.name.localeCompare(b.name));
   const config = JOB_STATUS_CONFIG[job.status];
   const openComplaints = jobComplaints.filter((c) => c.status !== "resolved" && c.status !== "closed");
   const areas = Array.from(new Set([...checklist.map((c) => c.area), ...jobPhotos.map((p) => p.area)]));

@@ -1,3 +1,4 @@
+import { getSystemSettings } from "@/lib/server/settings";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { requireUser, jobWhereFor } from "@/lib/server/authz";
@@ -37,6 +38,7 @@ export async function GET() {
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
 
+    const qcPolicy = (await getSystemSettings()).qualityControl;
     const where = await jobWhereFor(user, "jobs.view");
     const jobs = where
       ? await prisma.job.findMany({
@@ -80,6 +82,8 @@ export async function GET() {
         photosBefore: j.photos.filter((p) => p.photoType === "before").length,
         photosAfter: j.photos.filter((p) => p.photoType === "after").length,
         openRework: j.reworkTasks.filter((t) => t.status !== "completed").length,
+        viewerId: user.id,
+        separationOfDuties: qcPolicy.separationOfDuties,
         approvedAt: j.approvedAt?.toISOString() ?? null,
         feedbackAt: j.customerFeedbackAt?.toISOString() ?? null,
       });

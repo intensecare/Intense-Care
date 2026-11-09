@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, PhoneCall, Search, Download, LayoutGrid, List, CalendarClock, AlertTriangle } from "lucide-react";
+import { MessageCircle, Plus, PhoneCall, Search, Download, LayoutGrid, List, CalendarClock, AlertTriangle } from "lucide-react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -78,12 +78,13 @@ export default function LeadsPage() {
       <PageHeader
         title="Leads"
         description="Every enquiry from calls, the website, WhatsApp, Google and referrals — until it becomes a customer and a job."
-        actions={manage ? (
+        actions={
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setCallOpen(true)}><PhoneCall className="h-5 w-5" aria-hidden /> Log call</Button>
-            <Button onClick={() => setCreateOpen(true)}><Plus className="h-5 w-5" aria-hidden /> New lead</Button>
+            <Link href="/leads/inbox" className="h-11 px-4 rounded-xl border border-zinc-300 bg-white text-sm font-semibold inline-flex items-center gap-2"><MessageCircle className="h-5 w-5 text-emerald-600" aria-hidden /> WhatsApp inbox</Link>
+            {manage && <Button variant="outline" onClick={() => setCallOpen(true)}><PhoneCall className="h-5 w-5" aria-hidden /> Log call</Button>}
+            {manage && <Button onClick={() => setCreateOpen(true)}><Plus className="h-5 w-5" aria-hidden /> New lead</Button>}
           </div>
-        ) : undefined}
+        }
       />
 
       {flash && <Notice tone="success" className="mb-4">{flash}</Notice>}

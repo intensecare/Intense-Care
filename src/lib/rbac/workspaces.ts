@@ -70,23 +70,14 @@ export const WORKSPACES: Record<Role, WorkspaceDef> = {
       { label: "Settings", href: "/settings", permission: "settings.manage", secondary: true },
     ],
   },
-  field_manager: {
-    role: "field_manager",
+  field_operations_manager: {
+    role: "field_operations_manager",
     title: "My Jobs",
     home: "/my-jobs",
     queue: "/my-jobs",
     layout: "mobile",
     nav: [
       { label: "My Jobs", href: "/my-jobs", permission: "jobs.view" },
-    ],
-  },
-  qc_inspector: {
-    role: "qc_inspector",
-    title: "Quality",
-    home: "/quality-queue",
-    queue: "/quality-queue",
-    layout: "mobile",
-    nav: [
       { label: "Quality", href: "/quality-queue", permission: "qc.inspect", badge: "qc_pending" },
     ],
   },

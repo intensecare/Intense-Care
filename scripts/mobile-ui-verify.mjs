@@ -33,7 +33,7 @@ const adminCookie = await login("admin@test.local", "adminpass123");
 
 // A job with two photos, one of a finished-and-paid job (PROTECTED) so the deletion dialog has something to say.
 const mk = async (name, email, role) => (await api(adminCookie, "/api/users", { method: "POST", body: { name, email, phone: "+919800000000", role, password: "password123" } })).json?.data;
-await mk("UI FM", "uifm@test.local", "field_manager");
+await mk("UI FM", "uifm@test.local", "field_operations_manager");
 const fmId = sql(`select id from "User" where email='uifm@test.local'`);
 const fmCookie = await login("uifm@test.local", "password123");
 const svc = (await api(adminCookie, "/api/services", { method: "POST", body: { name: "UI Clean", basePrice: 1000, estimatedDurationHours: 2, checklistTemplate: [{ area: "Hall", task: "Dust", critical: false }] } })).json.data;

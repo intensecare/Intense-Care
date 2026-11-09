@@ -23,6 +23,7 @@ import { dispatchCutoffTime } from "@/lib/server/policy";
 import { getSystemSettings } from "@/lib/server/settings";
 import { logger } from "@/lib/server/logger";
 import { can } from "@/lib/rbac";
+import { addressKey, findOrCreateCustomer } from "@/lib/server/parties";
 
 /** Include shape shared by every job-list fetch (display joins only). */
 const JOB_LIST_INCLUDE = {
@@ -152,18 +153,12 @@ export async function POST(request: Request) {
       const partner = d.referralPartnerId
         ? await prisma.referralPartner.findUnique({ where: { id: d.referralPartnerId } })
         : null;
-      const created = await prisma.customer.create({
-        data: {
-          name: d.customerName,
-          phone: d.customerPhone,
-          email: d.customerEmail || "",
-          address: d.propertyAddress || "",
-          source: d.referralPartnerId ? "referral" : "direct",
-          referralPartnerId: d.referralPartnerId,
-          referralCode: partner?.code,
-        },
-      });
-      customerId = created.id;
+      // The same phone number is the same customer: reuse it instead of creating a duplicate.
+      const r = await findOrCreateCustomer({ name: d.customerName, phone: d.customerPhone, email: d.customerEmail, address: d.propertyAddress });
+      if (r.created && d.referralPartnerId) {
+        await prisma.customer.update({ where: { id: r.customer.id }, data: { source: "referral", referralPartnerId: d.referralPartnerId, referralCode: partner?.code } });
+      }
+      customerId = r.customer.id;
     } else {
       const existing = await prisma.customer.findUnique({ where: { id: customerId } });
       if (!existing) return fail("Customer not found.", 404);
@@ -176,18 +171,26 @@ export async function POST(request: Request) {
       if (!address) return fail("Property address is required.", 400);
       const pin = normalizeCoords(d.locationLat, d.locationLng);
       if (!pin && (d.locationLat != null || d.locationLng != null)) return fail("The map location needs both latitude and longitude (and can't be 0, 0).", 400);
-      const created = await prisma.property.create({
-        data: {
-          customerId,
-          title: d.propertyTitle || `${(d.customerName || "Customer").split(" ")[0]}'s Property`,
-          address,
-          lat: pin?.lat ?? null,
-          lng: pin?.lng ?? null,
-          locationSource: pin ? "MAP_PIN" : null,
-          locationUpdatedAt: pin ? new Date() : null,
-        },
-      });
-      propertyId = created.id;
+      // The same address for the same customer is the same property: reuse it, never duplicate.
+      const known = (await prisma.property.findMany({ where: { customerId } })).find((p) => addressKey(p.address) === addressKey(address));
+      if (known) {
+        propertyId = known.id;
+        // A pin typed for this job travels with the job (and is saved on the property when it has none).
+        if (pin && known.lat == null && d.saveLocationToProperty === undefined) d.saveLocationToProperty = true;
+      } else {
+        const created = await prisma.property.create({
+          data: {
+            customerId,
+            title: d.propertyTitle || `${(d.customerName || "Customer").split(" ")[0]}'s Property`,
+            address,
+            lat: pin?.lat ?? null,
+            lng: pin?.lng ?? null,
+            locationSource: pin ? "MAP_PIN" : null,
+            locationUpdatedAt: pin ? new Date() : null,
+          },
+        });
+        propertyId = created.id;
+      }
     }
 
     const settings = await getSystemSettings();

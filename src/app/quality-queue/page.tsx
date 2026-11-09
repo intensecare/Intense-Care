@@ -29,9 +29,12 @@ function greeting(): string {
  * Admin opens the same page inside the Operations desk.
  */
 function QualityQueue() {
-  const tab = useSearchParams()?.get("tab") ?? "home";
-  const { jobs, photos, qualityChecks, refreshJobs, refreshQuality, loading } = useApp();
   const { currentUser } = useAuth();
+  const isFom = currentUser?.role === "field_operations_manager";
+  const rawTab = useSearchParams()?.get("tab");
+  // Field Operations Managers land straight on the queue; their "home" is My Jobs.
+  const tab = rawTab ?? (isFom ? "quality" : "home");
+  const { systemSettings, jobs, photos, qualityChecks, refreshJobs, refreshQuality, loading } = useApp();
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -43,13 +46,16 @@ function QualityQueue() {
   }, [refreshJobs, refreshQuality]);
 
   const all = jobs as DeskJob[];
-  const queue = all.filter((j) => WAITING.includes(j.status)).sort((a, b) => (a.completedAt ?? a.updatedAt).localeCompare(b.completedAt ?? b.updatedAt));
+  // Separation of duties: jobs I worked on aren't mine to inspect while the company rule is on.
+  const sod = systemSettings.qualityControl?.separationOfDuties !== false;
+  const barred = (j: DeskJob) => sod && !!currentUser && (j.assignedManagerId === currentUser.id || (j.assignedStaffIds ?? []).includes(currentUser.id));
+  const queue = all.filter((j) => WAITING.includes(j.status) && !barred(j)).sort((a, b) => (a.completedAt ?? a.updatedAt).localeCompare(b.completedAt ?? b.updatedAt));
   const inRework = all.filter((j) => IN_REWORK.includes(j.status));
   const reinspections = queue.filter((j) => ["REWORK_COMPLETED", "REINSPECTION"].includes(j.status));
   const today = new Date().toISOString().slice(0, 10);
   const history = [...qualityChecks].sort((a, b) => (b.inspectedAt ?? "").localeCompare(a.inspectedAt ?? ""));
   const passedToday = history.filter((q) => q.status === "PASS" && (q.inspectedAt ?? "").startsWith(today)).length;
-  const isQc = currentUser?.role === "qc_inspector";
+  const isQc = currentUser?.role === "field_operations_manager";
 
   const card = (j: DeskJob) => {
     const reinspect = ["REWORK_COMPLETED", "REINSPECTION"].includes(j.status);
@@ -84,6 +90,13 @@ function QualityQueue() {
 
   return (
     <QualityShell title={isQc ? titles[tab] ?? "Home" : "Quality"} subtitle={isQc ? "Quality Check" : `${queue.length} waiting for inspection`}>
+      {isQc && (tab === "quality" || tab === "history") && (
+        <div role="tablist" aria-label="Quality" className="grid grid-cols-2 gap-2">
+          {([["quality", `To inspect${queue.length ? ` (${queue.length})` : ""}`], ["history", "My inspections"]] as const).map(([k, label]) => (
+            <Link key={k} role="tab" aria-selected={tab === k} href={`/quality-queue?tab=${k}`} className={cn("h-11 rounded-xl text-sm font-semibold inline-flex items-center justify-center border", tab === k ? "bg-zinc-900 text-white border-zinc-900" : "bg-white text-zinc-700 border-zinc-300")}>{label}</Link>
+          ))}
+        </div>
+      )}
       {tab === "profile" && <ProfilePanel />}
 
       {tab === "home" && (

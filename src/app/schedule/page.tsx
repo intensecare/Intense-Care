@@ -236,7 +236,7 @@ export default function SchedulePage() {
             <h3 className="text-sm font-semibold text-zinc-900 mb-2">Field Manager availability</h3>
             <ul className="space-y-1.5 text-xs">
               {users
-                .filter((u) => u.role === "field_manager" && u.active)
+                .filter((u) => u.role === "field_operations_manager" && u.active)
                 .map((u) => {
                   const busyNow = dayJobs.some((j) => j.assignedStaffIds.includes(u.id) || j.assignedManagerId === u.id);
                   return (
@@ -250,7 +250,7 @@ export default function SchedulePage() {
                     </li>
                   );
                 })}
-              {users.filter((u) => u.role === "field_manager").length === 0 && <li className="text-zinc-400">No Field Managers yet.</li>}
+              {users.filter((u) => u.role === "field_operations_manager").length === 0 && <li className="text-zinc-400">No Field Operations Managers yet.</li>}
             </ul>
           </div>
         </div>

@@ -1,6 +1,6 @@
 /** Push notification texts and routes — pure (no database). Generic on purpose: no customer, address, Job ID or amount. */
 
-export type PushType = "JOB_ASSIGNED" | "JOB_REASSIGNED" | "JOB_REMINDER" | "QC_PENDING" | "REWORK_ASSIGNED" | "APPROVAL_REQUIRED" | "FOLLOW_UP_DUE" | "ERP_UPDATE" | "TEST";
+export type PushType = "JOB_ASSIGNED" | "JOB_REASSIGNED" | "JOB_REMINDER" | "QC_PENDING" | "REWORK_ASSIGNED" | "APPROVAL_REQUIRED" | "FOLLOW_UP_DUE" | "NEW_ENQUIRY" | "WHATSAPP_MESSAGE" | "ERP_UPDATE" | "TEST";
 
 export interface PushMessage {
   type: PushType;
@@ -23,6 +23,8 @@ export const messages = {
   reworkAssigned: (jobId: string): PushMessage => ({ type: "REWORK_ASSIGNED", title: "Rework needed", body: "QC found items to fix on one of your jobs.", route: `/my-jobs/${jobId}` }),
   approvalRequired: (jobId: string): PushMessage => ({ type: "APPROVAL_REQUIRED", title: "Waiting for customer approval", body: "QC passed. The customer has been asked to approve.", route: `/jobs/${jobId}` }),
   followUps: (count: number): PushMessage => ({ type: "FOLLOW_UP_DUE", title: "Follow-ups due", body: count === 1 ? "You have a lead follow-up due." : `You have ${count} lead follow-ups due.`, route: "/leads" }),
+  newEnquiry: (): PushMessage => ({ type: "NEW_ENQUIRY", title: "New WhatsApp enquiry", body: "A new customer wrote to the business WhatsApp.", route: "/leads/inbox" }),
+  whatsappMessage: (contactId: string): PushMessage => ({ type: "WHATSAPP_MESSAGE", title: "New WhatsApp message", body: "A customer replied. Tap to open the conversation.", route: `/leads/inbox?c=${contactId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40)}` }),
   update: (title: string, body: string): PushMessage => ({ type: "ERP_UPDATE", title: title.slice(0, 60), body: body.slice(0, 200), route: "/" }),
   test: (): PushMessage => ({ type: "TEST", title: "Test notification", body: "Notifications are working on this phone.", route: "/device-storage" }),
 };

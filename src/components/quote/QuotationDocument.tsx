@@ -23,6 +23,8 @@ export interface QuoteDetail {
   quote: Quote;
   customer: { name: string; phone?: string; email?: string; address?: string | null; gstin?: string | null };
   property: { title: string; address: string } | null;
+  /** The address to show: the linked property's, else the one typed on the quotation. */
+  serviceAddress?: string | null;
   company: DocCompany;
 }
 
@@ -35,6 +37,7 @@ export interface QuoteDetail {
  */
 export function QuotationDocument({ detail }: { detail: QuoteDetail }) {
   const { quote: q, customer, property, company } = detail;
+  const address = detail.serviceAddress ?? property?.address ?? q.serviceAddress ?? null;
   const gst = q.quoteType === "GST";
   return (
     <div className="space-y-3">
@@ -56,15 +59,8 @@ export function QuotationDocument({ detail }: { detail: QuoteDetail }) {
             {customer.phone && <div>{customer.phone}</div>}
             {gst && <div className="text-zinc-900"><span className="text-zinc-500">GSTIN:</span> <span className="font-mono font-semibold">{q.customerGstin || customer.gstin || "Unregistered"}</span></div>}
           </DocParty>
-          <DocParty heading="Property / location">
-            {property ? (
-              <>
-                <div className="text-zinc-900 font-medium">{property.title}</div>
-                <div>{property.address}</div>
-              </>
-            ) : (
-              <div>To be confirmed</div>
-            )}
+          <DocParty heading="Service address">
+            {address ? <div className="text-zinc-900">{address}</div> : <div className="text-zinc-500">To be confirmed</div>}
             {gst && <div>Supply: {q.interState ? "Inter-state (IGST)" : "Intra-state (CGST + SGST)"}</div>}
           </DocParty>
         </DocParties>

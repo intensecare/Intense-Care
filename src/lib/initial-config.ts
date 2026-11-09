@@ -1,4 +1,5 @@
 import { DEFAULT_UPI_SETTINGS } from "./payments";
+import { DEFAULT_QC_POLICY } from "./qc-policy";
 import { DEFAULT_CONTACT_SYNC } from "./contacts";
 import { DEFAULT_START_VERIFICATION } from "./start-verification";
 import type { SystemSettings } from "./types";
@@ -43,6 +44,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   jobStartVerification: { ...DEFAULT_START_VERIFICATION },
   contactSync: { ...DEFAULT_CONTACT_SYNC },
   upi: { ...DEFAULT_UPI_SETTINGS },
+  qualityControl: { ...DEFAULT_QC_POLICY },
   referralRules: { enabled: true, bonusType: "FIXED", bonusValue: 500, minJobValue: 2000, requirePaid: true, eligibilityDays: 90, maxBonus: 0 },
   notifications: { customerArrived: true, customerCompleted: true, fieldManagerAssigned: true, reworkAssigned: true, qcReady: true },
 };

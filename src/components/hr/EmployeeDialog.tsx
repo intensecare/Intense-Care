@@ -44,7 +44,7 @@ export function EmployeeDialog({ employee, defaultType = "PERMANENT", onClose, o
   const [error, setError] = useState<string | null>(null);
   const up = (p: Partial<typeof v>) => setV((x) => ({ ...x, ...p }));
   const freelance = v.employmentType === "FREELANCE";
-  const managers = users.filter((u) => (u.role === "field_manager" || u.role === "admin") && u.active !== false);
+  const managers = users.filter((u) => (u.role === "field_operations_manager" || u.role === "admin") && u.active !== false);
   useEffect(() => {
     // A freelancer is paid per hour or per job; switching type clears an invalid pay type.
     if (freelance && (v.payType === "MONTHLY" || v.payType === "DAILY")) up({ payType: "" });

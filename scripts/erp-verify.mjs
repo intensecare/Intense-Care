@@ -112,7 +112,8 @@ const otherProp = (await admin("/api/properties", { method: "POST", body: { cust
 const otherJob = (await admin("/api/jobs", { method: "POST", body: { customerId: cust.id, propertyId: otherProp.id, serviceId: svc.id, scheduledDate: "2026-12-30", scheduledTimeSlot: "09:00 - 10:00" } })).json?.data?.job;
 const otherTok = (await admin("/api/qr-links", { method: "POST", body: { action: "get", jobId: otherJob.id } })).json?.data.linkUrl.split("/").pop();
 const far = { lat: 13.5, lng: 77.5, accuracy: 10 };
-ok((await admin(`/api/jobs/${job.id}`, { method: "PATCH", body: { startVerificationMode: "QR" } })).status === 400, "the retired QR-only mode can't be set any more");
+ok((await admin(`/api/jobs/${job.id}`, { method: "PATCH", body: { startVerificationMode: "QR" } })).status === 200, "QR-only mode (restored by migration 20261021) can be set");
+await admin(`/api/jobs/${job.id}`, { method: "PATCH", body: { startVerificationMode: "GPS" } });
 ok((await admin(`/api/jobs/${job.id}`, { method: "PATCH", body: { startVerificationMode: "GPS_QR" } })).status === 200, "admin sets this job to GPS + QR job start");
 const near = { lat: 12.9602, lng: 77.6013, accuracy: 12 };
 ok((await fmc(`/api/jobs/${job.id}`, { method: "PATCH", body: { status: "ARRIVED", arrival: near } })).status === 409, "GPS + QR: GPS alone does not start the job");

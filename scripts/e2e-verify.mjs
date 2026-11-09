@@ -32,9 +32,9 @@ ok((await admin("/api/auth/session")).json?.data?.role === "admin", "admin signs
 
 // Users: Field Managers + QC
 const mk = async (name, email, role) => (await admin("/api/users", { method: "POST", body: { name, email, phone: "+919800000000", role, password: "password123" } })).json?.data;
-const fm1 = await mk("Ravi FM", "fm1@test.local", "field_manager");
-const fm2 = await mk("Sana FM", "fm2@test.local", "field_manager");
-const qcU = await mk("Quinn QC", "qc@test.local", "qc_inspector");
+const fm1 = await mk("Ravi FM", "fm1@test.local", "field_operations_manager");
+const fm2 = await mk("Sana FM", "fm2@test.local", "field_operations_manager");
+const qcU = await mk("Quinn QC", "qc@test.local", "field_operations_manager");
 ok(fm1 && fm2 && qcU, "admin creates 2 Field Managers + 1 QC");
 ok((await admin("/api/users", { method: "POST", body: { name: "X", email: "x@test.local", phone: "+919800000000", role: "referral_partner", password: "password123" } })).status === 400, "cannot create a 5th role (referral_partner)");
 ok((await admin("/api/users", { method: "POST", body: { name: "X", email: "x2@test.local", phone: "+919800000000", role: "customer", password: "password123" } })).status === 400, "cannot create a customer login");

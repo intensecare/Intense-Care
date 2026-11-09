@@ -24,7 +24,7 @@ export async function GET(
       return fail("Property not found.", 404);
     }
     if (scope === "ASSIGNED" || scope === "TEAM" || scope === "BRANCH") {
-      const jobWhere = await jobWhereFor(user, "jobs.view");
+      const jobWhere = await jobWhereFor(user, "jobs.view", { qcWindow: false });
       const job = await prisma.job.findFirst({
         where: { ...(jobWhere ?? { id: "__none__" }), propertyId: id },
       });

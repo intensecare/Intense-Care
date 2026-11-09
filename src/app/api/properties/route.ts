@@ -96,7 +96,7 @@ export async function GET() {
       where = { customerId: user.customerId ?? "__none__" };
     } else if (scope === "ASSIGNED" || scope === "TEAM" || scope === "BRANCH") {
       // Field roles see the properties of the jobs they are on — nothing else.
-      const jobWhere = await jobWhereFor(user, "jobs.view");
+      const jobWhere = await jobWhereFor(user, "jobs.view", { qcWindow: false });
       const jobs = await prisma.job.findMany({ where: jobWhere ?? { id: "__none__" }, select: { propertyId: true } });
       where = { id: { in: Array.from(new Set(jobs.map((j) => j.propertyId))) } };
     }

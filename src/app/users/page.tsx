@@ -16,16 +16,14 @@ import { UserPlus, Pencil, Trash2, ShieldCheck, Smartphone, ClipboardCheck, Load
 
 const ROLE_ICON: Record<Role, React.ElementType> = {
   admin: ShieldCheck,
-  field_manager: Smartphone,
-  qc_inspector: ClipboardCheck,
+  field_operations_manager: Smartphone,
   tax_officer: Receipt,
   customer: ShieldCheck,
 };
 
 const ROLE_TONE: Record<Role, string> = {
   admin: "bg-zinc-900 text-white",
-  field_manager: "bg-emerald-50 text-emerald-800 border border-emerald-200",
-  qc_inspector: "bg-rose-50 text-rose-700 border border-rose-200",
+  field_operations_manager: "bg-emerald-50 text-emerald-800 border border-emerald-200",
   tax_officer: "bg-info-50 text-info-700 border border-info-200",
   customer: "bg-zinc-100 text-zinc-600",
 };
@@ -39,10 +37,10 @@ interface FormState {
   password: string;
 }
 
-const EMPTY: FormState = { id: null, name: "", email: "", phone: "", role: "field_manager", password: "" };
+const EMPTY: FormState = { id: null, name: "", email: "", phone: "", role: "field_operations_manager", password: "" };
 
 /**
- * Users — the three sign-in roles only (Admin, Field Manager, QC).
+ * Users — the sign-in roles only (Admin, Field Operations Manager, Tax Officer).
  * Customers never get an account: they use the secure service link.
  */
 export default function UsersPage() {

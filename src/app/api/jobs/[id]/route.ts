@@ -21,7 +21,7 @@ import { notifyStaffAssignment } from "@/lib/server/notify";
 import { bucket, messages, pushToUsers } from "@/lib/server/push";
 import { userNames } from "@/lib/server/biz";
 import { syncJobEvent, cancelJobEvent } from "@/lib/server/google-calendar";
-import { ASSIGNABLE_ROLES, can, scopeOf, type JobStatus } from "@/lib/rbac";
+import { FIELD_OPS_STORED_ROLES, normalizeRole, can, scopeOf, type JobStatus } from "@/lib/rbac";
 import type { SessionUser } from "@/lib/server/session";
 
 const JOB_INCLUDE = {
@@ -123,18 +123,18 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       const crew = Array.from(new Set([...ids, ...(managerId ? [managerId] : [])]));
       if (crew.length > 0) {
         const rows = await prisma.user.findMany({
-          where: { id: { in: crew }, role: { in: ASSIGNABLE_ROLES }, active: true },
+          where: { id: { in: crew }, role: { in: FIELD_OPS_STORED_ROLES }, active: true },
           select: { id: true, role: true },
         });
         const valid = new Map(rows.map((r) => [r.id, r.role]));
         if (crew.some((x) => !valid.has(x))) {
           return fail("One or more selected workers are not active field accounts.", 400);
         }
-        if (managerId && valid.get(managerId) !== "field_manager") {
-          return fail("The team leader must be a Field Manager account.", 400);
+        if (managerId && normalizeRole(valid.get(managerId)) !== "field_operations_manager") {
+          return fail("The team leader must be a Field Operations Manager account.", 400);
         }
         if (!managerId) {
-          managerId = ids.find((x) => valid.get(x) === "field_manager") ?? null;
+          managerId = ids.find((x) => normalizeRole(valid.get(x)) === "field_operations_manager") ?? null;
         }
         if (existing.scheduledDate) {
           const slotRow = await prisma.job.findUnique({ where: { id }, select: { scheduledTimeSlot: true } });

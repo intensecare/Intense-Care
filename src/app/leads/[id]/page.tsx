@@ -88,6 +88,7 @@ export default function LeadDetailPage() {
           <div className="flex flex-wrap gap-2">
             <a href={`tel:${lead.phone}`} className="h-11 px-4 rounded-xl border border-zinc-300 bg-white text-sm font-semibold inline-flex items-center gap-2"><Phone className="h-4 w-4 text-emerald-600" aria-hidden /> {lead.phone}</a>
             <a href={`https://wa.me/${waNumber}`} target="_blank" rel="noreferrer" className="h-11 px-4 rounded-xl border border-zinc-300 bg-white text-sm font-semibold inline-flex items-center gap-2"><MessageCircle className="h-4 w-4 text-emerald-600" aria-hidden /> WhatsApp</a>
+            <Link href={`/leads/inbox?lead=${lead.id}`} className="h-11 px-4 rounded-xl border border-zinc-300 bg-white text-sm font-semibold inline-flex items-center gap-2"><MessageCircle className="h-4 w-4 text-emerald-600" aria-hidden /> Conversation</Link>
             {lead.email && <a href={`mailto:${lead.email}`} className="h-11 px-4 rounded-xl border border-zinc-300 bg-white text-sm font-semibold inline-flex items-center gap-2 min-w-0"><Mail className="h-4 w-4" aria-hidden /> <span className="truncate">{lead.email}</span></a>}
             {manage && <Button variant="outline" onClick={() => setCall(true)}><PhoneCall className="h-4 w-4" aria-hidden /> Log call</Button>}
             {manage && <Button variant="outline" onClick={() => setEdit(true)}><Pencil className="h-4 w-4" aria-hidden /> Edit</Button>}

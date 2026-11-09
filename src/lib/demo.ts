@@ -14,8 +14,7 @@ export const DEMO_DOMAIN = "demo.intensecare.local";
 
 export const DEMO_ACCOUNTS = [
   { role: "admin", label: "Admin", name: "Demo Admin", email: `admin@${DEMO_DOMAIN}` },
-  { role: "field_manager", label: "Field Manager", name: "Demo Field Manager", email: `field.manager@${DEMO_DOMAIN}` },
-  { role: "qc_inspector", label: "QC", name: "Demo QC", email: `qc@${DEMO_DOMAIN}` },
+  { role: "field_operations_manager", label: "Field Operations Manager", name: "Demo Field Operations Manager", email: `field.ops@${DEMO_DOMAIN}` },
   { role: "tax_officer", label: "Tax Officer", name: "Demo Tax Officer", email: `tax.officer@${DEMO_DOMAIN}` },
 ] as const;
 

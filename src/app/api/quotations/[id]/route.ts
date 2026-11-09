@@ -6,10 +6,12 @@ import { errorResponse } from "@/lib/server/http";
 import { ok, fail, readJson, serializeQuote, parseLines } from "@/lib/server/serialize";
 import { getSystemSettings } from "@/lib/server/settings";
 import { recordAudit } from "@/lib/server/audit";
-import { QuoteInputSchema, buildQuoteData, nextQuoteNumber, ensureQuoteShareLink, quoteDocument } from "@/lib/server/quotations";
+import { QuoteInputChecked, buildQuoteData, nextQuoteNumber, ensureQuoteShareLink, quoteDocument } from "@/lib/server/quotations";
 import { validateCrew, createJobWithInvoice, afterJobCreated } from "@/lib/server/job-create";
 import { nextInvoiceNumber } from "@/lib/server/invoices";
 import { computeInvoiceFigures } from "@/lib/tax";
+import { START_MODES } from "@/lib/start-verification";
+import { findOrCreateProperty } from "@/lib/server/parties";
 
 /** GET /api/quotations/[id] — the quotation as a printable document (Admin). */
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
@@ -18,7 +20,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     const settings = await getSystemSettings();
     const doc = await quoteDocument(params.id, settings);
     const share = doc.q.shareTokenEnc ? await ensureQuoteShareLink(doc.q.id) : null;
-    return ok({ quote: serializeQuote(doc.q, { customerName: doc.customer.name, propertyTitle: doc.property?.title }), customer: doc.customer, property: doc.property, job: doc.job, company: doc.company, shareUrl: share });
+    return ok({ quote: serializeQuote(doc.q, { customerName: doc.customer.name, propertyTitle: doc.property?.title }), customer: doc.customer, property: doc.property, serviceAddress: doc.serviceAddress, job: doc.job, company: doc.company, shareUrl: share });
   } catch (err) {
     return errorResponse(err, "quotations.detail.route_error");
   }
@@ -31,9 +33,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const existing = await prisma.quote.findUnique({ where: { id: params.id } });
     if (!existing) return fail("Quotation not found.", 404);
     if (existing.status === "converted_to_job") return fail("This quotation is already a job — edit the job's invoice instead.", 409);
-    const parsed = QuoteInputSchema.safeParse(await readJson(request));
+    const parsed = QuoteInputChecked.safeParse(await readJson(request));
     if (!parsed.success) return fail(parsed.error.issues[0]?.message || "Invalid quotation.", 400);
-    const data = await buildQuoteData(parsed.data, await getSystemSettings());
+    const { data } = await buildQuoteData(parsed.data, await getSystemSettings());
     // Editing an accepted quotation sends it back for acceptance.
     const updated = await prisma.quote.update({ where: { id: existing.id }, data: { ...data, status: parsed.data.status, acceptedAt: null, acceptedBy: null } });
     void recordAudit({ actor: user, action: "QUOTE_UPDATED", entityType: "quote", entityId: updated.id, previousState: `₹${existing.total}`, newState: `₹${updated.total}`, request });
@@ -61,6 +63,12 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
 const ConvertSchema = z.object({
   action: z.enum(["convert-job", "convert-invoice"]),
   propertyId: z.string().max(64).optional(),
+  /** Create a property from these details (matched on address, so an existing one is reused). */
+  newProperty: z.object({ title: z.string().trim().max(160).optional(), address: z.string().trim().min(5, "Enter the property address.").max(500) }).optional(),
+  /** Make a property from the address typed on the quotation. */
+  useServiceAddress: z.boolean().optional(),
+  startVerificationMode: z.enum(START_MODES).nullable().optional(),
+  notes: z.string().max(2000).optional(),
   scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   scheduledTimeSlot: z.string().regex(/^\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}$/).optional(),
   assignedManagerId: z.string().max(64).optional(),
@@ -88,7 +96,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
           customerId: q.customerId, propertyId: q.propertyId, serviceId: q.serviceId, items: (q.items ?? []) as Prisma.InputJsonValue,
           quoteType: q.quoteType, gstRate: q.gstRate, cgst: q.cgst, sgst: q.sgst, igst: q.igst, interState: q.interState, customerGstin: q.customerGstin,
           subtotal: q.subtotal, tax: q.tax, discount: q.discount, total: q.total, validUntil: valid,
-          terms: q.terms, paymentTerms: q.paymentTerms, notes: q.notes, status: "draft",
+          terms: q.terms, paymentTerms: q.paymentTerms, notes: q.notes, serviceAddress: q.serviceAddress, requirements: q.requirements, internalNotes: q.internalNotes, advanceAmount: q.advanceAmount, status: "draft",
         },
       });
       void recordAudit({ actor: user, action: "QUOTE_DUPLICATED", entityType: "quote", entityId: copy.id, details: `from ${q.quoteNumber}`, request });
@@ -139,8 +147,27 @@ export async function POST(request: Request, { params }: { params: { id: string 
       }
 
       if (q.status === "declined") return fail("A declined quotation can't be converted. Duplicate it to send a new one.", 409);
-      const propertyId = q.propertyId ?? d.propertyId;
-      if (!propertyId) return fail("Pick the property for this job.", 400);
+      // Property: already linked → pick one → quick-create one → make one from the address typed on the quotation.
+      // Nothing is invented: a property made from an address has no map pin until someone sets one.
+      let propertyId = q.propertyId ?? null;
+      let propertyCreated = false;
+      if (!propertyId && d.propertyId) {
+        const p = await prisma.property.findUnique({ where: { id: d.propertyId }, select: { customerId: true } });
+        if (!p || p.customerId !== q.customerId) return fail("That property does not belong to this customer.", 400);
+        propertyId = d.propertyId;
+      }
+      if (!propertyId && d.newProperty) {
+        const r = await findOrCreateProperty(q.customerId, d.newProperty);
+        propertyId = r.property.id;
+        propertyCreated = r.created;
+      }
+      if (!propertyId && (d.useServiceAddress ?? true) && q.serviceAddress?.trim()) {
+        const r = await findOrCreateProperty(q.customerId, { address: q.serviceAddress });
+        propertyId = r.property.id;
+        propertyCreated = r.created;
+      }
+      if (!propertyId) return fail("Pick a property, add one, or enter the service address.", 400);
+      if (d.startVerificationMode != null && !settings.jobStartVerification.allowPerJobOverride) return fail("Per-job start verification is turned off in Settings.", 409);
       if (!d.scheduledDate || !d.scheduledTimeSlot) return fail("Pick a date and a time window.", 400);
       const crew = await validateCrew(user, { assignedManagerId: d.assignedManagerId, scheduledDate: d.scheduledDate, scheduledTimeSlot: d.scheduledTimeSlot });
 
@@ -173,7 +200,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
           scheduledTimeSlot: d.scheduledTimeSlot,
           assignedManagerId: crew.assignedManagerId,
           assignedStaffIds: [],
-          notes: `From quotation ${q.quoteNumber}`,
+          notes: [`From quotation ${q.quoteNumber}`, d.notes?.trim(), q.requirements?.trim() && `Customer requirements: ${q.requirements.trim()}`].filter(Boolean).join("\n"),
+          startVerificationMode: d.startVerificationMode ?? null,
+          // The address typed on the quotation is the job's service address (a linked property's address otherwise).
+          location: q.serviceAddress?.trim() ? { lat: null, lng: null, address: q.serviceAddress.trim() } : null,
           quoteId: q.id,
           invoice: { type: q.quoteType === "NON_GST" ? "NON_GST" : "GST", interState: q.interState, items: lines, discount: q.discount, customerGstin: q.customerGstin },
         },
@@ -190,7 +220,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
       }
       afterJobCreated(job.id, user);
       void recordAudit({ actor: user, action: "QUOTE_CONVERTED", entityType: "quote", entityId: q.id, jobId: job.id, newState: job.status, details: `${q.quoteNumber} → ${job.jobSerial}`, request });
-      return ok({ jobId: job.id, jobNumber: job.jobSerial, invoiceId: invoice.id }, 201);
+      if (propertyCreated) void recordAudit({ actor: user, action: "PROPERTY_CREATED", entityType: "property", entityId: propertyId, jobId: job.id, details: `From quotation ${q.quoteNumber}`, request });
+      return ok({ jobId: job.id, jobNumber: job.jobSerial, invoiceId: invoice.id, propertyId, propertyCreated }, 201);
     }
 
     return fail("Unknown action.", 400);

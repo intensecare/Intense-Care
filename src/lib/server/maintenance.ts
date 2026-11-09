@@ -1,3 +1,4 @@
+import { processPending, retryMedia, purgeOldEvents } from "./whatsapp/ingest";
 import { prisma } from "./prisma";
 import { logger } from "./logger";
 import { dayKey, messages, pushToUsers, userIdsWithRole } from "./push";
@@ -44,7 +45,7 @@ export async function sendFollowUpAlerts(now = new Date()): Promise<number> {
 }
 
 export async function runMaintenance(now = new Date()) {
-  const out = { reminders: 0, followUps: 0, purged: { contacts: 0, batches: 0, runs: 0 }, pushLedger: 0, errors: [] as string[] };
+  const out = { reminders: 0, followUps: 0, purged: { contacts: 0, batches: 0, runs: 0 }, pushLedger: 0, whatsapp: { events: 0, media: 0, purged: 0 }, errors: [] as string[] };
   const step = async (name: string, f: () => Promise<void>) => {
     try {
       await f();
@@ -57,6 +58,10 @@ export async function runMaintenance(now = new Date()) {
   await step("followUps", async () => void (out.followUps = await sendFollowUpAlerts(now)));
   await step("purge", async () => void (out.purged = await purgeExpiredContacts()));
   await step("pushLedger", async () => void (out.pushLedger = (await prisma.pushNotification.deleteMany({ where: { createdAt: { lt: new Date(now.getTime() - 30 * 86400000) } } })).count));
+  await step("whatsapp", async () => {
+    const r = await processPending(200);
+    out.whatsapp = { events: r.done, media: await retryMedia(), purged: await purgeOldEvents() };
+  });
   return out;
 }
 

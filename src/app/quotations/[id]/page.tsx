@@ -2,13 +2,14 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft, Printer, Download, Pencil, Copy, Briefcase, Receipt, CheckCircle2, XCircle, Trash2 } from "lucide-react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { ChevronLeft, Pencil, Copy, Briefcase, Receipt, CheckCircle2, XCircle, Trash2 } from "lucide-react";
 import { AdminLayout } from "@/components/common/AdminLayout";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
 import { Button } from "@/components/ui/button";
 import { Skeleton, ErrorState, Notice } from "@/components/ui/states";
 import { ShareButtons } from "@/components/document/DocParts";
+import { PdfActions } from "@/components/document/PdfActions";
 import { QuotationDocument, type QuoteDetail } from "@/components/quote/QuotationDocument";
 import { ConvertDialog, quoteApi } from "@/components/quote/QuoteParts";
 import { formatMoney } from "@/lib/utils";
@@ -20,6 +21,7 @@ type Detail = QuoteDetail & { job: { id: string; jobNumber: string; invoiceId: s
 export default function QuotationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const search = useSearchParams();
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -67,8 +69,7 @@ export default function QuotationDetailPage() {
             <p className="mt-1 text-sm text-zinc-600">{data.customer.name} · {formatMoney(q.total)}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => window.print()} title="Choose “Save as PDF” in the print window"><Download className="h-4 w-4" aria-hidden /> Download PDF</Button>
-            <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4" aria-hidden /> Print</Button>
+            <PdfActions href={`/api/quotations/${encodeURIComponent(q.id)}/pdf`} defaultOpen={search.get("view") === "pdf"} />
             <ShareButtons
               phone={data.customer.phone}
               getUrl={async () => {
