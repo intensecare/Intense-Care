@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { useApp } from "@/lib/app-context";
 import { formatMoney } from "@/lib/utils";
-import type { Payment } from "@/lib/types";
+import type { Payment, BankAccount } from "@/lib/types";
 
 /** Record a payment against an invoice (Admin). */
 export function RecordPaymentDialog({
@@ -14,7 +14,7 @@ export function RecordPaymentDialog({
   onClose,
   onDone,
 }: {
-  invoice: { id: string; invoiceNumber: string; balanceDue: number } | null;
+  invoice: { id: string; invoiceNumber: string; balanceDue: number; bankAccountId?: string } | null;
   onClose: () => void;
   onDone?: () => void;
 }) {
@@ -22,6 +22,8 @@ export function RecordPaymentDialog({
   const [amount, setAmount] = useState(0);
   const [method, setMethod] = useState<Payment["paymentMethod"]>("upi");
   const [reference, setReference] = useState("");
+  const [receivingAccountId, setReceivingAccountId] = useState<string>("");
+  const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +32,14 @@ export function RecordPaymentDialog({
     setAmount(invoice.balanceDue);
     setMethod("upi");
     setReference(`TXN-${Date.now().toString().slice(-6)}`);
+    setReceivingAccountId(invoice.bankAccountId ?? "");
     setError(null);
+    void fetch("/api/bank-accounts")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j?.success && Array.isArray(j.data)) setAccounts((j.data as BankAccount[]).filter((a) => a.status === "ACTIVE"));
+      })
+      .catch(() => {});
   }, [invoice]);
 
   const submit = async (e: React.FormEvent) => {
@@ -39,7 +48,7 @@ export function RecordPaymentDialog({
     if (!(amount > 0)) return setError("Enter an amount greater than zero.");
     if (amount > invoice.balanceDue + 0.001) return setError(`The balance due is ${formatMoney(invoice.balanceDue)}.`);
     setBusy(true);
-    const r = await recordPayment(invoice.id, amount, method, reference.trim());
+    const r = await recordPayment(invoice.id, amount, method, reference.trim(), receivingAccountId || null);
     setBusy(false);
     if (!r.success) return setError(r.message);
     onDone?.();
@@ -69,6 +78,16 @@ export function RecordPaymentDialog({
           <Field label="Reference" required htmlFor="pay-ref" hint="UPI / bank reference or receipt number">
             <Input id="pay-ref" value={reference} onChange={(e) => setReference(e.target.value)} required />
           </Field>
+          {accounts.length > 0 && (
+            <Field label="Received into" htmlFor="pay-account" hint="The account the money actually arrived in — may differ from the invoice's default.">
+              <select id="pay-account" value={receivingAccountId} onChange={(e) => setReceivingAccountId(e.target.value)} className="w-full h-11 rounded-xl border border-zinc-300 px-3 bg-white text-sm">
+                <option value="">Not recorded</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.displayName} ({a.accountNumberMasked})</option>
+                ))}
+              </select>
+            </Field>
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" loading={busy}>{busy ? "Saving…" : "Record payment"}</Button>

@@ -7,6 +7,7 @@ import { resolveBaseUrl } from "./policy";
 import { generateToken, hashToken, sealToken, openToken } from "./qr-service";
 import { findOrCreateCustomer } from "./parties";
 import { computeInvoiceFigures, GSTIN_PATTERN } from "@/lib/tax";
+import { snapshotOf } from "./bank-accounts";
 import type { SystemSettings, QuoteLine } from "@/lib/types";
 
 /**
@@ -46,6 +47,8 @@ export const QuoteInputSchema = z.object({
   internalNotes: z.string().max(2000).optional(),
   advanceAmount: z.number().min(0).max(100_000_000).nullable().optional(),
   propertyId: z.string().max(64).nullable().optional(),
+  /** The account the customer should pay into. Not forced — a quotation can be a plain estimate. */
+  bankAccountId: z.string().max(64).nullable().optional(),
   items: z.array(LineSchema).min(1, "Add at least one service.").max(50),
   discount: z.number().min(0).max(10_000_000).default(0),
   quoteType: z.enum(["GST", "NON_GST"]).default("GST"),
@@ -99,6 +102,14 @@ export async function buildQuoteData(input: QuoteInput, settings: SystemSettings
     customerCreated = r.created;
   }
   if (!customer) throw new HttpError(400, "Select a customer.");
+  // Not forced: a quotation may be a plain estimate with no receiving account chosen yet.
+  let bankAccountId: string | null = null;
+  if (input.bankAccountId) {
+    const acc = await prisma.bankAccount.findUnique({ where: { id: input.bankAccountId } });
+    if (!acc) throw new HttpError(400, "That receiving bank account no longer exists.");
+    if (acc.status !== "ACTIVE") throw new HttpError(400, "That receiving bank account is inactive.");
+    bankAccountId = acc.id;
+  }
   const f = computeInvoiceFigures({ invoiceType: input.quoteType, subtotal, discount: input.discount, gstRatePercent: settings.taxRatePercent, interState: input.interState });
   const gst = f.invoiceType === "GST";
   if (input.advanceAmount != null && input.advanceAmount > f.total) throw new HttpError(400, "The advance can't be more than the total.");
@@ -109,6 +120,7 @@ export async function buildQuoteData(input: QuoteInput, settings: SystemSettings
     advanceAmount: input.advanceAmount ?? null,
     customerId: customer.id,
     propertyId: input.propertyId || null,
+    bankAccountId,
     serviceId: items.find((l) => l.serviceId)?.serviceId ?? null,
     items: items as unknown as Prisma.InputJsonValue,
     quoteType: f.invoiceType,
@@ -158,13 +170,16 @@ export async function quoteByToken(token: string) {
 export async function quoteDocument(id: string, settings: SystemSettings) {
   const q = await prisma.quote.findUnique({ where: { id } });
   if (!q) throw new HttpError(404, "Quotation not found.");
-  const [customer, property, job] = await Promise.all([
+  const [customer, property, job, bankAccount] = await Promise.all([
     prisma.customer.findUnique({ where: { id: q.customerId }, select: { name: true, phone: true, email: true, address: true, gstin: true } }),
     q.propertyId ? prisma.property.findUnique({ where: { id: q.propertyId }, select: { title: true, address: true, city: true } }) : null,
     q.jobId ? prisma.job.findUnique({ where: { id: q.jobId }, select: { jobSerial: true, invoices: { select: { id: true }, take: 1 } } }) : null,
+    q.bankAccountId ? prisma.bankAccount.findUnique({ where: { id: q.bankAccountId } }) : null,
   ]);
   return {
     q,
+    // Live account (a quotation is never "issued", so there is nothing to freeze yet).
+    bankAccount: bankAccount && bankAccount.status === "ACTIVE" ? snapshotOf(bankAccount) : null,
     customer: customer ?? { name: "Customer", phone: "", email: "", address: "", gstin: null },
     property: property ? { title: property.title, address: [property.address, property.city].filter(Boolean).join(", ") } : null,
     /** The address to print: the linked property's, else the one typed on the quotation, else nothing. */

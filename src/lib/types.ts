@@ -744,8 +744,49 @@ export interface Quote {
   acceptedBy?: string;
   jobId?: string;
   hasShareLink: boolean;
+  bankAccountId?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * A company-configured account for receiving customer payments.
+ *   COMPANY_ACCOUNT  a real account Admin typed in from a bank document.
+ *   VIRTUAL_ACCOUNT  reserved for a future bank-provisioned virtual-account integration — not live.
+ *   LEDGER_ACCOUNT   internal bookkeeping only (e.g. cash-in-hand); never shown to customers.
+ * `accountNumber` is present only when the caller holds `finance.bank.manage`; everyone else
+ * (there is currently no such "everyone else" — the module is Admin-only) sees `accountNumberMasked`.
+ */
+export interface BankAccount {
+  id: string;
+  displayName: string;
+  holderName: string;
+  bankName: string;
+  accountNumber?: string;
+  accountNumberMasked: string;
+  ifsc: string;
+  branch?: string;
+  accountType: "SAVINGS" | "CURRENT";
+  upiId?: string;
+  kind: "COMPANY_ACCOUNT" | "VIRTUAL_ACCOUNT" | "LEDGER_ACCOUNT";
+  openingBalance?: number;
+  currency: string;
+  status: "ACTIVE" | "INACTIVE";
+  isDefault: boolean;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Frozen on an Invoice at the moment it is issued so later edits to the BankAccount never rewrite a printed PDF. */
+export interface BankAccountSnapshot {
+  displayName: string;
+  holderName: string;
+  bankName: string;
+  accountNumber: string;
+  ifsc: string;
+  branch?: string;
+  upiId?: string;
 }
 
 export interface Invoice {
@@ -780,6 +821,9 @@ export interface Invoice {
   interState: boolean;
   customerGstin?: string;
   supplierGstin?: string;
+  /** The account the customer is asked to pay into. Never auto-changed once issued. */
+  bankAccountId?: string;
+  bankAccountSnapshot?: BankAccountSnapshot;
 }
 
 export interface Payment {
@@ -792,6 +836,8 @@ export interface Payment {
   transactionReference: string;
   status: "completed" | "pending" | "refunded" | "failed";
   paidAt: string;
+  /** The account the money actually arrived in for THIS payment (may differ from the invoice's default). */
+  receivingBankAccountId?: string;
 }
 
 export interface NotificationRecord {

@@ -274,6 +274,8 @@ export function serializeInvoice(i: Prisma.InvoiceGetPayload<object>): Invoice {
     interState: i.interState,
     customerGstin: i.customerGstin ?? undefined,
     supplierGstin: i.supplierGstin ?? undefined,
+    bankAccountId: i.bankAccountId ?? undefined,
+    bankAccountSnapshot: (i.bankAccountSnapshot as unknown as Invoice["bankAccountSnapshot"]) ?? undefined,
   };
 }
 
@@ -288,6 +290,7 @@ export function serializePayment(p: Prisma.PaymentGetPayload<object>): Payment {
     transactionReference: p.transactionReference,
     status: "completed",
     paidAt: new Date(p.paidAt).toISOString(),
+    receivingBankAccountId: p.receivingBankAccountId ?? undefined,
   };
 }
 
@@ -492,6 +495,7 @@ export function serializeQuote(
     acceptedAt: q.acceptedAt ? q.acceptedAt.toISOString() : undefined,
     acceptedBy: q.acceptedBy ?? undefined,
     jobId: q.jobId ?? undefined,
+    bankAccountId: q.bankAccountId ?? undefined,
     hasShareLink: Boolean(q.shareTokenHash),
     createdAt: q.createdAt.toISOString(),
     updatedAt: q.updatedAt.toISOString(),

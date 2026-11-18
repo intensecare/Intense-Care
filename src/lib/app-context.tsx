@@ -204,7 +204,8 @@ interface AppContextType {
     invoiceId: string,
     amount: number,
     method: Payment["paymentMethod"],
-    reference: string
+    reference: string,
+    receivingBankAccountId?: string | null
   ) => Promise<{ success: boolean; message: string }>;
 
   assignStaffToJob: (jobId: string, staffIds: string[]) => Promise<{ success: boolean; message: string }>;
@@ -1268,11 +1269,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     invoiceId: string,
     amount: number,
     method: Payment["paymentMethod"],
-    reference: string
+    reference: string,
+    receivingBankAccountId?: string | null
   ) => {
     const r = await api<Payment>("/api/finance", {
       method: "POST",
-      body: JSON.stringify({ action: "record-payment", invoiceId, amount, paymentMethod: method, reference }),
+      body: JSON.stringify({ action: "record-payment", invoiceId, amount, paymentMethod: method, reference, receivingBankAccountId: receivingBankAccountId ?? null }),
     });
     if (!r.ok || !r.data) return { success: false, message: r.error || "Payment failed." };
     setPayments((prev) => [r.data as Payment, ...prev]);

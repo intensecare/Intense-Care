@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { nextJobSerial } from "@/lib/server/job-serial";
 import { nextInvoiceNumber } from "@/lib/server/invoices";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
+import { snapshotOf } from "@/lib/server/bank-accounts";
 import { requirePermission, requireAnyPermission, requireApproval, HttpError } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
 import {
@@ -57,6 +59,16 @@ const PaymentSchema = z.object({
   amount: z.number().min(0.01).max(100000000),
   paymentMethod: z.enum(["card", "bank_transfer", "cash", "upi", "online_link"]),
   reference: z.string().min(1).max(160),
+  /** The account this specific payment actually landed in (may differ from the invoice's default). */
+  receivingBankAccountId: z.string().max(64).nullable().optional(),
+});
+
+/** Admin-only: correct the receiving account on an ALREADY ISSUED invoice. Never automatic. */
+const CorrectBankAccountSchema = z.object({
+  action: z.literal("correct-invoice-bank-account"),
+  invoiceId: z.string().min(1).max(64),
+  bankAccountId: z.string().max(64).nullable(),
+  reason: z.string().min(5).max(500),
 });
 
 const FinalizeSchema = z.object({ action: z.literal("finalize-invoice"), invoiceId: z.string().min(1).max(64) });
@@ -120,16 +132,60 @@ export async function POST(request: Request) {
 
       const invoice = await prisma.invoice.findUnique({ where: { id: d.invoiceId } });
       if (!invoice) return fail("Invoice not found.", 404);
+      if (d.receivingBankAccountId) {
+        const acc = await prisma.bankAccount.findUnique({ where: { id: d.receivingBankAccountId } });
+        if (!acc) return fail("That receiving bank account no longer exists.", 400);
+        if (acc.status !== "ACTIVE") return fail("That receiving bank account is inactive.", 400);
+      }
 
       // One shared, row-locked routine (also used when an Admin verifies a customer's UPI payment): it refuses
       // a cancelled invoice and an overpayment, and the same reference on the same invoice is the same payment.
-      const applied = await prisma.$transaction((tx) => applyPayment(tx, { invoiceId: d.invoiceId, amount: d.amount, method: d.paymentMethod, reference: d.reference }));
+      const applied = await prisma.$transaction((tx) =>
+        applyPayment(tx, {
+          invoiceId: d.invoiceId,
+          amount: d.amount,
+          method: d.paymentMethod,
+          reference: d.reference,
+          receivingBankAccountId: d.receivingBankAccountId ?? null,
+          recordedBy: `${user.id}:${user.name}`,
+        })
+      );
       if (applied.duplicate) return ok({ ...serializePayment(applied.payment), duplicate: true });
       const { payment, status } = applied;
 
       logger.info("finance.payment_recorded", { invoiceId: d.invoiceId, amount: d.amount, by: user.id });
       void recordAudit({ actor: user, action: "PAYMENT_RECORDED", entityType: "payment", entityId: payment.id, jobId: invoice.jobId, previousState: invoice.status, newState: status, details: `₹${d.amount} via ${d.paymentMethod} ref ${d.reference}`, request });
       return ok(serializePayment(payment), 201);
+    }
+
+    /* ------------------------------------------ correct bank account (issued) */
+    if (action === "correct-invoice-bank-account") {
+      const { user } = await requirePermission("finance.bank.manage");
+      const parsed = CorrectBankAccountSchema.safeParse(body);
+      if (!parsed.success) return fail(parsed.error.issues[0]?.message || "Invalid payload.", 400);
+      const d = parsed.data;
+      const invoice = await prisma.invoice.findUnique({ where: { id: d.invoiceId } });
+      if (!invoice) return fail("Invoice not found.", 404);
+      let snapshot: Prisma.InputJsonValue | typeof Prisma.DbNull = Prisma.DbNull;
+      if (d.bankAccountId) {
+        const acc = await prisma.bankAccount.findUnique({ where: { id: d.bankAccountId } });
+        if (!acc) return fail("That receiving bank account no longer exists.", 400);
+        if (acc.status !== "ACTIVE") return fail("That receiving bank account is inactive.", 400);
+        snapshot = snapshotOf(acc) as unknown as Prisma.InputJsonValue;
+      }
+      const updated = await prisma.invoice.update({ where: { id: invoice.id }, data: { bankAccountId: d.bankAccountId, bankAccountSnapshot: snapshot } });
+      void recordAudit({
+        actor: user,
+        action: "INVOICE_BANK_ACCOUNT_CORRECTED",
+        entityType: "invoice",
+        entityId: invoice.id,
+        jobId: invoice.jobId,
+        previousState: invoice.bankAccountId ?? "none",
+        newState: updated.bankAccountId ?? "none",
+        reason: d.reason,
+        request,
+      });
+      return ok(serializeInvoice(updated));
     }
 
     /* ----------------------------------------------------- finalize invoice */

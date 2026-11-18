@@ -11,6 +11,7 @@ import { CUSTOMER_VISIBILITY_KEYS } from "@/lib/types";
 import { formatAddress, normalizeCoords } from "@/lib/location";
 import { syncOpenJobsToProperty } from "./locations";
 import type { StartMode } from "@/lib/start-verification";
+import { resolveBankAccountForNew, snapshotOf } from "./bank-accounts";
 
 /**
  * Creating a job — ONE implementation used by "New job" and by converting a
@@ -86,6 +87,8 @@ export interface NewJob {
     customerGstin?: string | null;
     paymentTerms?: string | null;
     notes?: string | null;
+    /** Explicit choice, else the company default active account, else no account on the invoice. */
+    bankAccountId?: string | null;
   };
 }
 
@@ -122,6 +125,7 @@ export async function createJobWithInvoice(input: NewJob, settings: SystemSettin
   const pin = ownPin ?? propertyPin;
   const loc = { lat: pin?.lat ?? null, lng: pin?.lng ?? null, address: sent?.address?.trim() || propertyAddress };
   const locationSource = ownPin && !pinOnProperty ? "JOB" : "PROPERTY";
+  const bankAccount = await resolveBankAccountForNew(input.invoice.bankAccountId);
 
   const result = await prisma.$transaction(async (tx) => {
     if (pinOnProperty && ownPin) {
@@ -178,6 +182,8 @@ export async function createJobWithInvoice(input: NewJob, settings: SystemSettin
         paymentTerms: input.invoice.paymentTerms ?? settings.invoicePaymentTerms ?? null,
         notes: input.invoice.notes ?? settings.invoiceNotes ?? null,
         quoteId: input.quoteId ?? null,
+        bankAccountId: bankAccount?.id ?? null,
+        bankAccountSnapshot: (bankAccount ? (snapshotOf(bankAccount) as unknown as Prisma.InputJsonValue) : undefined),
       },
     });
     await tx.customer.update({ where: { id: customer.id }, data: { totalBookings: { increment: 1 } } });

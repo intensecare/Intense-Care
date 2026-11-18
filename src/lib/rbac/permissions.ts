@@ -157,6 +157,13 @@ export const PERMISSIONS = [
 
   "links.manage",
 
+  /** Bank Accounts (Finance → Bank Accounts): configuring the company's own receiving
+   *  accounts, mapping invoices/quotations to one, and recording which account a payment
+   *  landed in. Admin only — never granted to Field Operations Manager, Tax Officer or Customer. */
+  "finance.bank.manage",
+  /** Importing a bank statement (CSV) and matching its lines against recorded Payments. Admin only. */
+  "finance.reconcile",
+
   /** Intense AI assistant. What it can SEE is decided per data tool by the
    *  permissions above — this only switches the assistant on for a role. */
   "ai.use",

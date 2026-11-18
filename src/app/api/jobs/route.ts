@@ -111,6 +111,8 @@ const CreateJobSchema = z.object({
   interState: z.boolean().optional().default(false),
   /** Per-job override of the start verification mode; unset = follow the company default. */
   startVerificationMode: z.enum(START_MODES).nullable().optional(),
+  /** The account the customer should pay into; unset = the company's configured default. */
+  bankAccountId: z.string().max(64).nullable().optional(),
 });
 
 /**
@@ -216,7 +218,7 @@ export async function POST(request: Request) {
             : null,
         saveLocationToProperty: d.saveLocationToProperty,
         customerVisibility: cleanVisibility(d.customerVisibility),
-        invoice: { type: invoiceType, interState: d.interState },
+        invoice: { type: invoiceType, interState: d.interState, bankAccountId: d.bankAccountId },
         startVerificationMode: d.startVerificationMode ?? null,
       },
       settings

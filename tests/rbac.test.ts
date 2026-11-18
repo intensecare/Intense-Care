@@ -156,7 +156,7 @@ test("workspaces: five separate experiences, each with its own home", () => {
   );
   assert.deepEqual(
     navFor("admin").filter((n) => n.secondary).map((n) => n.label),
-    ["Schedule", "Properties", "Services", "GST", "Expenses", "Referrals", "HR", "Contacts", "Media & Storage", "Reviews & Feedback", "Settings"]
+    ["Bank Accounts", "Schedule", "Properties", "Services", "GST", "Expenses", "Referrals", "HR", "Contacts", "Media & Storage", "Reviews & Feedback", "Settings"]
   );
   assert.equal(homePathFor("admin"), "/");
   assert.equal(homePathFor("field_operations_manager"), "/my-jobs");

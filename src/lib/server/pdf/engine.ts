@@ -342,6 +342,34 @@ export class Pdf {
     this.y = y0 + H + 6;
   }
 
+  /**
+   * Bank payment details, printed only when a real configured account is attached — never fabricated.
+   * `acc` is null when no account is configured for this document, in which case nothing is drawn.
+   */
+  bankDetails(acc: { displayName: string; holderName: string; bankName: string; accountNumber: string; ifsc: string; branch?: string; upiId?: string } | null) {
+    if (!acc) return;
+    const rows: [string, string][] = [
+      ["Account holder", acc.holderName],
+      ["Bank", acc.bankName],
+      ["Account number", acc.accountNumber],
+      ["IFSC", acc.ifsc],
+      ...(acc.branch ? ([["Branch", acc.branch]] as [string, string][]) : []),
+      ...(acc.upiId ? ([["UPI ID", acc.upiId]] as [string, string][]) : []),
+    ];
+    const rowH = 13;
+    this.ensure(26 + rowH * rows.length);
+    this.heading("Bank payment details");
+    const lx = M.l, vx = M.l + 110;
+    for (const [label, value] of rows) {
+      this.font(false, 8.5, MUTED);
+      this.doc.text(label, lx, this.y, { width: 100, lineBreak: false });
+      this.font(true, 9, INK);
+      this.doc.text(value, vx, this.y, { width: CONTENT_W - 110, lineBreak: false });
+      this.y += rowH;
+    }
+    this.y += 6;
+  }
+
   /** A pill-style status label. */
   badge(text: string, x: number, y: number, tone: "good" | "warn" | "bad" | "neutral") {
     const col = { good: "#047857", warn: "#B45309", bad: "#B91C1C", neutral: "#52525B" }[tone];

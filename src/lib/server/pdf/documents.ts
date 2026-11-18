@@ -80,6 +80,7 @@ export async function buildQuotePdf(d: Awaited<ReturnType<typeof quoteDocument>>
   p.section("Additional requirements", q.requirements);
   p.section("Notes", q.notes);
   p.section("Payment terms", q.paymentTerms);
+  p.bankDetails(d.bankAccount);
   p.section("Terms & conditions", q.terms, { size: 8.5 });
   p.section("Validity", `This quotation is valid until ${dmy(q.validUntil)}. Prices and availability are confirmed on acceptance.`);
   p.signatures({ acceptance: true, company: pdfCompany(settings), ack: "I have read and accept this quotation and its terms." });
@@ -150,6 +151,7 @@ export async function buildInvoicePdf(d: Awaited<ReturnType<typeof loadInvoiceDe
     p.section("Pay by UPI", `UPI ID: ${d.upi.vpa}${d.upi.payeeName ? `  ·  Payee: ${d.upi.payeeName}` : ""}\nPlease quote ${inv.invoiceNumber} as the payment reference. A payment is shown as received only after it is confirmed by ${settings.companyName || "Intense Care"}.`);
   }
   p.section("Payment terms", inv.paymentTerms);
+  p.bankDetails(d.bankAccount);
   p.section("Notes", inv.notes);
   p.signatures({ acceptance: false, company: pdfCompany(settings) });
   return p.finish(gst ? "This is a computer-generated tax invoice." : "This is a computer-generated invoice. No GST is charged.");

@@ -6,6 +6,7 @@ import { serializeInvoice } from "@/lib/server/serialize";
 import { getSystemSettings } from "@/lib/server/settings";
 import { logger } from "@/lib/server/logger";
 import { can } from "@/lib/rbac";
+import type { BankAccountSnapshot } from "@/lib/types";
 
 /**
  * One invoice as a printable document — the single source for the invoice page AND the invoice PDF, so the two can
@@ -42,6 +43,9 @@ export async function loadInvoiceDetail(user: SessionUser, id: string) {
   return {
     invoice: serializeInvoice(row),
     quoteNumber: quote?.quoteNumber ?? null,
+    // Frozen at the moment the invoice's receiving account was set — a later edit to the BankAccount record
+    // (or its deactivation) never changes what a document already issued says. Null = no account was chosen.
+    bankAccount: (row.bankAccountSnapshot as BankAccountSnapshot | null) ?? null,
     upi: settings.upi?.enabled && settings.upi.vpa ? { vpa: settings.upi.vpa, payeeName: settings.upi.payeeName } : null,
     job: row.job
       ? {

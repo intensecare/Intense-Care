@@ -26,7 +26,10 @@ import {
 
 type Tx = Prisma.TransactionClient;
 
-export async function applyPayment(tx: Tx, input: { invoiceId: string; amount: number; method: string; reference: string }) {
+export async function applyPayment(
+  tx: Tx,
+  input: { invoiceId: string; amount: number; method: string; reference: string; receivingBankAccountId?: string | null; recordedBy?: string | null }
+) {
   // Row lock: concurrent payments for the same invoice run one after the other.
   await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${input.invoiceId} FOR UPDATE`;
   const invoice = await tx.invoice.findUnique({ where: { id: input.invoiceId } });
@@ -39,7 +42,16 @@ export async function applyPayment(tx: Tx, input: { invoiceId: string; amount: n
     throw new HttpError(400, `Payment amount (₹${amount.toFixed(2)}) exceeds the outstanding balance (₹${invoice.balanceDue.toFixed(2)}).`);
   }
   const payment = await tx.payment.create({
-    data: { invoiceId: input.invoiceId, jobId: invoice.jobId, customerId: invoice.customerId, amount, paymentMethod: input.method, transactionReference: input.reference },
+    data: {
+      invoiceId: input.invoiceId,
+      jobId: invoice.jobId,
+      customerId: invoice.customerId,
+      amount,
+      paymentMethod: input.method,
+      transactionReference: input.reference,
+      receivingBankAccountId: input.receivingBankAccountId ?? null,
+      recordedBy: input.recordedBy ?? null,
+    },
   });
   const amountPaid = round2(invoice.amountPaid + amount);
   const balanceDue = Math.max(0, round2(invoice.total - amountPaid));

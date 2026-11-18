@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { requirePermission, HttpError } from "@/lib/server/authz";
 import { errorResponse } from "@/lib/server/http";
@@ -9,6 +9,7 @@ import { recordAudit } from "@/lib/server/audit";
 import { QuoteInputChecked, buildQuoteData, nextQuoteNumber, ensureQuoteShareLink, quoteDocument } from "@/lib/server/quotations";
 import { validateCrew, createJobWithInvoice, afterJobCreated } from "@/lib/server/job-create";
 import { nextInvoiceNumber } from "@/lib/server/invoices";
+import { resolveBankAccountForNew, snapshotOf } from "@/lib/server/bank-accounts";
 import { computeInvoiceFigures } from "@/lib/tax";
 import { START_MODES } from "@/lib/start-verification";
 import { findOrCreateProperty } from "@/lib/server/parties";
@@ -134,12 +135,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
         if (!invoice) return fail("The job has no invoice.", 404);
         if (invoice.finalizedAt || invoice.amountPaid > 0) return ok({ jobId: q.jobId, invoiceId: invoice.id, unchanged: true });
         const f = computeInvoiceFigures({ invoiceType: q.quoteType === "NON_GST" ? "NON_GST" : "GST", subtotal: q.subtotal, discount: q.discount, gstRatePercent: settings.taxRatePercent, interState: q.interState });
+        const bankAccount = await resolveBankAccountForNew(q.bankAccountId);
         await prisma.invoice.update({
           where: { id: invoice.id },
           data: {
             items: lines as unknown as Prisma.InputJsonValue, subtotal: f.subtotal, discount: f.discount, tax: f.tax, gstRate: f.gstRate, cgst: f.cgst, sgst: f.sgst, igst: f.igst,
             interState: f.invoiceType === "GST" && q.interState, invoiceType: f.invoiceType, customerGstin: f.invoiceType === "GST" ? q.customerGstin : null,
             supplierGstin: f.invoiceType === "GST" ? settings.gstin?.trim() || null : null, total: f.total, balanceDue: f.total, quoteId: q.id,
+            bankAccountId: bankAccount?.id ?? null,
+            bankAccountSnapshot: bankAccount ? (snapshotOf(bankAccount) as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
             ...(f.invoiceType !== invoice.invoiceType ? { invoiceNumber: await nextInvoiceNumber(prisma, f.invoiceType) } : {}),
           },
         });
@@ -205,7 +209,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
           // The address typed on the quotation is the job's service address (a linked property's address otherwise).
           location: q.serviceAddress?.trim() ? { lat: null, lng: null, address: q.serviceAddress.trim() } : null,
           quoteId: q.id,
-          invoice: { type: q.quoteType === "NON_GST" ? "NON_GST" : "GST", interState: q.interState, items: lines, discount: q.discount, customerGstin: q.customerGstin },
+          invoice: { type: q.quoteType === "NON_GST" ? "NON_GST" : "GST", interState: q.interState, items: lines, discount: q.discount, customerGstin: q.customerGstin, bankAccountId: q.bankAccountId },
         },
         settings
       ).catch((e) => {

@@ -298,14 +298,22 @@ model Invoice {
   billingAddress String?
   serviceAddress String?
   quoteId        String?
+  /// Where the customer is asked to send payment. Never changed automatically once set; changing it on an
+  /// already-issued invoice is an explicit, audited correction (see /api/finance "correct-invoice-bank-account").
+  bankAccountId  String?
+  /// Frozen copy of the account's details at issue time ({displayName, holderName, bankName, accountNumber,
+  /// ifsc, branch, upiId}), so a later edit to the BankAccount record never rewrites a PDF already sent out.
+  bankAccountSnapshot Json?
 
-  job      Job       @relation(fields: [jobId], references: [id])
-  payments Payment[]
-  refunds  Refund[]
+  job         Job          @relation(fields: [jobId], references: [id])
+  bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
+  payments    Payment[]
+  refunds     Refund[]
 
   @@index([jobId])
   @@index([customerId])
   @@index([invoiceType, issuedAt])
+  @@index([bankAccountId])
 }
 
 /// Refund against an invoice. Refunds up to the configured limit are
@@ -342,11 +350,102 @@ model Payment {
   transactionReference String
   status               String   @default("completed")
   paidAt               DateTime @default(now())
+  /// The account the money actually arrived in — may differ from the invoice's assigned receiving account
+  /// (e.g. the customer paid into a different configured account). Null on older rows and when unknown.
+  receivingBankAccountId String?
+  recordedBy             String?
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  invoice        Invoice               @relation(fields: [invoiceId], references: [id])
+  receivingBankAccount BankAccount?    @relation("PaymentReceivingAccount", fields: [receivingBankAccountId], references: [id])
+  reconciliation ReconciliationRecord?
 
   @@index([invoiceId])
   @@index([jobId])
+  @@index([receivingBankAccountId])
+}
+
+/// A company bank/UPI account configured by Admin to receive customer payments. "VIRTUAL" marks an account
+/// meant for a future bank-provisioned virtual-account integration (not live yet); "LEDGER" is an internal
+/// bookkeeping-only account with no real bank behind it (e.g. petty cash). Numbers here are never invented —
+/// every row is typed in by an Admin from a real bank document, or explicitly marked as not a real account.
+model BankAccount {
+  id                 String    @id @default(cuid())
+  /// Short label shown in pickers, e.g. "HDFC Current — Operations".
+  displayName        String
+  holderName         String
+  bankName           String
+  accountNumber      String
+  /// Last 4 digits only — used to render a masked number in list views without re-deriving it each time.
+  accountNumberLast4 String
+  ifsc               String
+  branch             String?
+  accountType        String    @default("CURRENT") // SAVINGS | CURRENT
+  upiId              String?
+  /// COMPANY_ACCOUNT (a real account Admin typed in) | VIRTUAL_ACCOUNT (reserved for a future bank-provisioned
+  /// virtual-account integration — not wired to any real gateway yet) | LEDGER_ACCOUNT (internal bookkeeping
+  /// only, e.g. cash-in-hand; never shown to customers as a place to pay).
+  kind               String    @default("COMPANY_ACCOUNT")
+  /// As entered by Admin when the account was configured — informational only, never treated as a live balance.
+  openingBalance     Float?
+  currency           String    @default("INR")
+  status             String    @default("ACTIVE") // ACTIVE | INACTIVE
+  isDefault          Boolean   @default(false)
+  notes              String?
+  createdBy          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  invoices     Invoice[]
+  quotes       Quote[]
+  payments     Payment[]         @relation("PaymentReceivingAccount")
+  transactions BankTransaction[]
+
+  @@index([status])
+}
+
+/// One line from an imported bank statement (CSV). There is no live bank-feed integration: every row here
+/// came from a file an Admin uploaded, or will in a future integration — never fabricated or auto-generated.
+model BankTransaction {
+  id            String    @id @default(cuid())
+  bankAccountId String
+  txnDate       String // YYYY-MM-DD, as stated on the imported statement
+  description   String
+  /// Positive = money in. The reconciliation screen only matches inflow transactions against Payments.
+  amount        Float
+  reference     String?
+  /// Dedupe key derived from the imported row (its own reference, or a hash of date+amount+description when
+  /// the file has none) — re-importing the same statement never creates duplicate rows.
+  externalId    String
+  status        String    @default("UNMATCHED") // UNMATCHED | MATCHED | PARTIALLY_MATCHED | REVERSED
+  importedBy    String?
+  importedAt    DateTime  @default(now())
+  source        String    @default("CSV_IMPORT")
+
+  bankAccount    BankAccount           @relation(fields: [bankAccountId], references: [id])
+  reconciliation ReconciliationRecord?
+
+  @@unique([bankAccountId, externalId])
+  @@index([bankAccountId, status])
+}
+
+/// A manual match between one imported bank statement line and one recorded Payment. Admin-only; prevents the
+/// same statement line from being reconciled twice (unique on bankTransactionId).
+model ReconciliationRecord {
+  id                String    @id @default(cuid())
+  bankTransactionId String    @unique
+  paymentId         String    @unique
+  matchedAmount     Float
+  status            String    @default("MATCHED") // MATCHED | PARTIALLY_MATCHED | REVERSED
+  matchedBy         String
+  matchedAt         DateTime  @default(now())
+  reversedAt        DateTime?
+  reversedBy        String?
+  notes             String?
+
+  bankTransaction BankTransaction @relation(fields: [bankTransactionId], references: [id])
+  payment         Payment         @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
 }
 
 model QualityCheck {
@@ -495,10 +594,16 @@ model Quote {
   shareTokenHash String?   @unique
   shareTokenEnc  String?
   jobId          String?
+  /// Carried forward to the Invoice on conversion to a job; changeable any time before the quotation is
+  /// accepted/converted, never forced (a quotation may be a plain estimate with no account chosen yet).
+  bankAccountId  String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @default(now()) @updatedAt
 
+  bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
+
   @@index([customerId])
+  @@index([bankAccountId])
 }
 
 model ReferralPartner {

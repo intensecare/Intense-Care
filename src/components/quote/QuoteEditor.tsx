@@ -12,7 +12,7 @@ import { CustomerPicker, rememberCustomer, type CustomerChoice } from "@/compone
 import { useApp } from "@/lib/app-context";
 import { computeInvoiceFigures, isValidGstin } from "@/lib/tax";
 import { cn, formatMoney, toLocalDateOffset } from "@/lib/utils";
-import type { Quote } from "@/lib/types";
+import type { Quote, BankAccount } from "@/lib/types";
 
 interface Line {
   key: number;
@@ -58,8 +58,29 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
   const [terms, setTerms] = useState(initial?.terms ?? systemSettings.quotationTerms ?? "");
   const [paymentTerms, setPaymentTerms] = useState(initial?.paymentTerms ?? systemSettings.quotationPaymentTerms ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [bankAccountId, setBankAccountId] = useState(initial?.bankAccountId ?? "");
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [busy, setBusy] = useState<"draft" | "sent" | "pdf" | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Admin-only; a Field Operations Manager / Tax Officer never reaches this editor, but the fetch
+  // fails quietly (empty list) for anyone without finance.bank.manage rather than erroring the form.
+  useEffect(() => {
+    void fetch("/api/bank-accounts")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j?.success && Array.isArray(j.data)) {
+          const active = (j.data as BankAccount[]).filter((a) => a.status === "ACTIVE");
+          setBankAccounts(active);
+          if (!initial) {
+            const def = active.find((a) => a.isDefault);
+            if (def) setBankAccountId(def.id);
+          }
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const customer = customers.find((c) => c.id === customerId);
   const customerProps = useMemo(() => properties.filter((p) => p.customerId === customerId), [properties, customerId]);
@@ -140,6 +161,7 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
       requirements: requirements.trim() || undefined,
       internalNotes: internalNotes.trim() || undefined,
       advanceAmount: advance.trim() ? num(advance) : null,
+      bankAccountId: bankAccountId || null,
       items: lines.map((l) => ({ serviceId: l.serviceId || null, description: l.description.trim(), quantity: num(l.quantity), rate: num(l.rate) })),
       discount: disc,
       quoteType,
@@ -251,6 +273,16 @@ export function QuoteEditor({ initial, presetCustomerId }: { initial?: Quote; pr
           <Field label="Valid until" required htmlFor="qe-valid"><Input id="qe-valid" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></Field>
           <Field label="Advance (₹)" htmlFor="qe-adv" hint="Optional"><Input id="qe-adv" inputMode="decimal" value={advance} onChange={(e) => setAdvance(e.target.value)} placeholder="0" /></Field>
         </div>
+        {bankAccounts.length > 0 && (
+          <Field label="Receiving bank account" htmlFor="qe-bank" hint="Optional for an estimate — carried forward to the invoice if this quotation becomes a job.">
+            <select id="qe-bank" value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)} className={area}>
+              <option value="">Not chosen yet</option>
+              {bankAccounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.displayName} ({a.accountNumberMasked}){a.isDefault ? " · default" : ""}</option>
+              ))}
+            </select>
+          </Field>
+        )}
         <dl className="rounded-xl bg-zinc-50 divide-y divide-zinc-200/70 text-sm">
           <div className="flex justify-between px-4 py-2"><dt className="text-zinc-600">Subtotal</dt><dd className="tabular-nums">{formatMoney(fig.subtotal)}</dd></div>
           {fig.discount > 0 && <div className="flex justify-between px-4 py-2"><dt className="text-zinc-600">Discount</dt><dd className="tabular-nums">− {formatMoney(fig.discount)}</dd></div>}
