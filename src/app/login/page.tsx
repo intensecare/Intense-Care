@@ -30,8 +30,8 @@ export default function LoginPage() {
     <main className="min-h-dvh bg-zinc-50 flex flex-col justify-center px-4 py-10">
       <div className="mx-auto w-full max-w-sm">
         <div className="text-center">
-          <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-white p-3 shadow-sm border border-zinc-200 overflow-hidden">
-            <img src="/logo.svg" alt="" className="h-full w-full object-contain" />
+          <div className="inline-flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl bg-white p-2 sm:p-2.5 shadow-sm border border-zinc-200">
+            <img src="/logo-icon.svg" alt="Intense Care" className="h-full w-full object-contain" />
           </div>
           <h1 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-950">Intense Care</h1>
           <p className="mt-1 text-sm text-zinc-600">Sign in with your work account.</p>

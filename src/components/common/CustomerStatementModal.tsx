@@ -134,21 +134,21 @@ export function CustomerStatementModal({
   const whatsappUrl = buildWhatsAppShareUrl(customer.whatsapp || customer.phone, whatsappMessage);
 
   return createPortal(
-    <div data-print-overlay="true" className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+    <div data-print-overlay="true" className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-0 sm:p-4 overflow-y-auto">
       <div
         id={PRINT_ROOT_ID}
-        className="bg-white rounded-lg shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden my-8 max-h-[90vh] flex flex-col"
+        className="bg-white rounded-none sm:rounded-lg shadow-2xl max-w-3xl w-full border-0 sm:border border-slate-200 overflow-hidden my-0 sm:my-8 max-h-dvh sm:max-h-[90vh] flex flex-col"
       >
         {/* Modal action bar (hidden on print) */}
-        <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between print:hidden shrink-0">
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-blue-600" />
-            <span className="text-sm font-semibold text-slate-900">
+        <div className="p-3 sm:p-4 border-b border-slate-100 bg-slate-50 flex flex-wrap items-center justify-between gap-2 print:hidden shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <FileText className="h-4 w-4 text-blue-600 shrink-0" />
+            <span className="text-sm font-semibold text-slate-900 truncate">
               Statement of Account — {customer.name}
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <a href={whatsappUrl} target="_blank" rel="noreferrer" title="Share the account summary via WhatsApp (attach the saved PDF)">
               <Button
                 size="sm"
@@ -170,7 +170,7 @@ export function CustomerStatementModal({
         </div>
 
         {/* ============ PRINTABLE DOCUMENT ============ */}
-        <div className="print-scroll p-8 overflow-y-auto flex-1 space-y-5 text-slate-800 print:overflow-visible" style={{ printColorAdjust: "exact", WebkitPrintColorAdjust: "exact" }}>
+        <div className="print-scroll p-4 sm:p-8 overflow-y-auto flex-1 space-y-5 text-slate-800 print:overflow-visible" style={{ printColorAdjust: "exact", WebkitPrintColorAdjust: "exact" }}>
           {/* Header */}
           <div className="flex items-start justify-between gap-6 border-b-2 border-slate-900 pb-5">
             <div className="min-w-0">
@@ -256,7 +256,8 @@ export function CustomerStatementModal({
             {sortedInvoices.length === 0 ? (
               <p className="text-xs text-slate-400">No invoices issued in this period.</p>
             ) : (
-              <table className="w-full text-xs border-collapse">
+              <div className="-mx-1 overflow-x-auto print:overflow-visible">
+              <table className="w-full min-w-[560px] text-xs border-collapse">
                 <thead>
                   <tr className="bg-slate-900 text-white text-xs">
                     <th className="py-2 px-2.5 rounded-l-md text-left font-semibold">Date</th>
@@ -290,6 +291,7 @@ export function CustomerStatementModal({
                   </tr>
                 </tfoot>
               </table>
+              </div>
             )}
           </div>
 
@@ -299,7 +301,8 @@ export function CustomerStatementModal({
               <h4 className="text-xs font-semibold text-slate-400 mb-2">
                 Payment Receipts
               </h4>
-              <table className="w-full text-xs border-collapse">
+              <div className="-mx-1 overflow-x-auto print:overflow-visible">
+              <table className="w-full min-w-[480px] text-xs border-collapse">
                 <thead>
                   <tr className="text-slate-400 text-xs border-b border-slate-200">
                     <th className="py-1.5 text-left font-semibold">Date</th>
@@ -323,6 +326,7 @@ export function CustomerStatementModal({
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
