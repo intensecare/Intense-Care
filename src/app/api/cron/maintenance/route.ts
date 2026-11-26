@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { runMaintenance } from "@/lib/server/maintenance";
+import { errorResponse } from "@/lib/server/http";
 
 /**
  * GET|POST /api/cron/maintenance — run by a scheduler every ~15 minutes (Vercel Cron, or any external
@@ -18,7 +19,12 @@ async function handle(request: Request) {
   // `asOf` (ISO time) runs the job as if it were then — for backfilling after an outage and for tests. Needs the secret like everything here.
   const asOf = new URL(request.url).searchParams.get("asOf");
   const at = asOf && !Number.isNaN(Date.parse(asOf)) ? new Date(asOf) : new Date();
-  return NextResponse.json({ success: true, data: await runMaintenance(at) }, { headers: { "Cache-Control": "no-store" } });
+  try {
+    return NextResponse.json({ success: true, data: await runMaintenance(at) }, { headers: { "Cache-Control": "no-store" } });
+  } catch (err) {
+    // A failure here is otherwise silent — this runs unattended on a scheduler, not in front of a user.
+    return errorResponse(err, "cron.maintenance.route_error");
+  }
 }
 export const GET = handle;
 export const POST = handle;
